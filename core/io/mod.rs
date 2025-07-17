@@ -19,6 +19,7 @@ pub trait File: Send + Sync {
         -> Result<Completion>;
     fn sync(&self, c: Completion) -> Result<Completion>;
     fn size(&self) -> Result<u64>;
+    fn truncate(&self, len: u64, c: Completion) -> Result<Arc<Completion>>;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -53,6 +54,7 @@ pub trait IO: Clock + Send + Sync {
 pub type Complete = dyn Fn(Arc<RefCell<Buffer>>, i32);
 pub type WriteComplete = dyn Fn(i32);
 pub type SyncComplete = dyn Fn(i32);
+pub type TruncateComplete = dyn Fn(i32);
 
 #[must_use]
 #[derive(Clone)]
@@ -69,6 +71,7 @@ pub enum CompletionType {
     Read(ReadCompletion),
     Write(WriteCompletion),
     Sync(SyncCompletion),
+    Truncate(TruncateCompletion),
 }
 
 pub struct ReadCompletion {
@@ -122,6 +125,7 @@ impl Completion {
             CompletionType::Read(r) => r.complete(result),
             CompletionType::Write(w) => w.complete(result),
             CompletionType::Sync(s) => s.complete(result), // fix
+            CompletionType::Truncate(t) => t.complete(result),
         };
         self.inner.is_completed.set(true);
     }
@@ -183,6 +187,20 @@ impl WriteCompletion {
 
 impl SyncCompletion {
     pub fn new(complete: Box<SyncComplete>) -> Self {
+        Self { complete }
+    }
+
+    pub fn complete(&self, res: i32) {
+        (self.complete)(res);
+    }
+}
+
+pub struct TruncateCompletion {
+    pub complete: Box<TruncateComplete>,
+}
+
+impl TruncateCompletion {
+    pub fn new(complete: Box<TruncateComplete>) -> Self {
         Self { complete }
     }
 
