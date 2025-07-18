@@ -123,7 +123,7 @@ impl File for WindowsFile {
     }
 
     #[instrument(err, skip_all, level = Level::TRACE)]
-    fn truncate(&self, len: usize, c: Arc<Completion>) -> Result<Arc<Completion>> {
+    fn truncate(&self, len: usize, c: Completion) -> Result<Completion> {
         let mut file = self.file.borrow_mut();
         file.set_len(len as u64).map_err(LimboError::IOError)?;
         c.complete(0);

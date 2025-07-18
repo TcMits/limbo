@@ -1695,7 +1695,8 @@ pub fn begin_write_wal_header(io: &Arc<dyn File>, header: &WalHeader) -> Result<
     };
     #[allow(clippy::arc_with_non_send_sync)]
     let c = Completion::new_write(write_complete);
-    io.pwrite(0, buffer.clone(), c)
+    let c = io.pwrite(0, buffer.clone(), c.clone())?;
+    Ok(c)
 }
 
 /// Checks if payload will overflow a cell based on the maximum allowed size.

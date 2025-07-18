@@ -19,7 +19,7 @@ pub trait File: Send + Sync {
         -> Result<Completion>;
     fn sync(&self, c: Completion) -> Result<Completion>;
     fn size(&self) -> Result<u64>;
-    fn truncate(&self, len: usize, c: Arc<Completion>) -> Result<Arc<Completion>>;
+    fn truncate(&self, len: usize, c: Completion) -> Result<Completion>;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

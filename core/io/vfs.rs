@@ -166,7 +166,7 @@ impl File for VfsFileImpl {
         }
     }
 
-    fn truncate(&self, len: usize, c: Arc<Completion>) -> Result<Arc<Completion>> {
+    fn truncate(&self, len: usize, c: Completion) -> Result<Completion> {
         if self.vfs.is_null() {
             return Err(LimboError::ExtensionError("VFS is null".to_string()));
         }

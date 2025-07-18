@@ -1101,10 +1101,14 @@ impl Wal for WalFile {
             let shared = shared.clone();
             let shared = unsafe { shared.get().as_mut().unwrap() };
             let io = io.clone();
-            let _ = shared.restart_wal_header(&io);
+            shared.restart_wal_header(&io).unwrap();
         });
         let shared = self.get_shared();
-        shared.file.truncate(WAL_HEADER_SIZE, c.into())?;
+        let c_cloned = c.clone();
+        let c = shared.file.truncate(WAL_HEADER_SIZE, c_cloned.clone())?;
+        // ensure that the header is written and not just this completion fires
+        self.io.wait_for_completion(c_cloned)?;
+        self.io.wait_for_completion(c)?;
         Ok(())
     }
 }
@@ -1260,19 +1264,14 @@ impl WalFileShared {
         let c = sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
         // TODO: for now wait for completion
         io.wait_for_completion(c)?;
-        let header = Arc::new(SpinLock::new(wal_header));
-        let checksum = {
-            let checksum = header.lock();
-            (checksum.checksum_1, checksum.checksum_2)
-        };
-        tracing::debug!("new_shared(header={:?})", header);
+        tracing::debug!("new_shared(header={:?})", wal_header);
         let shared = WalFileShared {
-            wal_header: header,
+            wal_header: Arc::new(SpinLock::new(wal_header)),
             min_frame: AtomicU64::new(0),
             max_frame: AtomicU64::new(0),
             nbackfills: AtomicU64::new(0),
             frame_cache: Arc::new(SpinLock::new(HashMap::new())),
-            last_checksum: checksum,
+            last_checksum: (checksums.0, checksums.1),
             file,
             pages_in_frames: Arc::new(SpinLock::new(Vec::new())),
             read_locks: array::from_fn(|_| LimboRwLock {
@@ -1326,16 +1325,17 @@ impl WalFileShared {
         hdr.salt_2 = io.generate_random_number() as u32;
 
         // rewrite header on disk
-        sqlite3_ondisk::begin_write_wal_header(&self.file, &hdr)?;
+        let c = sqlite3_ondisk::begin_write_wal_header(&self.file, &hdr)?;
+        // TODO: for now wait for completion
+        io.wait_for_completion(c)?;
 
-        // clear per‑page caches
         self.frame_cache.lock().clear();
         self.pages_in_frames.lock().clear();
         self.last_checksum = (hdr.checksum_1, hdr.checksum_2);
 
         // reset read‑marks
-        self.read_locks[0].value.store(0, Ordering::SeqCst); // always 0
-        self.read_locks[1].value.store(0, Ordering::SeqCst); // available
+        self.read_locks[0].value.store(0, Ordering::SeqCst);
+        self.read_locks[1].value.store(0, Ordering::SeqCst);
         for lock in &self.read_locks[2..] {
             lock.value.store(READMARK_NOT_USED, Ordering::SeqCst);
         }
@@ -1377,10 +1377,10 @@ pub mod test {
         let _done = done.clone();
         let _ = file.file.truncate(
             WAL_HEADER_SIZE,
-            Arc::new(Completion::new_trunc(move |_| {
+            Completion::new_trunc(move |_| {
                 let done = _done.clone();
                 done.set(true);
-            })),
+            }),
         );
         assert!(file.file.size().unwrap() == WAL_HEADER_SIZE as u64);
         assert!(done.get());

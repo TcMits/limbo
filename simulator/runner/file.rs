@@ -226,11 +226,7 @@ impl File for SimulatorFile {
         self.inner.size()
     }
 
-    fn truncate(
-        &self,
-        len: usize,
-        c: Arc<turso_core::Completion>,
-    ) -> Result<Arc<turso_core::Completion>> {
+    fn truncate(&self, len: usize, c: turso_core::Completion) -> Result<turso_core::Completion> {
         if self.fault.get() {
             return Err(turso_core::LimboError::InternalError(
                 FAULT_ERROR_MSG.into(),

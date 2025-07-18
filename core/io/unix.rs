@@ -452,8 +452,8 @@ impl File for UnixFile<'_> {
     }
 
     #[instrument(err, skip_all, level = Level::INFO)]
-    fn truncate(&self, len: usize, c: Arc<Completion>) -> Result<Arc<Completion>> {
-        let file = self.file.borrow();
+    fn truncate(&self, len: usize, c: Completion) -> Result<Completion> {
+        let file = self.file.lock().unwrap();
         let result = file.set_len(len as u64);
         match result {
             Ok(()) => {
