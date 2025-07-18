@@ -43,10 +43,8 @@ impl IO for VfsMod {
         Ok(())
     }
 
-    fn wait_for_completion(&self, c: Completion) -> Result<()> {
-        while !c.is_completed() {
-            self.run_once()?;
-        }
+    fn wait_for_completion(&self, _c: Completion) -> Result<()> {
+        // for the moment anyway, this is currently a sync api
         Ok(())
     }
 
