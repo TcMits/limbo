@@ -1262,9 +1262,13 @@ impl WalFileShared {
         wal_header.checksum_1 = checksums.0;
         wal_header.checksum_2 = checksums.1;
         let c = sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
-        // TODO: for now wait for completion
+        let header = Arc::new(SpinLock::new(wal_header));
+        let checksum = {
+            let checksum = header.lock();
+            (checksum.checksum_1, checksum.checksum_2)
+        };
         io.wait_for_completion(c)?;
-        tracing::debug!("new_shared(header={:?})", wal_header);
+        tracing::debug!("new_shared(header={:?})", header);
         let shared = WalFileShared {
             wal_header: Arc::new(SpinLock::new(wal_header)),
             min_frame: AtomicU64::new(0),
@@ -1326,7 +1330,6 @@ impl WalFileShared {
 
         // rewrite header on disk
         let c = sqlite3_ondisk::begin_write_wal_header(&self.file, &hdr)?;
-        // TODO: for now wait for completion
         io.wait_for_completion(c)?;
 
         self.frame_cache.lock().clear();
