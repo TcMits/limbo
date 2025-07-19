@@ -19,7 +19,6 @@ use std::{
 use crate::fast_lock::SpinLock;
 use crate::io::{File, IO};
 use crate::result::LimboResult;
-use crate::storage::header_accessor;
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_read_wal_frame_raw, finish_read_page, prepare_wal_frame,
     WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
@@ -54,6 +53,9 @@ impl CheckpointResult {
             num_wal_frames: n_frames,
             num_checkpointed_frames: n_ckpt,
         }
+    }
+    pub const fn everything_backfilled(&self) -> bool {
+        self.num_wal_frames > 0 && self.num_wal_frames == self.num_checkpointed_frames
     }
 }
 
@@ -1025,8 +1027,6 @@ impl Wal for WalFile {
                     let nbackfills = shared.nbackfills.load(Ordering::SeqCst);
 
                     let (checkpoint_result, everything_backfilled) = {
-                        let shared = self.get_shared();
-                        let current_mx = shared.max_frame.load(Ordering::SeqCst);
                         // Record two num pages fields to return as checkpoint result to caller.
                         // Ref: pnLog, pnCkpt on https://www.sqlite.org/c3ref/wal_checkpoint_v2.html
                         let frames_in_wal = max_frame.saturating_sub(nbackfills);
@@ -1044,16 +1044,18 @@ impl Wal for WalFile {
                     self.get_shared()
                         .nbackfills
                         .store(self.ongoing_checkpoint.max_frame, Ordering::SeqCst);
-                    if everything_backfilled {
-                        match mode {
-                            CheckpointMode::Restart | CheckpointMode::Truncate => {
-                                ensure_unlock!(self, self.restart_log(mode));
-                            }
-                            _ => {}
-                        };
-                        ensure_unlock!(self, self.trunc_db_file(pager));
+                    if everything_backfilled
+                        && matches!(mode, CheckpointMode::Restart | CheckpointMode::Truncate)
+                    {
+                        ensure_unlock!(self, self.restart_log(mode));
                     }
                     self.prev_checkpoint = checkpoint_result;
+                    // we cannot truncate the db file here, because we are currently inside a
+                    // mut borrow of pager.wal, and accessing the header will attempt a borrow,
+                    // so the caller will determine if:
+                    // a. the max frame == num wal frames
+                    // b. the db file size != num of db pages * page_size
+                    // and truncate the db file if necessary.
                     self.ongoing_checkpoint.state = CheckpointState::Start;
                     let _ = self.checkpoint_guard.take();
                     return Ok(IOResult::Done(checkpoint_result));
@@ -1311,28 +1313,6 @@ impl WalFile {
 
         self.max_frame = 0;
         self.min_frame = 0;
-        Ok(())
-    }
-
-    /// Truncate the db file to the size of the database in pages.
-    /// to be called after any checkpoint where we are able to backfill
-    /// all frames in the WAL.
-    fn trunc_db_file(&self, pager: &Pager) -> Result<()> {
-        let db_size = header_accessor::get_database_size(pager)? as u64;
-        let sz_db = db_size * (self.page_size() as u64);
-        if pager.db_file.size()? != sz_db {
-            let _ = pager.db_file.truncate(
-                sz_db as usize,
-                Completion::new_trunc(move |_| {
-                    tracing::trace!("db file truncated to {} bytes", sz_db);
-                })
-                .into(),
-            );
-        }
-        // then fsync
-        pager.db_file.sync(Completion::new_sync(move |_| {
-            tracing::trace!("db file syncd after truncating");
-        }))?;
         Ok(())
     }
 }
