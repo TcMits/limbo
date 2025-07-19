@@ -351,7 +351,7 @@ pub struct Pager {
     free_page_state: RefCell<FreePageState>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 /// The status of the current cache flush.
 pub enum PagerCommitResult {
     /// The WAL was written to disk and fsynced.
@@ -1297,7 +1297,7 @@ impl Pager {
             return Ok(CheckpointResult::default());
         }
 
-        let checkpoint_result = self.io.block(|| {
+        let mut checkpoint_result = self.io.block(|| {
             self.wal
                 .borrow_mut()
                 .checkpoint(self, Rc::new(RefCell::new(0)), mode)
@@ -1323,6 +1323,7 @@ impl Pager {
                     tracing::trace!("Database file syncd after truncation");
                 }))?;
             }
+            checkpoint_result.release_guard();
         }
 
         // TODO: only clear cache of things that are really invalidated
