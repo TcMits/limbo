@@ -2,9 +2,8 @@ use crate::result::LimboResult;
 use crate::storage::btree::BTreePageInner;
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
-use crate::storage::header_accessor;
 use crate::storage::sqlite3_ondisk::{
-    self, parse_wal_frame_header, DatabaseHeader, PageContent, PageType, DEFAULT_PAGE_SIZE,
+    self, parse_wal_frame_header, DatabaseHeader, PageContent, PageSize, PageType,
 };
 use crate::storage::wal::{CheckpointResult, Wal};
 use crate::types::{IOResult, WalInsertInfo};
@@ -21,8 +20,9 @@ use std::sync::{Arc, Mutex};
 use tracing::{instrument, trace, Level};
 
 use super::btree::{btree_init_page, BTreePage};
+use super::header_accessor::{HeaderRef, HeaderRefMut};
 use super::page_cache::{CacheError, CacheResizeResult, DumbLruPageCache, PageCacheKey};
-use super::sqlite3_ondisk::{begin_write_btree_page, DATABASE_HEADER_SIZE};
+use super::sqlite3_ondisk::begin_write_btree_page;
 use super::wal::CheckpointMode;
 
 #[cfg(not(feature = "omit_autovacuum"))]
@@ -473,10 +473,8 @@ impl Pager {
     #[cfg(not(feature = "omit_autovacuum"))]
     pub fn ptrmap_get(&self, target_page_num: u32) -> Result<IOResult<Option<PtrmapEntry>>> {
         tracing::trace!("ptrmap_get(page_idx = {})", target_page_num);
-        let configured_page_size = match header_accessor::get_page_size_async(self)? {
-            IOResult::Done(size) => size as usize,
-            IOResult::IO => return Ok(IOResult::IO),
-        };
+        let configured_page_size =
+            return_if_io!(self.with_header(|header| header.page_size)).get() as usize;
 
         if target_page_num < FIRST_PTRMAP_PAGE_NO
             || is_ptrmap_page(target_page_num, configured_page_size)
@@ -559,10 +557,7 @@ impl Pager {
             parent_page_no
         );
 
-        let page_size = match header_accessor::get_page_size_async(self)? {
-            IOResult::Done(size) => size as usize,
-            IOResult::IO => return Ok(IOResult::IO),
-        };
+        let page_size = return_if_io!(self.with_header(|header| header.page_size)).get() as usize;
 
         if db_page_no_to_update < FIRST_PTRMAP_PAGE_NO
             || is_ptrmap_page(db_page_no_to_update, page_size)
@@ -658,21 +653,19 @@ impl Pager {
                     Ok(IOResult::Done(page.get().get().id as u32))
                 }
                 AutoVacuumMode::Full => {
-                    let mut root_page_num =
-                        match header_accessor::get_vacuum_mode_largest_root_page_async(self)? {
-                            IOResult::Done(value) => value,
-                            IOResult::IO => return Ok(IOResult::IO),
-                        };
+                    let (mut root_page_num, page_size) =
+                        return_if_io!(self.with_header(|header| {
+                            (
+                                header.vacuum_mode_largest_root_page.get(),
+                                header.page_size.get(),
+                            )
+                        }));
+
                     assert!(root_page_num > 0); //  Largest root page number cannot be 0 because that is set to 1 when creating the database with autovacuum enabled
                     root_page_num += 1;
                     assert!(root_page_num >= FIRST_PTRMAP_PAGE_NO); //  can never be less than 2 because we have already incremented
 
-                    let page_size = match header_accessor::get_page_size_async(self)? {
-                        IOResult::Done(size) => size as usize,
-                        IOResult::IO => return Ok(IOResult::IO),
-                    };
-
-                    while is_ptrmap_page(root_page_num, page_size) {
+                    while is_ptrmap_page(root_page_num, page_size as usize) {
                         root_page_num += 1;
                     }
                     assert!(root_page_num >= 3); //  the very first root page is page 3
@@ -745,14 +738,18 @@ impl Pager {
     /// The usable size of a page might be an odd number. However, the usable size is not allowed to be less than 480.
     /// In other words, if the page size is 512, then the reserved space size cannot exceed 32.
     pub fn usable_space(&self) -> usize {
-        let page_size = *self
-            .page_size
-            .get()
-            .get_or_insert_with(|| header_accessor::get_page_size(self).unwrap());
+        let page_size = *self.page_size.get().get_or_insert_with(|| {
+            self.io
+                .block(|| self.with_header(|header| header.page_size))
+                .unwrap_or_default()
+                .get()
+        });
 
-        let reserved_space = *self
-            .reserved_space
-            .get_or_init(|| header_accessor::get_reserved_space(self).unwrap());
+        let reserved_space = *self.reserved_space.get_or_init(|| {
+            self.io
+                .block(|| self.with_header(|header| header.reserved_space))
+                .unwrap_or_default()
+        });
 
         (page_size as usize) - (reserved_space as usize)
     }
@@ -1080,7 +1077,10 @@ impl Pager {
                     };
 
                     let db_size = {
-                        let db_size = header_accessor::get_database_size(self)?;
+                        let db_size = self
+                            .io
+                            .block(|| self.with_header(|header| header.database_size))?
+                            .get();
                         if is_last_frame {
                             db_size
                         } else {
@@ -1313,8 +1313,11 @@ impl Pager {
         if checkpoint_result.everything_backfilled()
             && checkpoint_result.num_checkpointed_frames != 0
         {
-            let db_size = header_accessor::get_database_size(self)?;
-            let page_size = self.page_size.get().unwrap_or(DEFAULT_PAGE_SIZE);
+            let db_size = self
+                .io
+                .block(|| self.with_header(|header| header.database_size))?
+                .get();
+            let page_size = self.page_size.get().unwrap_or(PageSize::DEFAULT as u32);
             let expected = (db_size * page_size) as u64;
             if expected < self.db_file.size()? {
                 self.io.wait_for_completion(self.db_file.truncate(
@@ -1354,12 +1357,15 @@ impl Pager {
         const TRUNK_PAGE_NEXT_PAGE_OFFSET: usize = 0; // Offset to next trunk page pointer
         const TRUNK_PAGE_LEAF_COUNT_OFFSET: usize = 4; // Offset to leaf count
 
+        let header_ref = self.io.block(|| HeaderRefMut::from_pager(self))?;
+        let mut header = header_ref.borrow_mut();
+
         let mut state = self.free_page_state.borrow_mut();
         tracing::debug!(?state);
         loop {
             match &mut *state {
                 FreePageState::Start => {
-                    if page_id < 2 || page_id > header_accessor::get_database_size(self)? as usize {
+                    if page_id < 2 || page_id > header.database_size.get() as usize {
                         return Err(LimboError::Corrupt(format!(
                             "Invalid page number {page_id} for free operation"
                         )));
@@ -1385,12 +1391,9 @@ impl Pager {
                             (page, Some(c))
                         }
                     };
-                    header_accessor::set_freelist_pages(
-                        self,
-                        header_accessor::get_freelist_pages(self)? + 1,
-                    )?;
+                    header.freelist_pages = (header.freelist_pages.get() + 1).into();
 
-                    let trunk_page_id = header_accessor::get_freelist_trunk_page(self)?;
+                    let trunk_page_id = header.freelist_trunk_page.get();
 
                     if trunk_page_id != 0 {
                         *state = FreePageState::AddToTrunk {
@@ -1402,7 +1405,7 @@ impl Pager {
                     }
                 }
                 FreePageState::AddToTrunk { page, trunk_page } => {
-                    let trunk_page_id = header_accessor::get_freelist_trunk_page(self)?;
+                    let trunk_page_id = header.freelist_trunk_page.get();
                     if trunk_page.is_none() {
                         // Add as leaf to current trunk
                         let (page, c) = self.read_page(trunk_page_id as usize)?;
@@ -1449,7 +1452,7 @@ impl Pager {
                     turso_assert!(page.get().id == page_id, "page has unexpected id");
                     self.add_dirty(page);
 
-                    let trunk_page_id = header_accessor::get_freelist_trunk_page(self)?;
+                    let trunk_page_id = header.freelist_trunk_page.get();
 
                     let contents = page.get().contents.as_mut().unwrap();
                     // Point to previous trunk
@@ -1457,7 +1460,7 @@ impl Pager {
                     // Zero leaf count
                     contents.write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, 0);
                     // Update page 1 to point to new trunk
-                    header_accessor::set_freelist_trunk_page(self, page_id as u32)?;
+                    header.freelist_trunk_page = (page_id as u32).into();
                     // Clear flags
                     page.clear_uptodate();
                     break;
@@ -1476,9 +1479,12 @@ impl Pager {
                 tracing::trace!("allocate_page1(Start)");
                 self.db_state.set(DbState::Initializing);
                 let mut default_header = DatabaseHeader::default();
-                default_header.database_size += 1;
+
+                assert_eq!(default_header.database_size.get(), 0);
+                default_header.database_size = 1.into();
+
                 if let Some(size) = self.page_size.get() {
-                    default_header.update_page_size(size);
+                    default_header.page_size = PageSize::new(size).expect("page size");
                 }
                 let page = allocate_new_page(1, &self.buffer_pool, 0);
 
@@ -1495,8 +1501,8 @@ impl Pager {
                 btree_init_page(
                     &page1,
                     PageType::TableLeaf,
-                    DATABASE_HEADER_SIZE,
-                    (default_header.get_page_size() - default_header.reserved_space as u32) as u16,
+                    DatabaseHeader::SIZE,
+                    (default_header.page_size.get() - default_header.reserved_space as u32) as u16,
                 );
                 let write_counter = Rc::new(RefCell::new(0));
                 let c = begin_write_btree_page(self, &page1.get(), write_counter.clone())?;
@@ -1553,12 +1559,15 @@ impl Pager {
         const FREELIST_TRUNK_OFFSET_LEAF_COUNT: usize = 4;
         const FREELIST_TRUNK_OFFSET_FIRST_LEAF: usize = 8;
 
+        let header_ref = self.io.block(|| HeaderRefMut::from_pager(self))?;
+        let mut header = header_ref.borrow_mut();
+
         loop {
             let mut state = self.allocate_page_state.borrow_mut();
             tracing::debug!("allocate_page(state={:?})", state);
             match &mut *state {
                 AllocatePageState::Start => {
-                    let old_db_size = header_accessor::get_database_size(self)?;
+                    let old_db_size = header.database_size.get();
                     #[cfg(not(feature = "omit_autovacuum"))]
                     let mut new_db_size = old_db_size;
                     #[cfg(feature = "omit_autovacuum")]
@@ -1571,10 +1580,7 @@ impl Pager {
                         //  - autovacuum is enabled
                         //  - the last page is a pointer map page
                         if matches!(*self.auto_vacuum_mode.borrow(), AutoVacuumMode::Full)
-                            && is_ptrmap_page(
-                                new_db_size + 1,
-                                header_accessor::get_page_size(self)? as usize,
-                            )
+                            && is_ptrmap_page(new_db_size + 1, header.page_size.get() as usize)
                         {
                             // we will allocate a ptrmap page, so increment size
                             new_db_size += 1;
@@ -1595,8 +1601,7 @@ impl Pager {
                         }
                     }
 
-                    let first_freelist_trunk_page_id =
-                        header_accessor::get_freelist_trunk_page(self)?;
+                    let first_freelist_trunk_page_id = header.freelist_trunk_page.get();
                     if first_freelist_trunk_page_id == 0 {
                         *state = AllocatePageState::AllocateNewPage {
                             current_db_size: new_db_size,
@@ -1649,11 +1654,8 @@ impl Pager {
 
                     // Freelist is not empty, so we can reuse the trunk itself as a new page
                     // and update the database's first freelist trunk page to the next trunk page.
-                    header_accessor::set_freelist_trunk_page(self, next_trunk_page_id)?;
-                    header_accessor::set_freelist_pages(
-                        self,
-                        header_accessor::get_freelist_pages(self)? - 1,
-                    )?;
+                    header.freelist_trunk_page = next_trunk_page_id.into();
+                    header.freelist_pages = (header.freelist_pages.get() + 1).into();
                     self.add_dirty(trunk_page);
                     // zero out the page
                     turso_assert!(
@@ -1736,11 +1738,7 @@ impl Pager {
                     );
                     self.add_dirty(trunk_page);
 
-                    header_accessor::set_freelist_pages(
-                        self,
-                        header_accessor::get_freelist_pages(self)? - 1,
-                    )?;
-
+                    header.freelist_pages = (header.freelist_pages.get() - 1).into();
                     *state = AllocatePageState::Start;
                     return Ok(IOResult::Done(leaf_page));
                 }
@@ -1766,7 +1764,7 @@ impl Pager {
                                 Ok(_) => {}
                             };
                         }
-                        header_accessor::set_database_size(self, new_db_size)?;
+                        header.database_size = new_db_size.into();
                         *state = AllocatePageState::Start;
                         return Ok(IOResult::Done(page));
                     }
@@ -1794,12 +1792,6 @@ impl Pager {
             })?;
         page.set_loaded();
         Ok(())
-    }
-
-    pub fn usable_size(&self) -> usize {
-        let page_size = header_accessor::get_page_size(self).unwrap_or_default() as u32;
-        let reserved_space = header_accessor::get_reserved_space(self).unwrap_or_default() as u32;
-        (page_size - reserved_space) as usize
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
@@ -1839,6 +1831,22 @@ impl Pager {
             dirty_pages: Vec::new(),
         });
         self.allocate_page_state.replace(AllocatePageState::Start);
+    }
+
+    pub fn with_header<T>(&self, f: impl Fn(&DatabaseHeader) -> T) -> Result<IOResult<T>> {
+        let IOResult::Done(header_ref) = HeaderRef::from_pager(self)? else {
+            return Ok(IOResult::IO);
+        };
+        let header = header_ref.borrow();
+        Ok(IOResult::Done(f(&header)))
+    }
+
+    pub fn with_header_mut<T>(&self, f: impl Fn(&mut DatabaseHeader) -> T) -> Result<IOResult<T>> {
+        let IOResult::Done(header_ref) = HeaderRefMut::from_pager(self)? else {
+            return Ok(IOResult::IO);
+        };
+        let mut header = header_ref.borrow_mut();
+        Ok(IOResult::Done(f(&mut header)))
     }
 }
 
@@ -1917,7 +1925,7 @@ impl CreateBTreeFlags {
 */
 #[cfg(not(feature = "omit_autovacuum"))]
 mod ptrmap {
-    use crate::{storage::sqlite3_ondisk::MIN_PAGE_SIZE, LimboError, Result};
+    use crate::{storage::sqlite3_ondisk::PageSize, LimboError, Result};
 
     // Constants
     pub const PTRMAP_ENTRY_SIZE: usize = 5;
@@ -1985,14 +1993,14 @@ mod ptrmap {
     /// Calculates how many database pages are mapped by a single pointer map page.
     /// This is based on the total page size, as ptrmap pages are filled with entries.
     pub fn entries_per_ptrmap_page(page_size: usize) -> usize {
-        assert!(page_size >= MIN_PAGE_SIZE as usize);
+        assert!(page_size >= PageSize::MIN as usize);
         page_size / PTRMAP_ENTRY_SIZE
     }
 
     /// Calculates the cycle length of pointer map pages
     /// The cycle length is the number of database pages that are mapped by a single pointer map page.
     pub fn ptrmap_page_cycle_length(page_size: usize) -> usize {
-        assert!(page_size >= MIN_PAGE_SIZE as usize);
+        assert!(page_size >= PageSize::MIN as usize);
         (page_size / PTRMAP_ENTRY_SIZE) + 1
     }
 
@@ -2102,7 +2110,7 @@ mod ptrmap_tests {
     use crate::storage::database::{DatabaseFile, DatabaseStorage};
     use crate::storage::page_cache::DumbLruPageCache;
     use crate::storage::pager::Pager;
-    use crate::storage::sqlite3_ondisk::MIN_PAGE_SIZE;
+    use crate::storage::sqlite3_ondisk::PageSize;
     use crate::storage::wal::{WalFile, WalFileShared};
 
     pub fn run_until_done<T>(
@@ -2154,7 +2162,12 @@ mod ptrmap_tests {
         )
         .unwrap();
         run_until_done(|| pager.allocate_page1(), &pager).unwrap();
-        header_accessor::set_vacuum_mode_largest_root_page(&pager, 1).unwrap();
+        pager
+            .io
+            .block(|| {
+                pager.with_header_mut(|header| header.vacuum_mode_largest_root_page = 1.into())
+            })
+            .unwrap();
         pager.set_auto_vacuum_mode(AutoVacuumMode::Full);
 
         //  Allocate all the pages as btree root pages
@@ -2194,7 +2207,11 @@ mod ptrmap_tests {
 
         //  Ensure that the database header size is correctly reflected
         assert_eq!(
-            header_accessor::get_database_size(&pager).unwrap(),
+            pager
+                .io
+                .block(|| pager.with_header(|header| header.database_size))
+                .unwrap()
+                .get(),
             initial_db_pages + 2
         ); // (1+1) -> (header + ptrmap)
 
@@ -2210,7 +2227,7 @@ mod ptrmap_tests {
 
     #[test]
     fn test_is_ptrmap_page_logic() {
-        let page_size = MIN_PAGE_SIZE as usize;
+        let page_size = PageSize::MIN as usize;
         let n_data_pages = entries_per_ptrmap_page(page_size);
         assert_eq!(n_data_pages, 102); //   512/5 = 102
 
@@ -2228,7 +2245,7 @@ mod ptrmap_tests {
 
     #[test]
     fn test_get_ptrmap_page_no() {
-        let page_size = MIN_PAGE_SIZE as usize; // Maps 103 data pages
+        let page_size = PageSize::MIN as usize; // Maps 103 data pages
 
         // Test pages mapped by P0 (page 2)
         assert_eq!(get_ptrmap_page_no_for_db_page(3, page_size), 2); // D(3) -> P0(2)
@@ -2248,7 +2265,7 @@ mod ptrmap_tests {
 
     #[test]
     fn test_get_ptrmap_offset() {
-        let page_size = MIN_PAGE_SIZE as usize; //  Maps 103 data pages
+        let page_size = PageSize::MIN as usize; //  Maps 103 data pages
 
         assert_eq!(get_ptrmap_offset_in_page(3, 2, page_size).unwrap(), 0);
         assert_eq!(

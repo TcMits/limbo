@@ -1,5 +1,4 @@
 #![allow(unused)]
-use crate::storage::header_accessor::get_schema_cookie;
 use crate::translate::expr::WalkControl;
 use crate::types::IOResult;
 use crate::{
