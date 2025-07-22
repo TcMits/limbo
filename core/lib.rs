@@ -1752,9 +1752,8 @@ impl Statement {
         let mut res = self
             .program
             .step(&mut self.state, self.mv_store.clone(), self.pager.clone());
-        for i in 0..MAX_SCHEMA_RETRY {
+        for _ in 0..MAX_SCHEMA_RETRY {
             // Only reprepare if we still need to update schema
-            dbg!(i);
             if !matches!(res, Err(LimboError::SchemaUpdated)) {
                 break;
             }
