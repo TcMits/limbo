@@ -218,6 +218,11 @@ impl Connection {
             .map_err(|e| Error::WalOperationError(format!("wal_insert_frame failed: {e}")))
     }
 
+    /// Execute a batch of SQL statements on the database.
+    pub async fn execute_batch(&self, _sql: &str, _params: impl IntoParams) -> Result<u64> {
+        unimplemented!();
+    }
+
     /// Prepare a SQL statement for later execution.
     pub async fn prepare(&self, sql: &str) -> Result<Statement> {
         let conn = self
