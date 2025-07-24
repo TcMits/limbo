@@ -68,7 +68,7 @@ impl CheckpointResult {
     }
 
     pub const fn everything_backfilled(&self) -> bool {
-        self.num_wal_frames > 0 && self.num_wal_frames == self.num_checkpointed_frames
+        self.num_wal_frames == self.num_checkpointed_frames
     }
     pub fn release_guard(&mut self) {
         let _ = self.maybe_guard.take();
@@ -757,12 +757,8 @@ impl Wal for WalFile {
     #[instrument(skip_all, level = Level::DEBUG)]
     fn end_read_tx(&self) {
         let held = self.max_frame_read_lock_index.get();
-        turso_assert!(
-            held != NO_LOCK_HELD,
-            "We must have a read lock held to end a read transaction"
-        );
         tracing::debug!("end_read_tx(lock={})", held);
-        {
+        if held != NO_LOCK_HELD {
             let read_lock = &mut self.get_shared().read_locks[held];
             read_lock.unlock();
         }
@@ -806,26 +802,19 @@ impl Wal for WalFile {
     /// Find the latest frame containing a page.
     #[instrument(skip_all, level = Level::DEBUG)]
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>> {
-        let shared = self.get_shared();
-        let frames = shared.frame_cache.lock();
-        // if we have read_lock 0, we are reading straight from the db file
+        // if we are holding read_lock 0, skip and read right from db file.
         if self.max_frame_read_lock_index.get() == 0 {
             return Ok(None);
         }
-        let frames = frames.get(&page_id);
-        if frames.is_none() {
-            return Ok(None);
+        let shared = self.get_shared();
+        // if we have read_lock 0, we are reading straight from the db file
+        let frames = shared.frame_cache.lock();
+        if let Some(list) = frames.get(&page_id) {
+            if let Some(f) = list.iter().rev().find(|f| **f <= self.max_frame) {
+                return Ok(Some(*f));
+            }
         }
-        let frames = frames.unwrap();
-        if let Some(&f) = frames
-            .iter()
-            .rev()
-            .find(|&&f| f <= self.max_frame && f >= self.min_frame)
-        {
-            Ok(Some(f))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
     /// Read a frame from the WAL.
@@ -971,6 +960,10 @@ impl Wal for WalFile {
         db_size: u32,
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<Completion> {
+        let shared = self.get_shared();
+        if shared.max_frame.load(Ordering::SeqCst).eq(&0) {
+            self.ensure_header_if_needed()?;
+        }
         let page_id = page.get().id;
         let frame_id = self.max_frame + 1;
         let offset = self.frame_offset(frame_id);
@@ -1213,6 +1206,46 @@ impl WalFile {
         self.syncing.set(false);
     }
 
+    /// the WAL file has been truncated and we are writing the first
+    /// frame since then. We need to ensure that the header is initialized.
+    fn ensure_header_if_needed(&mut self) -> Result<()> {
+        self.last_checksum = {
+            let shared = self.get_shared();
+            if shared.max_frame.load(Ordering::SeqCst) != 0 {
+                return Ok(());
+            }
+            if shared.file.size()? >= WAL_HEADER_SIZE as u64 {
+                return Ok(());
+            }
+
+            let mut hdr = shared.wal_header.lock();
+            if hdr.page_size == 0 {
+                hdr.page_size = self.page_size();
+            }
+
+            // recompute header checksum
+            let prefix = &hdr.as_bytes()[..WAL_HEADER_SIZE - 8];
+            let use_native = (hdr.magic & 1) != 0;
+            let (c1, c2) = checksum_wal(prefix, &hdr, (0, 0), use_native);
+            hdr.checksum_1 = c1;
+            hdr.checksum_2 = c2;
+
+            shared.last_checksum = (c1, c2);
+            (c1, c2)
+        };
+
+        self.max_frame = 0;
+        let shared = self.get_shared();
+        self.io
+            .wait_for_completion(sqlite3_ondisk::begin_write_wal_header(
+                &shared.file,
+                &shared.wal_header.lock(),
+            )?)?;
+        self.io
+            .wait_for_completion(shared.file.sync(Completion::new_sync(|_| {}).into())?)?;
+        Ok(())
+    }
+
     fn checkpoint_inner(
         &mut self,
         pager: &Pager,
@@ -1335,31 +1368,43 @@ impl WalFile {
                     if *write_counter.borrow() > 0 {
                         return Ok(IOResult::IO);
                     }
-                    let (mut checkpoint_result, everything_backfilled) = {
+                    let mut checkpoint_result = {
                         let shared = self.get_shared();
                         let current_mx = shared.max_frame.load(Ordering::SeqCst);
                         let nbackfills = shared.nbackfills.load(Ordering::SeqCst);
-
-                        let frames_in_wal = current_mx.saturating_sub(nbackfills);
-                        let frames_checkpointed =
-                            current_mx.saturating_sub(self.ongoing_checkpoint.min_frame - 1);
                         // Record two num pages fields to return as checkpoint result to caller.
                         // Ref: pnLog, pnCkpt on https://www.sqlite.org/c3ref/wal_checkpoint_v2.html
-                        (
-                            CheckpointResult::new(frames_in_wal, frames_checkpointed),
-                            // if the current max frame that we read while holding checkpoint_lock is equal to the max frame of the
-                            // ongoing checkpoint, it means that we have backfilled everything
-                            current_mx == self.ongoing_checkpoint.max_frame,
-                        )
+
+                        // the total # of frames we could have possibly backfilled
+                        let frames_possible = current_mx.saturating_sub(nbackfills);
+
+                        // the total # of frames we actually backfilled
+                        let frames_checkpointed =
+                            current_mx.saturating_sub(self.ongoing_checkpoint.min_frame - 1);
+
+                        if matches!(mode, CheckpointMode::Truncate) {
+                            // sqlite always returns zeros for truncate mode
+                            CheckpointResult::default()
+                        } else if frames_checkpointed == 0
+                            && matches!(mode, CheckpointMode::Restart)
+                        // if we restarted the log but didn't backfill pages we still have to
+                        // return the last checkpoint result.
+                        {
+                            self.prev_checkpoint.clone()
+                        } else {
+                            // otherwise return the normal result of the total # of possible frames
+                            // we could have backfilled, and the number we actually did.
+                            CheckpointResult::new(frames_possible, frames_checkpointed)
+                        }
                     };
 
-                    // we will just overwrite nbackfills with 0 if we are resetting
+                    // store the max frame we were able to successfully checkpoint.
                     self.get_shared()
                         .nbackfills
                         .store(self.ongoing_checkpoint.max_frame, Ordering::SeqCst);
 
                     if matches!(mode, CheckpointMode::Restart | CheckpointMode::Truncate) {
-                        if everything_backfilled {
+                        if checkpoint_result.everything_backfilled() {
                             self.restart_log(mode)?;
                         } else {
                             return Err(LimboError::Busy);
@@ -1399,6 +1444,10 @@ impl WalFile {
         // lower max_frame if the reader is busy and we cannot overtake
         for (read_lock_idx, read_lock) in shared.read_locks.iter_mut().enumerate().skip(1) {
             let this_mark = read_lock.value.load(Ordering::SeqCst);
+            if this_mark == READMARK_NOT_USED {
+                // this read lock is not used, skip it
+                continue;
+            }
             if this_mark < max_safe_frame as u32 {
                 let busy = !read_lock.write();
                 if !busy {
@@ -1475,18 +1524,9 @@ impl WalFile {
             });
             let shared = self.get_shared();
             // for now at least, lets do all this IO syncronously
-            let c = shared.file.truncate(0, c.clone()).inspect_err(handle_err)?;
+            let c = shared.file.truncate(0, c).inspect_err(handle_err)?;
             self.io.wait_for_completion(c).inspect_err(handle_err)?;
-
-            let hdr = shared.wal_header.lock();
-            // sqlite just lets the next writer create it when the first frame is written.
-            // we can write the new header here for simplicity.
-            self.io
-                .wait_for_completion(
-                    sqlite3_ondisk::begin_write_wal_header(&shared.file, &hdr)
-                        .inspect_err(handle_err)?,
-                )
-                .inspect_err(handle_err)?;
+            // fsync after truncation
             self.io
                 .wait_for_completion(
                     shared
@@ -1661,42 +1701,29 @@ impl WalFileShared {
             matches!(mode, CheckpointMode::Restart | CheckpointMode::Truncate),
             "CheckpointMode must be Restart or Truncate"
         );
-        // bump checkpoint sequence
-        let mut hdr = self.wal_header.lock();
-        hdr.checkpoint_seq = hdr.checkpoint_seq.wrapping_add(1);
+        {
+            let mut hdr = self.wal_header.lock();
+            // bump checkpoint sequence
+            hdr.checkpoint_seq = hdr.checkpoint_seq.wrapping_add(1);
+            // keep hdr.magic, hdr.file_format, hdr.page_size as-is
+            hdr.checkpoint_seq = hdr.checkpoint_seq.wrapping_add(1);
+            hdr.salt_1 = hdr.salt_1.wrapping_add(1);
+            hdr.salt_2 = io.generate_random_number() as u32;
 
-        // reset frame counters
-        hdr.checksum_1 = 0;
-        hdr.checksum_2 = 0;
-        self.max_frame.store(0, Ordering::SeqCst);
-        self.nbackfills.store(0, Ordering::SeqCst);
-
-        // update salts. increment the first and generate a new random one for the second
-        hdr.salt_1 = hdr.salt_1.wrapping_add(1); // aSalt[0]++
-        hdr.salt_2 = io.generate_random_number() as u32;
-        let native = cfg!(target_endian = "big");
-        let header_prefix = &hdr.as_bytes()[..WAL_HEADER_SIZE - 2 * 4];
-        let (c1, c2) = checksum_wal(header_prefix, &hdr, (0, 0), native);
-        hdr.checksum_1 = c1;
-        hdr.checksum_2 = c2;
-        self.last_checksum = (c1, c2);
-
-        // for RESTART, we write a new header to the WAL file. truncate will simply
-        // write it in memory and let the following writer append it to the empty WAL file
-        if matches!(mode, CheckpointMode::Restart) {
-            // if we are truncating the WAL, we don't bother writing a new header
-            let c = sqlite3_ondisk::begin_write_wal_header(&self.file, &hdr)?;
-            io.wait_for_completion(c)?;
-            self.file.sync(
-                Completion::new_sync(move |_| {
-                    tracing::trace!("WAL header synced after restart");
-                })
-                .into(),
-            )?;
+            self.max_frame.store(0, Ordering::SeqCst);
+            self.nbackfills.store(0, Ordering::SeqCst);
+            self.last_checksum = (hdr.checksum_1, hdr.checksum_2);
         }
+
         self.frame_cache.lock().clear();
         self.pages_in_frames.lock().clear();
-        self.last_checksum = (hdr.checksum_1, hdr.checksum_2);
+
+        // read-marks
+        self.read_locks[0].value.store(0, Ordering::SeqCst);
+        self.read_locks[1].value.store(0, Ordering::SeqCst);
+        for l in &self.read_locks[2..] {
+            l.value.store(READMARK_NOT_USED, Ordering::SeqCst);
+        }
 
         // reset read‑marks
         self.read_locks[0].value.store(0, Ordering::SeqCst);

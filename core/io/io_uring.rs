@@ -359,9 +359,9 @@ impl File for UringFile {
         let truncate = with_fd!(self, |fd| {
             io_uring::opcode::Ftruncate::new(fd, len as u64)
                 .build()
-                .user_data(io.ring.get_key())
+                .user_data(get_key(c.clone()))
         });
-        io.ring.submit_entry(&truncate, c.clone());
+        io.ring.submit_entry(&truncate);
         Ok(c)
     }
 }
