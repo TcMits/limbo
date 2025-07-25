@@ -16,7 +16,14 @@ pub trait DatabaseStorage: Send + Sync {
         buffer: Arc<RefCell<Buffer>>,
         c: Completion,
     ) -> Result<Completion>;
-    fn sync(&self, c: Completion) -> Result<Completion>;
+    fn write_pages(
+        &self,
+        first_page_idx: usize,
+        page_size: usize,
+        buffers: Vec<Arc<RefCell<Buffer>>>,
+        c: Completion,
+    ) -> Result<Completion>;
+    fn sync(&self, c: Completion) -> Result<()>;
     fn size(&self) -> Result<u64>;
     fn truncate(&self, len: usize, c: Completion) -> Result<Completion>;
 }
@@ -59,6 +66,22 @@ impl DatabaseStorage for DatabaseFile {
         assert_eq!(buffer_size & (buffer_size - 1), 0);
         let pos = (page_idx - 1) * buffer_size;
         self.file.pwrite(pos, buffer, c)
+    }
+
+    fn write_pages(
+        &self,
+        page_idx: usize,
+        page_size: usize,
+        buffers: Vec<Arc<RefCell<Buffer>>>,
+        c: Completion,
+    ) -> Result<()> {
+        assert!(page_idx > 0);
+        assert!(page_size >= 512);
+        assert!(page_size <= 65536);
+        assert_eq!(page_size & (page_size - 1), 0);
+        let pos = (page_idx - 1) * page_size;
+        let c = self.file.pwritev(pos, buffers, c)?;
+        Ok(c)
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
@@ -118,6 +141,22 @@ impl DatabaseStorage for FileMemoryStorage {
         assert_eq!(buffer_size & (buffer_size - 1), 0);
         let pos = (page_idx - 1) * buffer_size;
         self.file.pwrite(pos, buffer, c)
+    }
+
+    fn write_pages(
+        &self,
+        page_idx: usize,
+        page_size: usize,
+        buffer: Vec<Arc<RefCell<Buffer>>>,
+        c: Completion,
+    ) -> Result<()> {
+        assert!(page_idx > 0);
+        assert!(page_size >= 512);
+        assert!(page_size <= 65536);
+        assert_eq!(page_size & (page_size - 1), 0);
+        let pos = (page_idx - 1) * page_size;
+        let c = self.file.pwritev(pos, buffer, c)?;
+        Ok(c)
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]

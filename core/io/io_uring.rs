@@ -106,28 +106,27 @@ impl WrappedIOUring {
     fn submit_entry(&mut self, entry: &io_uring::squeue::Entry) {
         trace!("submit_entry({:?})", entry);
         unsafe {
-            self.ring
-                .submission()
-                .push(entry)
-                .expect("submission queue is full");
+            let mut sub = self.ring.submission_shared();
+            match sub.push(entry) {
+                Ok(_) => self.pending_ops += 1,
+                Err(e) => {
+                    tracing::error!("Failed to submit entry: {e}");
+                    self.ring.submit().expect("failed to submit entry");
+                    sub.push(entry).expect("failed to push entry after submit");
+                    self.pending_ops += 1;
+                }
+            }
         }
-        self.pending_ops += 1;
     }
 
     fn wait_for_completion(&mut self) -> Result<()> {
-        self.ring.submit_and_wait(1)?;
-        Ok(())
-    }
-
-    fn get_completion(&mut self) -> Option<io_uring::cqueue::Entry> {
-        // NOTE: This works because CompletionQueue's next function pops the head of the queue. This is not normal behaviour of iterators
-        let entry = self.ring.completion().next();
-        if entry.is_some() {
-            trace!("get_completion({:?})", entry);
-            // consumed an entry from completion queue, update pending_ops
-            self.pending_ops -= 1;
+        if self.pending_ops == 0 {
+            return Ok(());
         }
-        entry
+        let wants = std::cmp::min(self.pending_ops, 8);
+        tracing::info!("Waiting for {wants} pending operations to complete");
+        self.ring.submit_and_wait(wants)?;
+        Ok(())
     }
 
     fn empty(&self) -> bool {
@@ -185,7 +184,8 @@ impl IO for UringIO {
         }
 
         ring.wait_for_completion()?;
-        while let Some(cqe) = ring.get_completion() {
+        while let Some(cqe) = ring.ring.completion().next() {
+            ring.pending_ops -= 1;
             let result = cqe.result();
             if result < 0 {
                 return Err(LimboError::UringIOError(format!(
@@ -196,6 +196,12 @@ impl IO for UringIO {
             }
             let ud = cqe.user_data();
             turso_assert!(ud > 0, "therea are no linked timeouts or cancelations, all cqe user_data should be valid arc pointers");
+            if ud == 0 {
+                // we currently don't have any linked timeouts or cancelations, but just in case
+                // lets guard against this case
+                tracing::error!("Received completion with user_data 0");
+                continue;
+            }
             completion_from_key(ud).complete(result);
         }
         Ok(())
@@ -347,6 +353,52 @@ impl File for UringFile {
                 .user_data(get_key(c.clone()))
         });
         io.ring.submit_entry(&sync);
+        Ok(c)
+    }
+
+    fn pwritev(
+        &self,
+        pos: usize,
+        bufs: Vec<Arc<RefCell<crate::Buffer>>>,
+        c: Arc<Completion>,
+    ) -> Result<Arc<Completion>> {
+        // build iovecs
+        let mut iovs: Vec<libc::iovec> = Vec::with_capacity(bufs.len());
+        for b in &bufs {
+            let rb = b.borrow();
+            iovs.push(libc::iovec {
+                iov_base: rb.as_ptr() as *mut _,
+                iov_len: rb.len(),
+            });
+        }
+        // keep iovecs alive until completion
+        let boxed_iovs = iovs.into_boxed_slice();
+        let iov_ptr = boxed_iovs.as_ptr();
+        let iov_len = boxed_iovs.len() as u32;
+        // leak now, free in completion
+        let raw_iovs = Box::into_raw(boxed_iovs);
+
+        let comp = {
+            // wrap original completion to free resources
+            let orig = c.clone();
+            Box::new(move |res: i32| {
+                // reclaim iovecs
+                unsafe {
+                    let _ = Box::from_raw(raw_iovs);
+                }
+                // forward to user closure
+                orig.complete(res);
+            })
+        };
+        let c = Arc::new(Completion::new_write(comp));
+        let mut io = self.io.borrow_mut();
+        let e = with_fd!(self, |fd| {
+            io_uring::opcode::Writev::new(fd, iov_ptr, iov_len)
+                .offset(pos as u64)
+                .build()
+                .user_data(get_key(c.clone()))
+        });
+        io.ring.submit_entry(&e);
         Ok(c)
     }
 
