@@ -399,7 +399,7 @@ pub enum CheckpointState {
     Done,
 }
 
-const CKPT_BATCH_PAGES: usize = 256;
+const CKPT_BATCH_PAGES: usize = 512;
 
 #[derive(Clone)]
 pub(super) struct BatchItem {
@@ -416,7 +416,7 @@ pub(super) struct BatchItem {
 // current_page is a helper to iterate through all the pages that might have a frame in the safe
 // range. This is inefficient for now.
 struct OngoingCheckpoint {
-    scratch: PageRef,
+    scratch_page: PageRef,
     batch: Vec<BatchItem>,
     state: CheckpointState,
     pending_flushes: Vec<PendingFlush>,
@@ -1261,7 +1261,7 @@ impl WalFile {
             max_frame: unsafe { (*shared.get()).max_frame.load(Ordering::SeqCst) },
             shared,
             ongoing_checkpoint: OngoingCheckpoint {
-                scratch: checkpoint_page,
+                scratch_page: checkpoint_page,
                 batch: Vec::new(),
                 pending_flushes: Vec::new(),
                 state: CheckpointState::Start,
