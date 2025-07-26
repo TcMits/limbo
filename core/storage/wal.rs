@@ -399,6 +399,7 @@ pub enum CheckpointState {
     Done,
 }
 
+/// IOV_MAX is 1024 on most systems
 pub const CKPT_BATCH_PAGES: usize = 1024;
 
 #[derive(Clone)]
@@ -1129,8 +1130,8 @@ impl Wal for WalFile {
     #[instrument(skip_all, level = Level::DEBUG)]
     fn should_checkpoint(&self) -> bool {
         let shared = self.get_shared();
-        let nbackfills = shared.nbackfills.load(Ordering::SeqCst) as usize;
         let frame_id = shared.max_frame.load(Ordering::SeqCst) as usize;
+        let nbackfills = shared.nbackfills.load(Ordering::SeqCst) as usize;
         frame_id > self.checkpoint_threshold + nbackfills
     }
 

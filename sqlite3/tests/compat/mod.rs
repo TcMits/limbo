@@ -207,12 +207,6 @@ mod tests {
 
     #[cfg(not(feature = "sqlite3"))]
     mod libsql_ext {
-<<<<<<< HEAD
-||||||| parent of 7f61fbb8 (Update test to match cacheflush behavior)
-=======
-        use limbo_sqlite3::sqlite3_close_v2;
->>>>>>> 7f61fbb8 (Update test to match cacheflush behavior)
-
         use super::*;
 
         #[test]
