@@ -222,6 +222,34 @@ impl File for SimulatorFile {
         Ok(c)
     }
 
+    fn pwritev(
+        &self,
+        pos: usize,
+        buffers: Vec<Arc<RefCell<turso_core::Buffer>>>,
+        c: turso_core::Completion,
+    ) -> Result<turso_core::Completion> {
+        self.nr_pwrite_calls.set(self.nr_pwrite_calls.get() + 1);
+        if self.fault.get() {
+            tracing::debug!("pwritev fault");
+            self.nr_pwrite_faults.set(self.nr_pwrite_faults.get() + 1);
+            return Err(turso_core::LimboError::InternalError(
+                FAULT_ERROR_MSG.into(),
+            ));
+        }
+        if let Some(latency) = self.generate_latency_duration() {
+            let cloned_c = c.clone();
+            let op =
+                Box::new(move |file: &SimulatorFile| file.inner.pwritev(pos, buffers, cloned_c));
+            self.queued_io
+                .borrow_mut()
+                .push(DelayedIo { time: latency, op });
+            Ok(c)
+        } else {
+            let c = self.inner.pwritev(pos, buffers, c)?;
+            Ok(c)
+        }
+    }
+
     fn size(&self) -> Result<u64> {
         self.inner.size()
     }
