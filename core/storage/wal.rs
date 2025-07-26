@@ -399,7 +399,7 @@ pub enum CheckpointState {
     Done,
 }
 
-const CKPT_BATCH_PAGES: usize = 512;
+pub const CKPT_BATCH_PAGES: usize = 512;
 
 #[derive(Clone)]
 pub(super) struct BatchItem {
