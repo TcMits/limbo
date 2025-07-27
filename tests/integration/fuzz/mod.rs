@@ -604,7 +604,7 @@ mod tests {
                 query.push_str(select_statement);
             }
 
-            // if the right most SELECT is a VALUES claude, no limit is not allowed
+            // if the right most SELECT is a VALUES clause, no limit is not allowed
             if rng.random_bool(0.8) && !has_right_most_values {
                 let limit_val = rng.random_range(0..=MAX_LIMIT_VALUE); // LIMIT 0 is valid
                 query = format!("{query} LIMIT {limit_val}");
