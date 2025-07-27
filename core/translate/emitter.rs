@@ -266,7 +266,7 @@ pub fn emit_query<'a>(
     t_ctx: &mut TranslateCtx<'a>,
 ) -> Result<usize> {
     if !plan.values.is_empty() {
-        let reg_result_cols_start = emit_values(program, plan, &t_ctx.resolver)?;
+        let reg_result_cols_start = emit_values(program, plan, &t_ctx.resolver, t_ctx.limit_ctx)?;
         return Ok(reg_result_cols_start);
     }
 

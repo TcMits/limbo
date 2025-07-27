@@ -606,6 +606,24 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
 
       select * from t EXCEPT values('x','x'),('z','y');
     } {y|y}
+
+    do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit {
+    CREATE TABLE t (x TEXT);
+    INSERT INTO t VALUES('x'), ('y'), ('z');
+
+    values('x') UNION ALL select * from t limit 3;
+    } {x
+    x
+    y}
+
+    do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit-2 {
+    CREATE TABLE t (x TEXT);
+    INSERT INTO t VALUES('x'), ('y'), ('z');
+
+    values('a'), ('b') UNION ALL select * from t limit 3;
+    } {a
+    b
+    x}
 }
 
 do_execsql_test_on_specific_db {:memory:} select-no-match-in-leaf-page {
