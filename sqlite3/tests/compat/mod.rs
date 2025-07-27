@@ -207,6 +207,7 @@ mod tests {
 
     #[cfg(not(feature = "sqlite3"))]
     mod libsql_ext {
+
         use super::*;
 
         #[test]

@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{turso_assert, Result};
 use bitflags::bitflags;
 use cfg_block::cfg_block;
 use std::fmt;
@@ -344,10 +344,10 @@ cfg_block! {
         pub use unix::UnixIO as PlatformIO;
     }
 
-    #[cfg(target_os = "windows")] {
+     #[cfg(target_os = "windows")] {
         mod windows;
         pub use windows::WindowsIO as PlatformIO;
-        pub use PlatformIO as SyscallIO;
+         pub use PlatformIO as SyscallIO;
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows", target_os = "android", target_os = "ios")))] {

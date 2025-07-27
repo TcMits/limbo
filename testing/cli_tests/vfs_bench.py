@@ -48,6 +48,9 @@ def bench_one(vfs: str, sql: str, iterations: int) -> list[float]:
 
 
 def setup_temp_db() -> None:
+    # make sure we start fresh, otherwise we could end up with
+    # one having to checkpoint the others from the previous run
+    cleanup_temp_db()
     cmd = ["sqlite3", "testing/testing.db", ".clone testing/temp.db"]
     proc = subprocess.run(cmd, check=True)
     proc.check_returncode()
@@ -57,7 +60,9 @@ def setup_temp_db() -> None:
 def cleanup_temp_db() -> None:
     if DB_FILE.exists():
         DB_FILE.unlink()
-        os.remove("testing/temp.db-wal")
+    wal_file = DB_FILE.with_suffix(".db-wal")
+    if wal_file.exists():
+        os.remove(wal_file)
 
 
 def main() -> None:
@@ -65,7 +70,6 @@ def main() -> None:
     parser.add_argument("sql", help="SQL statement to execute (quote it)")
     parser.add_argument("iterations", type=int, help="number of repetitions")
     args = parser.parse_args()
-    setup_temp_db()
 
     sql, iterations = args.sql, args.iterations
     if iterations <= 0:
@@ -85,7 +89,8 @@ def main() -> None:
         info(f"All times ({vfs}):", " ".join(f"{t:.6f}" for t in times))
         avg = statistics.mean(times)
         averages[vfs] = avg
-        cleanup_temp_db()
+
+    cleanup_temp_db()
 
     info("\n" + "-" * 60)
     info("Average runtime per VFS")
