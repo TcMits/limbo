@@ -569,14 +569,28 @@ mod tests {
                 .map(|c| c.to_string())
                 .collect::<Vec<_>>();
 
-            for _ in 0..num_selects_in_union {
-                // Randomly pick a table
-                let table_to_select_from = &table_names[rng.random_range(0..table_names.len())];
-                select_statements.push(format!(
-                    "SELECT {} FROM {}",
-                    cols_to_select.join(", "),
-                    table_to_select_from
-                ));
+            let mut has_right_most_values = false;
+            for i in 0..num_selects_in_union {
+                let p = 1.0 / table_names.len() as f64;
+                // Randomly decide whether to use a VALUES clause or a SELECT clause
+                if rng.random_bool(p) {
+                    let values = (0..cols_to_select.len())
+                        .map(|_| rng.random_range(-3..3))
+                        .map(|val| val.to_string())
+                        .collect::<Vec<_>>();
+                    select_statements.push(format!("VALUES({})", values.join(", ")));
+                    if i == (num_selects_in_union - 1) {
+                        has_right_most_values = true;
+                    }
+                } else {
+                    // Randomly pick a table
+                    let table_to_select_from = &table_names[rng.random_range(0..table_names.len())];
+                    select_statements.push(format!(
+                        "SELECT {} FROM {}",
+                        cols_to_select.join(", "),
+                        table_to_select_from
+                    ));
+                }
             }
 
             const COMPOUND_OPERATORS: [&str; 4] =
@@ -590,7 +604,8 @@ mod tests {
                 query.push_str(select_statement);
             }
 
-            if rng.random_bool(0.8) {
+            // if the right most SELECT is a VALUES claude, no limit is not allowed
+            if rng.random_bool(0.8) && !has_right_most_values {
                 let limit_val = rng.random_range(0..=MAX_LIMIT_VALUE); // LIMIT 0 is valid
                 query = format!("{query} LIMIT {limit_val}");
             }

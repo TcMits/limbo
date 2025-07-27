@@ -344,6 +344,15 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
     } {1|100
     2|200}
 
+    do_execsql_test_on_specific_db {:memory:} insert_from_select_union-2 {
+        CREATE TABLE t (a, b);
+        CREATE TABLE t2 (b, c);
+
+        INSERT INTO t SELECT * FROM t UNION values(1, 100), (2, 200);
+        SELECT * FROM t;
+    } {1|100
+    2|200}
+
     do_execsql_test_on_specific_db {:memory:} insert_from_select_intersect {
         CREATE TABLE t (a, b);
         CREATE TABLE t1 (a, b);
