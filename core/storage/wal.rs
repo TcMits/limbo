@@ -663,133 +663,144 @@ impl Wal for WalFile {
     /// Begin a read transaction.
     #[instrument(skip_all, level = Level::DEBUG)]
     fn begin_read_tx(&mut self) -> Result<(LimboResult, bool)> {
-        let max_frame_in_wal = self.get_shared().max_frame.load(Ordering::SeqCst);
-        let nbackfills = self.get_shared().nbackfills.load(Ordering::SeqCst);
-        let db_has_changed = max_frame_in_wal > self.max_frame;
+        let (shared_max, nbackfills, last_checksum) = {
+            let shared = self.get_shared();
+            let mx = shared.max_frame.load(Ordering::SeqCst);
+            let nb = shared.nbackfills.load(Ordering::SeqCst);
+            let ck = shared.last_checksum;
+            (mx, nb, ck)
+        };
+        let db_changed = shared_max > self.max_frame;
 
         // WAL is already fully back‑filled into the main DB image
         // (mxFrame == nBackfill).  Readers can therefore ignore the
         // WAL and fetch pages directly from the DB file.  We do this
         // by taking read‑lock 0.
-        if max_frame_in_wal == nbackfills {
-            let lock0 = &mut self.get_shared().read_locks[0];
-            if !lock0.read() {
-                return Ok((LimboResult::Busy, db_has_changed));
+        if shared_max == nbackfills {
+            let l0 = &mut self.get_shared().read_locks[0];
+            if !l0.read() {
+                return Ok((LimboResult::Busy, db_changed));
             }
-            self.max_frame = max_frame_in_wal;
+            self.max_frame = shared_max;
             // we need to keep self.max_frame set to the appropriate
             // max frame in the wal at the time this transaction starts.
             // but here we set min_frame=max_frame + 1 to keep an empty snapshot window,
             // to demonstrate that we do not care about any frames,
             // while still capturing a snapshot that we may need if we ever want to upgrade
             // to a write transaction.
-            self.min_frame = max_frame_in_wal + 1;
+            self.min_frame = shared_max.saturating_add(1);
             self.max_frame_read_lock_index.set(0);
             self.has_snapshot.set(true);
-            self.last_checksum = self.get_shared().last_checksum;
-            return Ok((LimboResult::Ok, db_has_changed));
+            self.last_checksum = last_checksum;
+            return Ok((LimboResult::Ok, db_changed));
         }
 
-        let mut max_read_mark_index = -1;
-        let mut max_read_mark = 0;
-        // Find the largest mark we can find, ignore frames that are impossible to be in range and
-        // that are not set
-        for (index, lock) in self.get_shared().read_locks.iter().enumerate().skip(1) {
-            let this_mark = lock.value.load(Ordering::SeqCst);
-            if this_mark > max_read_mark && this_mark <= max_frame_in_wal as u32 {
-                max_read_mark = this_mark;
-                max_read_mark_index = index as i64;
+        // Find largest mark <= mx among slots 1..N
+        let mut best_idx: i64 = -1;
+        let mut best_mark: u32 = 0;
+        for (idx, lock) in self.get_shared().read_locks.iter().enumerate().skip(1) {
+            let m = lock.value.load(Ordering::SeqCst);
+            if m != READMARK_NOT_USED && m <= shared_max as u32 && m > best_mark {
+                best_mark = m;
+                best_idx = idx as i64;
             }
         }
 
-        // If we didn't find any mark or we can update, let's update them
-        if (max_read_mark as u64) < max_frame_in_wal || max_read_mark_index == -1 {
-            for (index, lock) in self.get_shared().read_locks.iter_mut().enumerate().skip(1) {
-                let busy = !lock.write();
-                if !busy {
-                    // If this was busy then it must mean >1 threads tried to set this read lock
-                    lock.value.store(max_frame_in_wal as u32, Ordering::SeqCst);
-                    max_read_mark = max_frame_in_wal as u32;
-                    max_read_mark_index = index as i64;
-                    lock.unlock();
-                    break;
+        // If none found or lagging, try to claim/update a slot
+        if best_idx == -1 || (best_mark as u64) < shared_max {
+            for (idx, lock) in self.get_shared().read_locks.iter_mut().enumerate().skip(1) {
+                if !lock.write() {
+                    continue; // busy slot
                 }
+                // claim or bump this slot
+                lock.value.store(shared_max as u32, Ordering::SeqCst);
+                best_idx = idx as i64;
+                best_mark = shared_max as u32;
+                lock.unlock();
+                break;
             }
         }
 
-        if max_read_mark_index == -1 {
-            return Ok((LimboResult::Busy, db_has_changed));
+        if best_idx == -1 {
+            return Ok((LimboResult::Busy, db_changed));
         }
 
-        let (min_frame, last_checksum, start_pages_in_frames) = {
+        // Now take a shared read on that slot
+        let (min_frame, start_pages) = {
             let shared = self.get_shared();
-            let lock = &mut shared.read_locks[max_read_mark_index as usize];
-            tracing::trace!("begin_read_tx_read_lock(lock={})", max_read_mark_index);
-            let busy = !lock.read();
-            if busy {
-                return Ok((LimboResult::Busy, db_has_changed));
+            let lock = &mut shared.read_locks[best_idx as usize];
+            if !lock.read() {
+                return Ok((LimboResult::Busy, db_changed));
             }
             (
                 shared.nbackfills.load(Ordering::SeqCst) + 1,
-                shared.last_checksum,
                 shared.pages_in_frames.lock().len(),
             )
         };
+
         self.min_frame = min_frame;
-        self.max_frame_read_lock_index
-            .set(max_read_mark_index as usize);
-        self.max_frame = max_read_mark as u64;
-        self.last_checksum = last_checksum;
+        self.max_frame = best_mark as u64;
+        self.start_pages_in_frames = start_pages;
+        self.max_frame_read_lock_index.set(best_idx as usize);
         self.has_snapshot.set(true);
-        self.start_pages_in_frames = start_pages_in_frames;
+
         tracing::debug!(
-            "begin_read_tx(min_frame={}, max_frame={}, lock={}, max_frame_in_wal={})",
+            "begin_read_tx(min={}, max={}, slot={}, max_frame_in_wal={})",
             self.min_frame,
             self.max_frame,
-            max_read_mark_index,
-            max_frame_in_wal
+            best_idx,
+            shared_max
         );
-        Ok((LimboResult::Ok, db_has_changed))
+
+        Ok((LimboResult::Ok, db_changed))
     }
 
     /// End a read transaction.
     #[inline(always)]
     #[instrument(skip_all, level = Level::DEBUG)]
     fn end_read_tx(&self) {
-        let held = self.max_frame_read_lock_index.get();
-        tracing::debug!("end_read_tx(lock={})", held);
-        if held != NO_LOCK_HELD {
-            let read_lock = &mut self.get_shared().read_locks[held];
-            read_lock.unlock();
+        let slot = self.max_frame_read_lock_index.get();
+        if slot != NO_LOCK_HELD {
+            let rl = &mut self.get_shared().read_locks[slot];
+            rl.unlock();
+            self.max_frame_read_lock_index.set(NO_LOCK_HELD);
+            self.has_snapshot.set(false);
+            tracing::debug!("end_read_tx(slot={slot})");
+        } else {
+            tracing::debug!("end_read_tx(no snapshot)");
         }
-        self.has_snapshot.set(false);
-        self.max_frame_read_lock_index.set(NO_LOCK_HELD);
     }
 
     /// Begin a write transaction
     #[instrument(skip_all, level = Level::DEBUG)]
     fn begin_write_tx(&mut self) -> Result<LimboResult> {
-        if !self.get_shared().write_lock.write() {
+        let shared = self.get_shared();
+        if !shared.write_lock.write() {
             return Ok(LimboResult::Busy);
         }
-        let shared_max = self.get_shared().max_frame.load(Ordering::SeqCst);
-
-        // If we have a snapshot and self.max_frame == shared.max_frame,
-        // then the snapshot is still valid and it's safe to promote to write tx.
-        // It is also valid if we do not yet have a snapshot.
-        if !self.has_snapshot.get() || self.max_frame == shared_max {
-            // Both cases mean we can safely use the shared state.
-            self.max_frame = shared_max;
-            self.last_checksum = self.get_shared().last_checksum;
-            self.min_frame = self.get_shared().nbackfills.load(Ordering::SeqCst) + 1;
-            self.has_snapshot.set(true);
+        if !self.has_snapshot.get() {
+            // In SQLite this cannot happen (assert). Either assert or handle like Busy.
+            shared.write_lock.unlock();
+            return Ok(LimboResult::Busy);
+        }
+        let (shared_max, nbackfills, last_checksum) = {
+            let shared = self.get_shared();
+            (
+                shared.max_frame.load(Ordering::SeqCst),
+                shared.nbackfills.load(Ordering::SeqCst),
+                shared.last_checksum,
+            )
+        };
+        if self.max_frame == shared_max {
+            // Snapshot still valid; adopt counters
+            self.last_checksum = last_checksum;
+            self.min_frame = nbackfills + 1;
             return Ok(LimboResult::Ok);
         }
-        // Otherwise, another transaction wrote to the WAL after we started our read transaction.
-        // This means our snapshot is not consistent with the one in the shared state and we need to start over.
-        let shared = self.get_shared();
+
+        // Snapshot is stale, give up and let caller retry from scratch
         shared.write_lock.unlock();
-        return Ok(LimboResult::Busy);
+        Ok(LimboResult::Busy)
     }
 
     /// End a write transaction
@@ -1202,6 +1213,7 @@ impl WalFile {
         self.ongoing_checkpoint.min_frame = 0;
         self.ongoing_checkpoint.max_frame = 0;
         self.ongoing_checkpoint.current_page = 0;
+        self.max_frame_read_lock_index.set(NO_LOCK_HELD);
         self.sync_state.set(SyncState::NotSyncing);
         self.syncing.set(false);
     }
@@ -1424,7 +1436,9 @@ impl WalFile {
                     // a. the max frame == num wal frames (everything backfilled)
                     // b. the physical db file size differs from the expected pages * page_size
                     // and truncate + sync the db file if necessary.
-                    if checkpoint_result.everything_backfilled() {
+                    if checkpoint_result.everything_backfilled()
+                        && checkpoint_result.num_checkpointed_frames > 0
+                    {
                         checkpoint_result.maybe_guard = self.checkpoint_guard.take();
                     } else {
                         let _ = self.checkpoint_guard.take();

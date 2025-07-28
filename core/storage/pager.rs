@@ -1304,7 +1304,9 @@ impl Pager {
                 .checkpoint(self, counter.clone(), mode)
         })?;
 
-        if checkpoint_result.everything_backfilled() {
+        if checkpoint_result.everything_backfilled()
+            && checkpoint_result.num_checkpointed_frames != 0
+        {
             let db_size = header_accessor::get_database_size(self)?;
             let page_size = self.page_size.get().unwrap_or(DEFAULT_PAGE_SIZE);
             let expected = (db_size * page_size) as u64;
