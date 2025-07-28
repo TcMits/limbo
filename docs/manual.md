@@ -4,44 +4,49 @@ Welcome to Turso database manual!
 
 ## Table of contents
 
-* [Introduction](#introduction)
-  * [Getting Started](#getting-started)
-  * [Limitations](#limitations)
-* [The SQL shell](#the-sql-shell)
-  * [Shell commands](#shell-commands)
-  * [Command line options](#command-line-options)
-* [The SQL language](#the-sql-language)
-  * [`ALTER TABLE` — change table definition](#alter-table--change-table-definition)
-  * [`BEGIN TRANSACTION` — start a transaction](#begin-transaction--start-a-transaction)
-  * [`COMMIT TRANSACTION` — commit the current transaction](#commit-transaction--commit-the-current-transaction)
-  * [`CREATE INDEX` — define a new index](#create-index--define-a-new-index)
-  * [`CREATE TABLE` — define a new table](#create-table--define-a-new-table)
-  * [`DELETE` - delete rows from a table](#delete---delete-rows-from-a-table)
-  * [`DROP INDEX` - remove an index](#drop-index---remove-an-index)
-  * [`DROP TABLE` — remove a table](#drop-table--remove-a-table)
-  * [`END TRANSACTION` — commit the current transaction](#end-transaction--commit-the-current-transaction)
-  * [`INSERT` — create new rows in a table](#insert--create-new-rows-in-a-table)
-  * [`ROLLBACK TRANSACTION` — abort the current transaction](#rollback-transaction--abort-the-current-transaction)
-  * [`SELECT` — retrieve rows from a table](#select--retrieve-rows-from-a-table)
-  * [`UPDATE` — update rows of a table](#update--update-rows-of-a-table)
-* [JavaScript API](#javascript-api)
-* [SQLite C API](#sqlite-c-api)
-  * [Basic operations](#basic-operations)
-    * [`sqlite_open`](#sqlite3_open)
-    * [`sqlite_prepare`](#sqlite3_prepare)
-    * [`sqlite_step`](#sqlite3_step)
-    * [`sqlite_column`](#sqlite3_column)
-  * [WAL manipulation](#wal-manipulation)
-    * [`libsql_wal_frame_count`](#libsql_wal_frame_count)
-* [Appendix A: Turso Internals](#appendix-a-turso-internals)
-  * [Frontend](#frontend)
-    * [Parser](#parser)
-    * [Code generator](#code-generator)
-    * [Query optimizer](#query-optimizer)
-  * [Virtual Machine](#virtual-machine)
-  * [MVCC](#mvcc)
-  * [Pager](#pager)
-  * [I/O](#io)
+- [Turso Database Manual](#turso-database-manual)
+  - [Table of contents](#table-of-contents)
+  - [Introduction](#introduction)
+    - [Getting Started](#getting-started)
+    - [Limitations](#limitations)
+  - [The SQL shell](#the-sql-shell)
+    - [Shell commands](#shell-commands)
+    - [Command line options](#command-line-options)
+  - [The SQL language](#the-sql-language)
+    - [`ALTER TABLE` — change table definition](#alter-table--change-table-definition)
+    - [`BEGIN TRANSACTION` — start a transaction](#begin-transaction--start-a-transaction)
+    - [`COMMIT TRANSACTION` — commit the current transaction](#commit-transaction--commit-the-current-transaction)
+    - [`CREATE INDEX` — define a new index](#create-index--define-a-new-index)
+    - [`CREATE TABLE` — define a new table](#create-table--define-a-new-table)
+    - [`DELETE` - delete rows from a table](#delete---delete-rows-from-a-table)
+    - [`DROP INDEX` - remove an index](#drop-index---remove-an-index)
+    - [`DROP TABLE` — remove a table](#drop-table--remove-a-table)
+    - [`END TRANSACTION` — commit the current transaction](#end-transaction--commit-the-current-transaction)
+    - [`INSERT` — create new rows in a table](#insert--create-new-rows-in-a-table)
+    - [`ROLLBACK TRANSACTION` — abort the current transaction](#rollback-transaction--abort-the-current-transaction)
+    - [`SELECT` — retrieve rows from a table](#select--retrieve-rows-from-a-table)
+    - [`UPDATE` — update rows of a table](#update--update-rows-of-a-table)
+  - [JavaScript API](#javascript-api)
+    - [Installation](#installation)
+    - [Getting Started](#getting-started-1)
+  - [SQLite C API](#sqlite-c-api)
+    - [Basic operations](#basic-operations)
+      - [`sqlite3_open`](#sqlite3_open)
+      - [`sqlite3_prepare`](#sqlite3_prepare)
+      - [`sqlite3_step`](#sqlite3_step)
+      - [`sqlite3_column`](#sqlite3_column)
+    - [WAL manipulation](#wal-manipulation)
+      - [`libsql_wal_frame_count`](#libsql_wal_frame_count)
+  - [Appendix A: Turso Internals](#appendix-a-turso-internals)
+    - [Frontend](#frontend)
+      - [Parser](#parser)
+      - [Code generator](#code-generator)
+      - [Query optimizer](#query-optimizer)
+    - [Virtual Machine](#virtual-machine)
+    - [MVCC](#mvcc)
+    - [Pager](#pager)
+    - [I/O](#io)
+    - [References](#references)
 
 ## Introduction
 
@@ -624,7 +629,29 @@ TODO
 
 ### I/O
 
-TODO
+- Every I/O operation shall be tracked by a corresponding `Completion`. A `Completion` is just an object that tracks a particular I/O operation. The database `IO` will call it's complete callback to signal that the operation was complete, thus ensuring that every tracker can be poll to see if the operation succeeded.
+- To advance the Program State Machines, you must first wait for the tracked completions to complete. This can be done either by busy polling (`io.wait_for_completion`) or polling once and then yielding - e.g
+  ```rust
+  if !completion.is_completed {
+    return StepResult::IO;
+  }
+  ```
+  This allows us to be flexible in places where we do not have the state machines in place to correctly return the Completion. Thus, we can block in certain places to avoid bigger refactorings, which opens up the opportunity for such refactorings in separate PRs.
+- To know if a function does any sort of I/O we just have to look at the function signature. If it returns `Completion`, `Vec<Completion>` or `IOResult`, then it does I/O.
+- `IOResult` has the following structure:
+  ```rust
+  pub enum IOCompletions {
+    Single(Arc<Completion>),
+    Many(Vec<Arc<Completion>>),
+  }
+
+  #[must_use]
+  pub enum IOResult<T> {
+    Done(T),
+    IO(IOCompletions),
+  }
+  ```
+  This implies that when a function returns an `IOResult`, it must be called again until it returns an `IOResult::Done` variant. This works similarly to how `Future`s are polled in rust. When you receive a `Poll::Ready(None)`, it means that the future stopped it's execution. In a similar vein, if we receive `IOResult::Done`, the function/state machine has reached the end of it's execution. `IOCompletions` is here to signal that, if we are executing any I/O operation, that we need to propagate the completions that are generated from it. This design forces us to handle the fact that a function is asynchronous in nature. This is essentially [function coloring](https://www.tedinski.com/2018/11/13/function-coloring.html), but done at the application level instead of the compiler level.
 
 ### References
 
