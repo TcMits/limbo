@@ -888,14 +888,12 @@ impl Connection {
         tracing::trace!("Preparing and executing batch: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         while let Some(cmd) = parser.next()? {
-            dbg!(&cmd);
             let syms = self.syms.borrow();
             let pager = self.pager.borrow().clone();
             let byte_offset_end = parser.offset();
             let input = str::from_utf8(&sql.as_bytes()[..byte_offset_end])
                 .unwrap()
                 .trim();
-            dbg!(&self.schema);
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = translate::translate(
@@ -919,7 +917,7 @@ impl Connection {
                         self.run_once()?;
                     }
                 }
-                _ => todo!(),
+                _ => unreachable!(),
             }
         }
         Ok(())
