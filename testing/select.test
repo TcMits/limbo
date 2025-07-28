@@ -384,6 +384,24 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
     x|x
     y|y}
 
+    do_execsql_test_on_specific_db {:memory:} select-union-all-with-offset {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('y','y'),('z', 'z');
+
+    select * from t UNION ALL select * from u limit 1 offset 1;
+    } {y|y}
+
+    do_execsql_test_on_specific_db {:memory:} select-union-with-offset {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('y','y'),('z', 'z');
+
+    select * from t UNION select * from u limit 1 offset 1;
+    } {y|y}
+
     do_execsql_test_on_specific_db {:memory:} select-intersect-1 {
       CREATE TABLE t (x TEXT, y TEXT);
       CREATE TABLE u (x TEXT, y TEXT);
@@ -460,6 +478,16 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
       select * from t INTERSECT select * from u limit 2;
     } {x|x
     y|y}
+
+    do_execsql_test_on_specific_db {:memory:} select-intersect-with-offset {
+      CREATE TABLE t (x TEXT, y TEXT);
+      CREATE TABLE u (x TEXT, y TEXT);
+      INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
+      INSERT INTO u VALUES('x','x'),('y','y'), ('z','z');
+
+      select * from t INTERSECT select * from u limit 2 offset 1;
+    } {y|y
+    z|z}
 
     do_execsql_test_on_specific_db {:memory:} select-intersect-union-with-limit {
       CREATE TABLE t (x TEXT, y TEXT);

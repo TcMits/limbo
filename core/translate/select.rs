@@ -154,10 +154,6 @@ pub fn prepare_select_plan(
             }
             let (limit, offset) = select.limit.map_or(Ok((None, None)), |l| parse_limit(&l))?;
 
-            // FIXME: handle OFFSET for compound selects
-            if offset.is_some_and(|o| o > 0) {
-                crate::bail_parse_error!("OFFSET is not supported for compound SELECTs yet");
-            }
             // FIXME: handle ORDER BY for compound selects
             if select.order_by.is_some() {
                 crate::bail_parse_error!("ORDER BY is not supported for compound SELECTs yet");
