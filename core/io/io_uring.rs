@@ -16,12 +16,28 @@ use std::{
 };
 use tracing::{debug, trace};
 
+/// Size of the io_uring submission and completion queues
 const ENTRIES: u32 = 512;
+
+/// Idle timeout for the sqpoll kernel thread before it needs
+/// to be woken back up by a call to IORING_ENTER
 const SQPOLL_IDLE: u32 = 1000;
+
+/// Number of file descriptors we preallocate for io_uring.
+/// NOTE: we may need to increase this when `attach` is fully implemented.
 const FILES: u32 = 8;
+
+/// Number of Vec<Box<[iovec]>> we preallocate on initialization
 const IOVEC_POOL_SIZE: usize = 64;
+
+/// Maximum number of iovec entries per writev operation.
+/// IOV_MAX is typically 1024, but we limit it to a smaller number
 const MAX_IOVEC_ENTRIES: usize = CKPT_BATCH_PAGES;
-const MAX_WAIT: usize = 8;
+
+/// Maximum number of I/O operations to wait for in a single run,
+/// waiting for > 1 can reduce the amount of IOURING_ENTER syscalls we
+/// make, but can increase single operation latency.
+const MAX_WAIT: usize = 4;
 
 pub struct UringIO {
     inner: Rc<RefCell<InnerUringIO>>,
@@ -35,7 +51,6 @@ struct WrappedIOUring {
     pending_ops: usize,
     writev_states: HashMap<u64, WritevState>,
     iov_pool: IovecPool,
-    cqes: [Cqe; ENTRIES as usize + 1],
 }
 
 struct InnerUringIO {
@@ -94,10 +109,6 @@ impl UringIO {
                 pending_ops: 0,
                 writev_states: HashMap::new(),
                 iov_pool: IovecPool::new(),
-                cqes: [Cqe {
-                    user_data: 0,
-                    result: 0,
-                }; ENTRIES as usize + 1],
             },
             free_files: (0..FILES).collect(),
         };
@@ -108,6 +119,8 @@ impl UringIO {
     }
 }
 
+/// io_uring crate decides not to export their `UseFixed` trait, so we
+/// are forced to use a macro here to handle either fixed or raw file descriptors.
 macro_rules! with_fd {
     ($file:expr, |$fd:ident| $body:expr) => {
         match $file.id() {
@@ -123,6 +136,8 @@ macro_rules! with_fd {
     };
 }
 
+/// wrapper type to represent a possibly registered file desriptor,
+/// only used in WritevState
 enum Fd {
     Fixed(u32),
     RawFd(i32),
@@ -143,22 +158,24 @@ impl Fd {
     }
 }
 
+/// State to track an ongoing writev operation in
+/// the case of a partial write.
 struct WritevState {
-    // fixed fd slot
+    /// File descriptor/id of the file we are writing to
     file_id: Fd,
-    // absolute file offset for next submit
+    /// absolute file offset for next submit
     file_pos: usize,
-    // current buffer index in `bufs`
+    /// current buffer index in `bufs`
     current_buffer_idx: usize,
-    // intra-buffer offset
+    /// intra-buffer offset
     current_buffer_offset: usize,
-    // total bytes written so far
+    /// total bytes written so far
     total_written: usize,
-    // cache the sum of all buffer lengths
+    /// cache the sum of all buffer lengths for the total expected write
     total_len: usize,
+    /// buffers to write
     bufs: Vec<Arc<RefCell<crate::Buffer>>>,
-    // we keep the last iovec allocation alive until CQE.
-    // pointer to the beginning of the iovec array
+    /// we keep the last iovec allocation alive until final CQE
     last_iov_allocation: Option<Box<[libc::iovec; MAX_IOVEC_ENTRIES]>>,
 }
 
@@ -219,12 +236,6 @@ impl WritevState {
     }
 }
 
-#[derive(Clone, Copy)]
-struct Cqe {
-    user_data: u64,
-    result: i32,
-}
-
 impl InnerUringIO {
     fn register_file(&mut self, fd: i32) -> Result<u32> {
         if let Some(slot) = self.free_files.pop_front() {
@@ -266,7 +277,7 @@ impl WrappedIOUring {
     }
 
     fn submit_and_wait(&mut self) -> Result<()> {
-        if self.pending_ops == 0 {
+        if self.empty() {
             return Ok(());
         }
         let wants = std::cmp::min(self.pending_ops, MAX_WAIT);
@@ -304,6 +315,7 @@ impl WrappedIOUring {
         {
             let buf = buffer.borrow();
             let buf_slice = buf.as_slice();
+            // ensure we are providing a pointer to the proper offset in the buffer
             let slice = if idx == st.current_buffer_idx {
                 &buf_slice[st.current_buffer_offset..]
             } else {
@@ -318,7 +330,8 @@ impl WrappedIOUring {
             };
             iov_count += 1;
         }
-        // Store the allocation and get the pointer
+        // Store the pointers and get the pointer to the iovec array that we pass
+        // to the writev operation, and keep the array itself alive
         let ptr = iov_allocation.as_ptr() as *mut libc::iovec;
         st.last_iov_allocation = Some(iov_allocation);
 
@@ -328,28 +341,9 @@ impl WrappedIOUring {
                 .build()
                 .user_data(key)
         });
+        // track the current state in case we get a partial write
         self.writev_states.insert(key, st);
         self.submit_entry(&entry);
-    }
-
-    // to circumvent borrowing rules, collect everything into preallocated array
-    // and return the number of completed operations
-    fn reap_cqes(&mut self) -> usize {
-        let mut count = 0;
-        {
-            for cqe in self.ring.completion() {
-                self.pending_ops -= 1;
-                self.cqes[count] = Cqe {
-                    user_data: cqe.user_data(),
-                    result: cqe.result(),
-                };
-                count += 1;
-                if count == ENTRIES as usize {
-                    break;
-                }
-            }
-        }
-        count
     }
 
     fn handle_writev_completion(&mut self, mut st: WritevState, user_data: u64, result: i32) {
@@ -448,20 +442,24 @@ impl IO for UringIO {
             return Ok(());
         }
         ring.submit_and_wait()?;
-        let count = ring.reap_cqes();
-        for i in 0..count {
-            let Cqe { user_data, result } = ring.cqes[i];
+        loop {
+            let Some(cqe) = ring.ring.completion().next() else {
+                return Ok(());
+            };
+            ring.pending_ops -= 1;
+            let user_data = cqe.user_data();
+            let result = cqe.result();
             turso_assert!(
                     user_data != 0,
                     "user_data must not be zero, we dont submit linked timeouts or cancelations that would cause this"
                 );
             if let Some(state) = ring.writev_states.remove(&user_data) {
+                // if we have ongoing writev state, handle it separately and don't call completion
                 ring.handle_writev_completion(state, user_data, result);
                 continue;
             }
             completion_from_key(user_data).complete(result)
         }
-        Ok(())
     }
 
     fn generate_random_number(&self) -> i64 {

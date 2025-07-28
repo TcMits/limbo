@@ -399,8 +399,8 @@ pub enum CheckpointState {
     Done,
 }
 
-/// IOV_MAX is 1024 on most systems
-pub const CKPT_BATCH_PAGES: usize = 1024;
+/// IOV_MAX is 1024 on most systems, lets use 512 to be safe
+pub const CKPT_BATCH_PAGES: usize = 512;
 
 #[derive(Clone)]
 pub(super) struct BatchItem {
@@ -1587,6 +1587,11 @@ impl WalFile {
                     } else {
                         let _ = self.checkpoint_guard.take();
                     }
+                    self.ongoing_checkpoint.scratch_page.clear_dirty();
+                    self.ongoing_checkpoint.scratch_page.get().id = 0;
+                    self.ongoing_checkpoint.scratch_page.get().contents = None;
+                    let _ = self.ongoing_checkpoint.pending_flush.take();
+                    self.ongoing_checkpoint.batch.clear();
                     self.ongoing_checkpoint.state = CheckpointState::Start;
                     return Ok(IOResult::Done(checkpoint_result));
                 }
