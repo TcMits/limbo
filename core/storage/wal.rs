@@ -1227,7 +1227,9 @@ impl WalFileShared {
         );
         wal_header.checksum_1 = checksums.0;
         wal_header.checksum_2 = checksums.1;
-        sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
+        let c = sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
+        // TODO: for now wait for completion
+        io.wait_for_completion(c)?;
         let header = Arc::new(SpinLock::new(wal_header));
         let checksum = {
             let checksum = header.lock();
