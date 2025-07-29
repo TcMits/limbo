@@ -30,7 +30,7 @@ impl Builder {
         Self {
             path: path.to_string(),
             sync_url: sync_url.to_string(),
-            auth_token: auth_token,
+            auth_token,
             encryption_key: None,
             connector: None,
         }
@@ -48,12 +48,8 @@ impl Builder {
         }
     }
     pub async fn build(self) -> Result<Database> {
-        let path = PathBuf::try_from(self.path)
-            .map_err(|e| Error::DatabaseSyncError(format!("invalid synced database path: {e}")))?;
-        let connector = self
-            .connector
-            .map(Ok)
-            .unwrap_or_else(|| default_connector())?;
+        let path = PathBuf::from(self.path);
+        let connector = self.connector.map(Ok).unwrap_or_else(default_connector)?;
         let executor = TokioExecutor::new();
         let client = hyper_util::client::legacy::Builder::new(executor).build(connector);
         let sync_server = TursoSyncServer::new(
@@ -92,7 +88,7 @@ impl Database {
 pub fn default_connector() -> Result<HttpsConnector<HttpConnector>> {
     Ok(HttpsConnectorBuilder::new()
         .with_native_roots()
-        .map_err(|e| Error::DatabaseSyncError(format!("unable to configure CA roots: {}", e)))?
+        .map_err(|e| Error::DatabaseSyncError(format!("unable to configure CA roots: {e}")))?
         .https_or_http()
         .enable_http1()
         .build())

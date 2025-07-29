@@ -61,7 +61,7 @@ impl Filesystem for TokioFilesystem {
 
     async fn write_file(&self, file: &mut Self::File, buf: &[u8]) -> Result<()> {
         tracing::debug!("write buffer of size {} to file", buf.len());
-        file.write_all(&buf).await?;
+        file.write_all(buf).await?;
         Ok(())
     }
 

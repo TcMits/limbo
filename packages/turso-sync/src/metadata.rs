@@ -47,18 +47,17 @@ impl DatabaseMetadata {
         tracing::debug!("write metadata to {:?}: {:?}", path, self);
         let directory = path.parent().ok_or_else(|| {
             Error::MetadataError(format!(
-                "unable to get parent of the provided path: {:?}",
-                path
+                "unable to get parent of the provided path: {path:?}",
             ))
         })?;
         let filename = path
             .file_name()
             .and_then(|x| x.to_str())
-            .ok_or_else(|| Error::MetadataError(format!("unable to get filename: {:?}", path)))?;
+            .ok_or_else(|| Error::MetadataError(format!("unable to get filename: {path:?}")))?;
 
         let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
         let timestamp = timestamp.map_err(|e| {
-            Error::MetadataError(format!("failed to get current time for temp file: {}", e))
+            Error::MetadataError(format!("failed to get current time for temp file: {e}"))
         })?;
         let temp_name = format!("{}.tmp.{}", filename, timestamp.as_nanos());
         let temp_path = directory.join(temp_name);
@@ -72,7 +71,7 @@ impl DatabaseMetadata {
         }
         drop(temp_file);
         if result.is_ok() {
-            result = fs.rename_file(&temp_path, &path).await;
+            result = fs.rename_file(&temp_path, path).await;
         }
         if result.is_err() {
             let _ = fs.remove_file(&temp_path).await.inspect_err(|e| {

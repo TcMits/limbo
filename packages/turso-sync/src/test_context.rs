@@ -11,9 +11,10 @@ use tokio::sync::Mutex;
 
 use crate::{errors::Error, Result};
 
+type PinnedFuture = Pin<Box<dyn Future<Output = bool> + Send>>;
+
 pub struct FaultInjectionPlan {
-    pub is_fault:
-        Box<dyn Fn(String, String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>,
+    pub is_fault: Box<dyn Fn(String, String) -> PinnedFuture + Send + Sync>,
 }
 
 pub enum FaultInjectionStrategy {
@@ -55,7 +56,7 @@ impl FaultSession {
         }
 
         let plans = self.plans.as_mut().unwrap();
-        if plans.len() == 0 {
+        if plans.is_empty() {
             return None;
         }
 
@@ -100,7 +101,7 @@ impl TestContext {
                     let call = call.clone();
                     let count = count.clone();
                     Box::pin(async move {
-                        if &(name, bt) != &call {
+                        if (name, bt) != call {
                             return false;
                         }
                         let mut count = count.lock().await;
@@ -115,10 +116,9 @@ impl TestContext {
     pub async fn faulty_call(&self, name: &str) -> Result<()> {
         tracing::trace!("faulty_call: {}", name);
         tokio::task::yield_now().await;
-        match &*self.fault_injection.lock().await {
-            FaultInjectionStrategy::Disabled => return Ok(()),
-            _ => {}
-        };
+        if let FaultInjectionStrategy::Disabled = &*self.fault_injection.lock().await {
+            return Ok(());
+        }
         let bt = std::backtrace::Backtrace::force_capture().to_string();
         match &mut *self.fault_injection.lock().await {
             FaultInjectionStrategy::Record => {
@@ -128,7 +128,7 @@ impl TestContext {
             }
             FaultInjectionStrategy::Enabled { plan } => {
                 if plan.is_fault.as_ref()(name.to_string(), bt.clone()).await {
-                    Err(Error::DatabaseSyncError(format!("injected fault")))
+                    Err(Error::DatabaseSyncError("injected fault".to_string()))
                 } else {
                     Ok(())
                 }

@@ -33,7 +33,7 @@ pub struct TursoSyncServer {
 fn sync_server_error(status: http::StatusCode, body: impl Buf) -> Error {
     let mut body_str = String::new();
     if let Err(e) = body.reader().read_to_string(&mut body_str) {
-        Error::SyncServerError(status, format!("unable to read response body: {}", e))
+        Error::SyncServerError(status, format!("unable to read response body: {e}"))
     } else {
         Error::SyncServerError(status, body_str)
     }
@@ -57,7 +57,7 @@ impl Stream for HyperStream {
         let frame = frame.map_err(Error::HyperResponse)?;
         let frame = frame
             .into_data()
-            .map_err(|_| Error::DatabaseSyncError(format!("failed to read export chunk")))?;
+            .map_err(|_| Error::DatabaseSyncError("failed to read export chunk".to_string()))?;
         Ok(Some(frame))
     }
 }
@@ -67,7 +67,7 @@ impl TursoSyncServer {
         let auth_token_header = opts
             .auth_token
             .as_ref()
-            .map(|token| hyper::header::HeaderValue::from_str(&format!("Bearer {}", token)))
+            .map(|token| hyper::header::HeaderValue::from_str(&format!("Bearer {token}")))
             .transpose()
             .map_err(|e| Error::Http(e.into()))?;
         Ok(Self {
@@ -150,8 +150,8 @@ impl SyncServer for TursoSyncServer {
             return Err(sync_server_error(status_code, body));
         }
 
-        let status: DbSyncStatus;
-        status = serde_json::from_reader(body.reader()).map_err(Error::JsonDecode)?;
+        let status: DbSyncStatus =
+            serde_json::from_reader(body.reader()).map_err(Error::JsonDecode)?;
 
         match status.status.as_str() {
             "ok" => Ok(status),
@@ -185,8 +185,8 @@ impl SyncServer for TursoSyncServer {
         let (status, body) = self.send(http::Method::GET, &url, empty).await?;
         if status == http::StatusCode::BAD_REQUEST {
             let body = aggregate_body(body).await?;
-            let status: DbSyncStatus;
-            status = serde_json::from_reader(body.reader()).map_err(Error::JsonDecode)?;
+            let status: DbSyncStatus =
+                serde_json::from_reader(body.reader()).map_err(Error::JsonDecode)?;
             if status.status == "checkpoint_needed" {
                 return Err(Error::PullNeedCheckpoint(status));
             } else {

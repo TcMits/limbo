@@ -96,7 +96,7 @@ impl SyncServer for TestSyncServer {
 
         let state = self.state.lock().await;
         let Some(generation) = state.generations.get(&generation_id) else {
-            return Err(Error::DatabaseSyncError(format!("generation not found")));
+            return Err(Error::DatabaseSyncError("generation not found".to_string()));
         };
         Ok(TestStream::new(
             self.ctx.clone(),
@@ -110,7 +110,7 @@ impl SyncServer for TestSyncServer {
 
         let state = self.state.lock().await;
         let Some(generation) = state.generations.get(&generation_id) else {
-            return Err(Error::DatabaseSyncError(format!("generation not found")));
+            return Err(Error::DatabaseSyncError("generation not found".to_string()));
         };
         let mut data = Vec::new();
         for frame_no in start_frame..start_frame + self.opts.pull_batch_size {
@@ -120,7 +120,7 @@ impl SyncServer for TestSyncServer {
             };
             data.extend_from_slice(frame);
         }
-        if data.len() == 0 {
+        if data.is_empty() {
             let last_generation = state.generations.get(&state.generation).unwrap();
             return Err(Error::PullNeedCheckpoint(DbSyncStatus {
                 baton: None,
@@ -152,7 +152,9 @@ impl SyncServer for TestSyncServer {
         let mut session = {
             let mut state = self.state.lock().await;
             if state.generation != generation_id {
-                return Err(Error::DatabaseSyncError(format!("generation id mismatch")));
+                return Err(Error::DatabaseSyncError(
+                    "generation id mismatch".to_string(),
+                ));
             }
             let baton_str = baton.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let session = match state.sessions.get(&baton_str) {
@@ -174,9 +176,9 @@ impl SyncServer for TestSyncServer {
         let mut offset = 0;
         for frame_no in start_frame..end_frame {
             if offset + FRAME_SIZE > frames.len() {
-                return Err(Error::DatabaseSyncError(format!(
-                    "unexpected length of frames data"
-                )));
+                return Err(Error::DatabaseSyncError(
+                    "unexpected length of frames data".to_string(),
+                ));
             }
             if !session.in_txn {
                 session.conn.wal_insert_begin()?;
@@ -251,7 +253,7 @@ impl TestSyncServer {
             opts: Arc::new(opts),
             state: Arc::new(Mutex::new(TestSyncServerState {
                 generation: 1,
-                generations: generations,
+                generations,
                 sessions: HashMap::new(),
             })),
         })

@@ -73,9 +73,9 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         let path_str = path
             .to_str()
             .ok_or_else(|| Error::DatabaseSyncError(format!("invalid path: {path:?}")))?;
-        let draft_path = PathBuf::from(format!("{}-draft", path_str));
-        let synced_path = PathBuf::from(format!("{}-synced", path_str));
-        let meta_path = PathBuf::from(format!("{}-info", path_str));
+        let draft_path = PathBuf::from(format!("{path_str}-draft"));
+        let synced_path = PathBuf::from(format!("{path_str}-synced"));
+        let meta_path = PathBuf::from(format!("{path_str}-info"));
         let database_container = Arc::new(RwLock::new(ActiveDatabaseContainer {
             db: None,
             active_type: ActiveDatabase::Draft,
@@ -202,9 +202,9 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         let draft_exists = self.filesystem.exists_file(&self.draft_path).await?;
         let synced_exists = self.filesystem.exists_file(&self.synced_path).await?;
         if !draft_exists || !synced_exists {
-            return Err(Error::DatabaseSyncError(format!(
-                "Draft or Synced files doesn't exists, but metadata is"
-            )));
+            return Err(Error::DatabaseSyncError(
+                "Draft or Synced files doesn't exists, but metadata is".to_string(),
+            ));
         }
 
         // Synced db is active - we need to finish transfer from Synced to Draft then
@@ -302,10 +302,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         })
     }
 
-    async fn write_meta(
-        &self,
-        update: impl Fn(&mut DatabaseMetadata) -> (),
-    ) -> Result<DatabaseMetadata> {
+    async fn write_meta(&self, update: impl Fn(&mut DatabaseMetadata)) -> Result<DatabaseMetadata> {
         let mut meta = self.meta().clone();
         update(&mut meta);
         // todo: what happen if we will actually update the metadata on disk but fail and so in memory state will not be updated
@@ -358,7 +355,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
             };
             while let Some(mut chunk) = data.read_chunk().await? {
                 // chunk is arbitrary - aggregate groups of FRAME_SIZE bytes out from the chunks stream
-                while chunk.len() > 0 {
+                while !chunk.is_empty() {
                     let to_fill = FRAME_SIZE - buffer.len();
                     let prefix = chunk.split_to(to_fill.min(chunk.len()));
                     buffer.extend_from_slice(&prefix);
@@ -542,9 +539,9 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
 
         let draft_path_str = self.draft_path.to_str().unwrap_or("");
         let clean_path_str = self.synced_path.to_str().unwrap_or("");
-        let draft_wal = PathBuf::from(format!("{}-wal", draft_path_str));
-        let clean_wal = PathBuf::from(format!("{}-wal", clean_path_str));
-        let draft_shm = PathBuf::from(format!("{}-shm", draft_path_str));
+        let draft_wal = PathBuf::from(format!("{draft_path_str}-wal"));
+        let clean_wal = PathBuf::from(format!("{clean_path_str}-wal"));
+        let draft_shm = PathBuf::from(format!("{draft_path_str}-shm"));
         self.filesystem
             .copy_file(&self.synced_path, &self.draft_path)
             .await?;
@@ -568,7 +565,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         }
 
         let clean_path_str = self.synced_path.to_str().unwrap_or("");
-        let clean_wal_path = PathBuf::from(format!("{}-wal", clean_path_str));
+        let clean_wal_path = PathBuf::from(format!("{clean_path_str}-wal"));
         let wal_size = WAL_HEADER + FRAME_SIZE * self.meta().synced_frame_no;
         tracing::debug!(
             "reset Synced DB WAL to the size of {} frames",
@@ -617,7 +614,7 @@ mod tests {
         sql: &str,
     ) -> Result<Vec<Vec<Value>>> {
         let mut rows = db.query(sql, ()).await?;
-        Ok(convert_rows(&mut rows).await?)
+        convert_rows(&mut rows).await
     }
 
     #[test]
@@ -807,7 +804,7 @@ mod tests {
                 let db = DatabaseInner::new(
                     TestFilesystem::new(ctx.clone()),
                     server.clone(),
-                    &dir.path().join(&format!("local-{}.db", i)),
+                    &dir.path().join(format!("local-{i}.db")),
                 )
                 .await
                 .unwrap();
@@ -889,7 +886,7 @@ mod tests {
                     let server = server.clone();
                     let sync_lock = sync_lock.clone();
                     async move {
-                        let local_path = dir.join(format!("local-{}.db", i));
+                        let local_path = dir.join(format!("local-{i}.db"));
                         let fs = TestFilesystem::new(ctx.clone());
                         let mut db = DatabaseInner::new(fs, server.clone(), &local_path)
                             .await
@@ -936,7 +933,7 @@ mod tests {
             let mut session = ctx.fault_session();
             let mut it = 0;
             while let Some(strategy) = session.next().await {
-                let local_path = dir.path().join(format!("local-{}.db", it));
+                let local_path = dir.path().join(format!("local-{it}.db"));
                 it += 1;
 
                 let fs = TestFilesystem::new(ctx.clone());
@@ -992,14 +989,14 @@ mod tests {
             let mut session = ctx.fault_session();
             let mut it = 0;
             while let Some(strategy) = session.next().await {
-                let server_path = dir.path().join(format!("server-{}.db", it));
+                let server_path = dir.path().join(format!("server-{it}.db"));
                 let server = TestSyncServer::new(ctx.clone(), &server_path, opts.clone())
                     .await
                     .unwrap();
 
                 server.execute("CREATE TABLE t(x)", ()).await.unwrap();
 
-                let local_path = dir.path().join(format!("local-{}.db", it));
+                let local_path = dir.path().join(format!("local-{it}.db"));
                 it += 1;
 
                 let fs = TestFilesystem::new(ctx.clone());
@@ -1053,7 +1050,7 @@ mod tests {
             let mut session = ctx.fault_session();
             let mut it = 0;
             while let Some(strategy) = session.next().await {
-                let server_path = dir.path().join(format!("server-{}.db", it));
+                let server_path = dir.path().join(format!("server-{it}.db"));
                 let server = TestSyncServer::new(ctx.clone(), &server_path, opts.clone())
                     .await
                     .unwrap();
@@ -1068,7 +1065,7 @@ mod tests {
                     .await
                     .unwrap();
 
-                let local_path = dir.path().join(format!("local-{}.db", it));
+                let local_path = dir.path().join(format!("local-{it}.db"));
                 it += 1;
 
                 let fs = TestFilesystem::new(ctx.clone());
