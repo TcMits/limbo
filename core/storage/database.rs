@@ -23,7 +23,7 @@ pub trait DatabaseStorage: Send + Sync {
         buffers: Vec<Arc<RefCell<Buffer>>>,
         c: Completion,
     ) -> Result<Completion>;
-    fn sync(&self, c: Completion) -> Result<()>;
+    fn sync(&self, c: Completion) -> Result<Completion>;
     fn size(&self) -> Result<u64>;
     fn truncate(&self, len: usize, c: Completion) -> Result<Completion>;
 }
@@ -74,7 +74,7 @@ impl DatabaseStorage for DatabaseFile {
         page_size: usize,
         buffers: Vec<Arc<RefCell<Buffer>>>,
         c: Completion,
-    ) -> Result<()> {
+    ) -> Result<Completion> {
         assert!(page_idx > 0);
         assert!(page_size >= 512);
         assert!(page_size <= 65536);
@@ -149,7 +149,7 @@ impl DatabaseStorage for FileMemoryStorage {
         page_size: usize,
         buffer: Vec<Arc<RefCell<Buffer>>>,
         c: Completion,
-    ) -> Result<()> {
+    ) -> Result<Completion> {
         assert!(page_idx > 0);
         assert!(page_size >= 512);
         assert!(page_size <= 65536);

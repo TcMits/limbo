@@ -62,7 +62,7 @@ use crate::storage::wal::{BatchItem, PendingFlush};
 use crate::types::{RawSlice, RefValue, SerialType, SerialTypeKind, TextRef, TextSubtype};
 use crate::{turso_assert, File, Result, WalFileShared};
 use std::cell::{RefCell, UnsafeCell};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -854,52 +854,89 @@ pub fn begin_write_btree_page(
 }
 
 #[instrument(skip_all, level = Level::DEBUG)]
-pub fn write_pages_vectored(pager: &Pager, batch: &[BatchItem]) -> Result<PendingFlush> {
+pub fn write_pages_vectored(
+    pager: &Pager,
+    batch: BTreeMap<usize, BatchItem>,
+) -> Result<PendingFlush> {
     if batch.is_empty() {
         return Ok(PendingFlush::default());
     }
-    let mut run = batch.to_vec();
-    run.sort_by_key(|b| b.id);
+
+    // batch item array is already sorted by id, so we just need to find contiguous ranges of page_id's
+    // to submit as `writev`/write_pages calls.
 
     let page_sz = pager.page_size.get().unwrap_or(DEFAULT_PAGE_SIZE) as usize;
-    let mut all_ids = Vec::with_capacity(run.len());
-    // count runs
-    let mut starts = Vec::with_capacity(5); // arbitrary initialization
-    let mut start = 0;
-    while start < run.len() {
-        let mut end = start + 1;
-        while end < run.len() && run[end].id == run[end - 1].id + 1 {
-            end += 1;
+    let mut all_ids = Vec::with_capacity(batch.len());
+
+    // Count expected number of runs to create the atomic counter we need to track each batch
+    let mut run_count = 0;
+    let mut prev_id = None;
+    for &id in batch.keys() {
+        if let Some(prev) = prev_id {
+            if id != prev + 1 {
+                run_count += 1;
+            }
+        } else {
+            run_count = 1; // First run
         }
-        starts.push((start, end));
-        start = end;
+        prev_id = Some(id);
     }
-    let runs = starts.len();
-    let runs_left = Arc::new(AtomicUsize::new(runs));
+
+    // Create the atomic counters
+    let runs_left = Arc::new(AtomicUsize::new(run_count));
     let done = Arc::new(AtomicBool::new(false));
-    for (start, end) in starts {
-        let first_id = run[start].id;
-        let bufs: Vec<_> = run[start..end].iter().map(|b| b.buf.clone()).collect();
-        all_ids.extend(run[start..end].iter().map(|b| b.id));
+    let mut run_start_id = None;
+    // we know how many runs, but we don't know how many buffers per run, so we can only give an
+    // estimate of the capacity
+    const EST_BUFF_CAPACITY: usize = 32;
+    let mut run_bufs = Vec::with_capacity(EST_BUFF_CAPACITY);
+    let mut run_ids = Vec::with_capacity(EST_BUFF_CAPACITY);
 
-        let runs_left_cl = runs_left.clone();
-        let done_cl = done.clone();
+    // Iterate through the batch, submitting each run as soon as it ends
+    let mut iter = batch.iter().peekable();
+    while let Some((&id, item)) = iter.next() {
+        if run_start_id.is_none() {
+            run_start_id = Some(id);
+        }
 
-        let c = Completion::new_write(move |_| {
-            if runs_left_cl.fetch_sub(1, Ordering::AcqRel) == 1 {
-                done_cl.store(true, Ordering::Release);
+        run_bufs.push(item.buf.clone());
+        run_ids.push(id);
+
+        // Check if this is the end of a run, either the next key is not consecutive or this is the last entry
+        let is_end_of_run = match iter.peek() {
+            Some((&next_id, _)) => next_id != id + 1,
+            None => true, // Last item is always end of a run
+        };
+
+        if is_end_of_run {
+            // Submit this run immediately
+            let start_id = run_start_id.unwrap();
+            let runs_left_cl = runs_left.clone();
+            let done_cl = done.clone();
+            let c = Completion::new_write(move |_| {
+                if runs_left_cl.fetch_sub(1, Ordering::AcqRel) == 1 {
+                    done_cl.store(true, Ordering::Release);
+                }
+            });
+
+            // Submit and decrement the runs_left counter on error
+            if let Err(e) = pager.db_file.write_pages(start_id, page_sz, run_bufs, c) {
+                if runs_left.fetch_sub(1, Ordering::AcqRel) == 1 {
+                    done.store(true, Ordering::Release);
+                }
+                return Err(e);
             }
-        });
-        // submit, roll back on error
-        if let Err(e) = pager.db_file.write_pages(first_id, page_sz, bufs, c) {
-            if runs_left.fetch_sub(1, Ordering::AcqRel) == 1 {
-                done.store(true, Ordering::Release);
-            }
-            return Err(e);
+            // Add IDs to the all_ids list and prepare for the next run
+            all_ids.extend(run_ids);
+            run_start_id = None;
+            // .clear() will cause borrowing issue, unfortunately we have to reassign
+            run_bufs = Vec::with_capacity(EST_BUFF_CAPACITY);
+            run_ids = Vec::with_capacity(EST_BUFF_CAPACITY);
         }
     }
+
     tracing::debug!(
-        "write_pages_vectored: {} pages to write, runs: {runs}",
+        "write_pages_vectored: {} pages to write, runs: {run_count}",
         all_ids.len()
     );
 

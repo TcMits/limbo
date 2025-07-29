@@ -1304,11 +1304,10 @@ impl Pager {
         }
 
         let write_counter = Rc::new(RefCell::new(0));
-        let checkpoint_result = self.io.block(|| {
+        let mut checkpoint_result = self.io.block(|| {
             self.wal
                 .borrow_mut()
-                .checkpoint(self, counter.clone(), mode)
-                .map_err(|err| panic!("error while clearing cache {err}"))
+                .checkpoint(self, write_counter.clone(), mode)
         })?;
 
         if checkpoint_result.everything_backfilled()

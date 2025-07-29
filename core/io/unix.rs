@@ -411,7 +411,7 @@ enum CompletionCallback {
     ),
     Writev(
         Arc<Mutex<std::fs::File>>,
-        Arc<Completion>,
+        Completion,
         Vec<Arc<RefCell<crate::Buffer>>>,
         usize, // absolute file offset
         usize, // buf index
@@ -537,17 +537,12 @@ impl File for UnixFile<'_> {
     }
 
     #[instrument(err, skip_all, level = Level::TRACE)]
-<<<<<<< HEAD
-    fn sync(&self, c: Completion) -> Result<Completion> {
-||||||| parent of 7f48531b (batch backfilling pages when checkpointing)
-    fn sync(&self, c: Arc<Completion>) -> Result<Arc<Completion>> {
-=======
     fn pwritev(
         &self,
         pos: usize,
         buffers: Vec<Arc<RefCell<crate::Buffer>>>,
-        c: Arc<Completion>,
-    ) -> Result<Arc<Completion>> {
+        c: Completion,
+    ) -> Result<Completion> {
         let file = self
             .file
             .lock()
@@ -588,8 +583,7 @@ impl File for UnixFile<'_> {
     }
 
     #[instrument(err, skip_all, level = Level::TRACE)]
-    fn sync(&self, c: Arc<Completion>) -> Result<Arc<Completion>> {
->>>>>>> 7f48531b (batch backfilling pages when checkpointing)
+    fn sync(&self, c: Completion) -> Result<Completion> {
         let file = self.file.lock().unwrap();
         let result = fs::fsync(file.as_fd());
         match result {

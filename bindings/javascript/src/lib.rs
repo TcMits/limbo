@@ -724,10 +724,10 @@ impl turso_core::DatabaseStorage for DatabaseFile {
         page_size: usize,
         buffers: Vec<Arc<RefCell<turso_core::Buffer>>>,
         c: turso_core::Completion,
-    ) -> turso_core::Result<()> {
-        let pos = (page_idx - 1) * page_size;
-        self.file.pwritev(pos, buffers, c.into())?;
-        Ok(())
+    ) -> turso_core::Result<turso_core::Completion> {
+        let pos = page_idx.saturating_sub(1) * page_size;
+        let c = self.file.pwritev(pos, buffers, c)?;
+        Ok(c)
     }
 
     fn sync(&self, c: turso_core::Completion) -> turso_core::Result<turso_core::Completion> {

@@ -65,15 +65,16 @@ struct IovecPool {
 
 impl IovecPool {
     fn new() -> Self {
-        let mut pool = Vec::with_capacity(IOVEC_POOL_SIZE);
-        for _ in 0..IOVEC_POOL_SIZE {
-            pool.push(Box::new(
-                [libc::iovec {
-                    iov_base: std::ptr::null_mut(),
-                    iov_len: 0,
-                }; MAX_IOVEC_ENTRIES],
-            ));
-        }
+        let pool = (0..IOVEC_POOL_SIZE)
+            .map(|_| {
+                Box::new(
+                    [libc::iovec {
+                        iov_base: std::ptr::null_mut(),
+                        iov_len: 0,
+                    }; MAX_IOVEC_ENTRIES],
+                )
+            })
+            .collect();
         Self { pool }
     }
 
@@ -144,16 +145,18 @@ enum Fd {
 }
 
 impl Fd {
-    fn as_raw_fd(&self) -> i32 {
-        match self {
-            Fd::RawFd(fd) => *fd,
-            _ => unreachable!("only to be called on RawFd variant"),
-        }
-    }
+    /// to match the behavior of the File, we need to implement the same methods
     fn id(&self) -> Option<u32> {
         match self {
             Fd::Fixed(id) => Some(*id),
             Fd::RawFd(_) => None,
+        }
+    }
+    /// ONLY to be called by the macro, in the case where id() is None
+    fn as_raw_fd(&self) -> i32 {
+        match self {
+            Fd::RawFd(fd) => *fd,
+            _ => panic!("Cannot call as_raw_fd on a Fixed Fd"),
         }
     }
 }
@@ -181,10 +184,10 @@ struct WritevState {
 
 impl WritevState {
     fn new(file: &UringFile, pos: usize, bufs: Vec<Arc<RefCell<crate::Buffer>>>) -> Self {
-        let file_id = match file.id() {
-            Some(id) => Fd::Fixed(id),
-            None => Fd::RawFd(file.as_raw_fd()),
-        };
+        let file_id = file
+            .id()
+            .map(Fd::Fixed)
+            .unwrap_or_else(|| Fd::RawFd(file.as_raw_fd()));
         let total_len = bufs.iter().map(|b| b.borrow().len()).sum();
         Self {
             file_id,
@@ -293,18 +296,15 @@ impl WrappedIOUring {
     /// Submit or resubmit a writev operation
     fn submit_writev(&mut self, key: u64, mut st: WritevState) {
         st.free_last_iov(&mut self.iov_pool);
-        let mut iov_allocation = match self.iov_pool.acquire() {
-            Some(alloc) => alloc,
-            None => {
-                // Fallback: allocate a new one if pool is exhausted
-                Box::new(
-                    [libc::iovec {
-                        iov_base: std::ptr::null_mut(),
-                        iov_len: 0,
-                    }; MAX_IOVEC_ENTRIES],
-                )
-            }
-        };
+        let mut iov_allocation = self.iov_pool.acquire().unwrap_or_else(|| {
+            // Fallback: allocate a new one if pool is exhausted
+            Box::new(
+                [libc::iovec {
+                    iov_base: std::ptr::null_mut(),
+                    iov_len: 0,
+                }; MAX_IOVEC_ENTRIES],
+            )
+        });
         let mut iov_count = 0;
         for (idx, buffer) in st
             .bufs
@@ -346,52 +346,39 @@ impl WrappedIOUring {
         self.submit_entry(&entry);
     }
 
-    fn handle_writev_completion(&mut self, mut st: WritevState, user_data: u64, result: i32) {
+    fn handle_writev_completion(&mut self, mut state: WritevState, user_data: u64, result: i32) {
         if result < 0 {
-            tracing::error!(
-                "writev operation failed for user_data {}: {}",
-                user_data,
-                std::io::Error::from_raw_os_error(result)
-            );
-            // error: free iov allocation and call completion with error code
-            st.free_last_iov(&mut self.iov_pool);
+            let err = std::io::Error::from_raw_os_error(result);
+            tracing::error!("writev failed (user_data: {}): {}", user_data, err);
+            state.free_last_iov(&mut self.iov_pool);
             completion_from_key(user_data).complete(result);
-        } else {
-            let written = result as usize;
-            st.advance(written);
-            if st.remaining() == 0 {
+            return;
+        }
+
+        let written = result as usize;
+        state.advance(written);
+        match state.remaining() {
+            0 => {
                 tracing::info!(
                     "writev operation completed: wrote {} bytes",
-                    st.total_written
+                    state.total_written
                 );
                 // write complete, return iovec to pool
-                st.free_last_iov(&mut self.iov_pool);
-                completion_from_key(user_data).complete(st.total_written as i32);
-            } else {
+                state.free_last_iov(&mut self.iov_pool);
+                completion_from_key(user_data).complete(state.total_written as i32);
+            }
+            remaining => {
                 tracing::trace!(
                     "resubmitting writev operation for user_data {}: wrote {} bytes, remaining {}",
                     user_data,
                     written,
-                    st.remaining()
+                    remaining
                 );
                 // partial write, submit next
-                self.submit_writev(user_data, st);
+                self.submit_writev(user_data, state);
             }
         }
     }
-}
-
-#[inline(always)]
-/// use the callback pointer as the user_data for the operation as is
-/// common practice for io_uring to prevent more indirection
-fn get_key(c: Arc<Completion>) -> u64 {
-    Arc::into_raw(c) as u64
-}
-
-#[inline(always)]
-/// convert the user_data back to an Arc<Completion> pointer
-fn completion_from_key(key: u64) -> Arc<Completion> {
-    unsafe { Arc::from_raw(key as *const Completion) }
 }
 
 impl IO for UringIO {
@@ -613,8 +600,8 @@ impl File for UringFile {
         &self,
         pos: usize,
         bufs: Vec<Arc<RefCell<crate::Buffer>>>,
-        c: Arc<Completion>,
-    ) -> Result<Arc<Completion>> {
+        c: Completion,
+    ) -> Result<Completion> {
         // for a single buffer use pwrite directly
         if bufs.len().eq(&1) {
             return self.pwrite(pos, bufs[0].clone(), c.clone());
