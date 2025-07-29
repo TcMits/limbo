@@ -88,6 +88,12 @@ You can also build and run the latest development version with:
 cargo run
 ```
 
+If you like docker, we got you covered. Simply run this in the root folder:
+
+```bash
+docker build -f Dockerfile.cli -t turso-cli . && docker run -it turso-cli
+```
+
 ### MCP Server Mode
 
 The Turso CLI includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that allows AI assistants to interact with your databases. Start the MCP server with:
