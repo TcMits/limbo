@@ -334,6 +334,22 @@ pub fn vector_concat(v1: &Vector, v2: &Vector) -> Result<Vector> {
     })
 }
 
+pub fn subvector(vector: &Vector, start_idx: usize, length: usize) -> Result<Vector> {
+    if start_idx + length > vector.data.len() {
+        return Err(LimboError::ConversionError(
+            "Subvector range out of bounds".into(),
+        ));
+    }
+
+    let data = vector.data[start_idx..start_idx + length].to_vec();
+
+    Ok(Vector {
+        vector_type: vector.vector_type.clone(),
+        dims: length,
+        data,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
