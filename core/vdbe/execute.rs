@@ -6,7 +6,6 @@ use crate::storage::database::DatabaseFile;
 use crate::storage::page_cache::DumbLruPageCache;
 use crate::storage::pager::{AtomicDbState, CreateBTreeFlags, DbState};
 use crate::storage::sqlite3_ondisk::read_varint;
-use crate::storage::wal::DummyWAL;
 use crate::translate::collate::CollationSeq;
 use crate::types::{
     compare_immutable, compare_records_generic, Extendable, ImmutableRecord, RawSlice, SeekResult,
@@ -28,7 +27,6 @@ use crate::{
         },
         printf::exec_printf,
     },
-    IO,
 };
 use std::env::temp_dir;
 use std::ops::DerefMut;
@@ -6388,14 +6386,17 @@ pub fn op_open_ephemeral(
             let file = io.open_file(rand_path_str, OpenFlags::Create, false)?;
             let db_file = Arc::new(DatabaseFile::new(file));
 
-            let buffer_pool = Arc::new(BufferPool::new(Some(header_accessor::get_page_size(
-                &conn.pager.borrow(),
-            )? as usize)));
+            let page_size = pager
+                .io
+                .block(|| pager.with_header(|header| header.page_size))?
+                .get();
+
+            let buffer_pool = Arc::new(BufferPool::new(Some(page_size as usize)));
             let page_cache = Arc::new(RwLock::new(DumbLruPageCache::default()));
 
             let pager = Rc::new(Pager::new(
                 db_file,
-                Rc::new(RefCell::new(DummyWAL)),
+                None,
                 io,
                 page_cache,
                 buffer_pool.clone(),

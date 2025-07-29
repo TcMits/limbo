@@ -318,7 +318,8 @@ pub struct Pager {
     /// Source of the database pages.
     pub db_file: Arc<dyn DatabaseStorage>,
     /// The write-ahead log (WAL) for the database.
-    pub(crate) wal: Rc<RefCell<dyn Wal>>,
+    /// in-memory databases, ephemeral tables and ephemeral indexes do not have a WAL.
+    pub(crate) wal: Option<Rc<RefCell<dyn Wal>>>,
     /// A page cache for the database.
     page_cache: Arc<RwLock<DumbLruPageCache>>,
     /// Buffer pool for temporary data storage.
@@ -410,7 +411,7 @@ enum FreePageState {
 impl Pager {
     pub fn new(
         db_file: Arc<dyn DatabaseStorage>,
-        wal: Rc<RefCell<dyn Wal>>,
+        wal: Option<Rc<RefCell<dyn Wal>>>,
         io: Arc<dyn crate::io::IO>,
         page_cache: Arc<RwLock<DumbLruPageCache>>,
         buffer_pool: Arc<BufferPool>,
@@ -456,7 +457,7 @@ impl Pager {
     }
 
     pub fn set_wal(&mut self, wal: Rc<RefCell<dyn Wal>>) {
-        self.wal = wal;
+        self.wal = Some(wal);
     }
 
     pub fn get_auto_vacuum_mode(&self) -> AutoVacuumMode {
@@ -763,7 +764,10 @@ impl Pager {
     #[inline(always)]
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn begin_read_tx(&self) -> Result<LimboResult> {
-        let (result, changed) = self.wal.borrow_mut().begin_read_tx()?;
+        let Some(wal) = self.wal.as_ref() else {
+            return Ok(LimboResult::Ok);
+        };
+        let (result, changed) = wal.borrow_mut().begin_read_tx()?;
         if changed {
             // Someone else changed the database -> assume our page cache is invalid (this is default SQLite behavior, we can probably do better with more granular invalidation)
             self.clear_page_cache();
@@ -802,7 +806,10 @@ impl Pager {
             IOResult::Done(_) => {}
             IOResult::IO => return Ok(IOResult::IO),
         }
-        Ok(IOResult::Done(self.wal.borrow_mut().begin_write_tx()?))
+        let Some(wal) = self.wal.as_ref() else {
+            return Ok(IOResult::Done(LimboResult::Ok));
+        };
+        Ok(IOResult::Done(wal.borrow_mut().begin_write_tx()?))
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
@@ -814,15 +821,19 @@ impl Pager {
         wal_checkpoint_disabled: bool,
     ) -> Result<IOResult<PagerCommitResult>> {
         tracing::trace!("end_tx(rollback={})", rollback);
+        let Some(wal) = self.wal.as_ref() else {
+            // TODO: Unsure what the semantics of "end_tx" is for in-memory databases, ephemeral tables and ephemeral indexes.
+            return Ok(IOResult::Done(PagerCommitResult::Rollback));
+        };
         if rollback {
             let is_write = matches!(
                 connection.transaction_state.get(),
                 TransactionState::Write { .. }
             );
             if is_write {
-                self.wal.borrow().end_write_tx();
+                wal.borrow().end_write_tx();
             }
-            self.wal.borrow().end_read_tx();
+            wal.borrow().end_read_tx();
             self.rollback(schema_did_change, connection, is_write)?;
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
         }
@@ -830,8 +841,8 @@ impl Pager {
         match commit_status {
             IOResult::IO => Ok(IOResult::IO),
             IOResult::Done(_) => {
-                self.wal.borrow().end_write_tx();
-                self.wal.borrow().end_read_tx();
+                wal.borrow().end_write_tx();
+                wal.borrow().end_read_tx();
 
                 if schema_did_change {
                     let schema = connection.schema.borrow().clone();
@@ -844,7 +855,10 @@ impl Pager {
 
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn end_read_tx(&self) -> Result<()> {
-        self.wal.borrow().end_read_tx();
+        let Some(wal) = self.wal.as_ref() else {
+            return Ok(());
+        };
+        wal.borrow().end_read_tx();
         Ok(())
     }
 
@@ -862,35 +876,46 @@ impl Pager {
         let page = Arc::new(Page::new(page_idx));
         page.set_locked();
 
-        if let Some(frame_id) = self.wal.borrow().find_frame(page_idx as u64)? {
-            let c =
-                self.wal
-                    .borrow()
-                    .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
-            page.set_uptodate();
+        let Some(wal) = self.wal.as_ref() else {
+            let c = self.begin_read_disk_page(page_idx, page.clone())?;
+            self.cache_insert(page_idx, page.clone(), &mut page_cache)?;
+            return Ok((page, c));
+        };
+
+        if let Some(frame_id) = wal.borrow().find_frame(page_idx as u64)? {
+            let c = wal
+                .borrow()
+                .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
+            {
+                page.set_uptodate();
+            }
             // TODO(pere) should probably first insert to page cache, and if successful,
             // read frame or page
-            match page_cache.insert(page_key, page.clone()) {
-                Ok(_) => {}
-                Err(CacheError::Full) => return Err(LimboError::CacheFull),
-                Err(CacheError::KeyExists) => {
-                    unreachable!("Page should not exist in cache after get() miss")
-                }
-                Err(e) => {
-                    return Err(LimboError::InternalError(format!(
-                        "Failed to insert page into cache: {e:?}"
-                    )))
-                }
-            }
+            self.cache_insert(page_idx, page.clone(), &mut page_cache)?;
             return Ok((page, c));
         }
 
-        let c = sqlite3_ondisk::begin_read_page(
+        let c = self.begin_read_disk_page(page_idx, page.clone())?;
+        self.cache_insert(page_idx, page.clone(), &mut page_cache)?;
+        Ok((page, c))
+    }
+
+    fn begin_read_disk_page(&self, page_idx: usize, page: PageRef) -> Result<Completion> {
+        sqlite3_ondisk::begin_read_page(
             self.db_file.clone(),
             self.buffer_pool.clone(),
-            page.clone(),
+            page,
             page_idx,
-        )?;
+        )
+    }
+
+    fn cache_insert(
+        &self,
+        page_idx: usize,
+        page: PageRef,
+        page_cache: &mut DumbLruPageCache,
+    ) -> Result<()> {
+        let page_key = PageCacheKey::new(page_idx);
         match page_cache.insert(page_key, page.clone()) {
             Ok(_) => {}
             Err(CacheError::Full) => return Err(LimboError::CacheFull),
@@ -903,7 +928,7 @@ impl Pager {
                 )))
             }
         }
-        Ok((page, c))
+        Ok(())
     }
 
     // Get a page from the cache, if it exists.
@@ -928,13 +953,25 @@ impl Pager {
     }
 
     pub fn wal_frame_count(&self) -> Result<u64> {
-        Ok(self.wal.borrow().get_max_frame_in_wal())
+        let Some(wal) = self.wal.as_ref() else {
+            return Err(LimboError::InternalError(
+                "wal_frame_count() called on database without WAL".to_string(),
+            ));
+        };
+        Ok(wal.borrow().get_max_frame_in_wal())
     }
 
     /// Flush all dirty pages to disk.
     /// Unlike commit_dirty_pages, this function does not commit, checkpoint now sync the WAL/Database.
     #[instrument(skip_all, level = Level::INFO)]
     pub fn cacheflush(&self) -> Result<IOResult<()>> {
+        let Some(wal) = self.wal.as_ref() else {
+            // TODO: when ephemeral table spills to disk, it should cacheflush pages directly to the temporary database file.
+            // This handling is not yet implemented, but it should be when spilling is implemented.
+            return Err(LimboError::InternalError(
+                "cacheflush() called on database without WAL".to_string(),
+            ));
+        };
         let state = self.flush_info.borrow().state;
         trace!(?state);
         match state {
@@ -973,7 +1010,7 @@ impl Pager {
                     page
                 };
 
-                let _c = self.wal.borrow_mut().append_frame(
+                let _c = wal.borrow_mut().append_frame(
                     page.clone(),
                     0,
                     self.flush_info.borrow().in_flight_writes.clone(),
@@ -1032,6 +1069,11 @@ impl Pager {
         &self,
         wal_checkpoint_disabled: bool,
     ) -> Result<IOResult<PagerCommitResult>> {
+        let Some(wal) = self.wal.as_ref() else {
+            return Err(LimboError::InternalError(
+                "commit_dirty_pages() called on database without WAL".to_string(),
+            ));
+        };
         let mut checkpoint_result = CheckpointResult::default();
         let res = loop {
             let state = self.commit_info.borrow().state;
@@ -1088,7 +1130,7 @@ impl Pager {
                             0
                         }
                     };
-                    let _c = self.wal.borrow_mut().append_frame(
+                    let _c = wal.borrow_mut().append_frame(
                         page.clone(),
                         db_size,
                         self.commit_info.borrow().in_flight_writes.clone(),
@@ -1142,9 +1184,9 @@ impl Pager {
                     }
                 }
                 CommitState::SyncWal => {
-                    return_if_io!(self.wal.borrow_mut().sync());
+                    return_if_io!(wal.borrow_mut().sync());
 
-                    if wal_checkpoint_disabled || !self.wal.borrow().should_checkpoint() {
+                    if wal_checkpoint_disabled || !wal.borrow().should_checkpoint() {
                         self.commit_info.borrow_mut().state = CommitState::Start;
                         break PagerCommitResult::WalWritten;
                     }
@@ -1170,19 +1212,29 @@ impl Pager {
             }
         };
         // We should only signal that we finished appenind frames after wal sync to avoid inconsistencies when sync fails
-        self.wal.borrow_mut().finish_append_frames_commit()?;
+        wal.borrow_mut().finish_append_frames_commit()?;
         Ok(IOResult::Done(res))
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn wal_get_frame(&self, frame_no: u32, frame: &mut [u8]) -> Result<Completion> {
-        let wal = self.wal.borrow();
+        let Some(wal) = self.wal.as_ref() else {
+            return Err(LimboError::InternalError(
+                "wal_get_frame() called on database without WAL".to_string(),
+            ));
+        };
+        let wal = wal.borrow();
         wal.read_frame_raw(frame_no.into(), frame)
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalInsertInfo> {
-        let mut wal = self.wal.borrow_mut();
+        let Some(wal) = self.wal.as_ref() else {
+            return Err(LimboError::InternalError(
+                "wal_insert_frame() called on database without WAL".to_string(),
+            ));
+        };
+        let mut wal = wal.borrow_mut();
         let (header, raw_page) = parse_wal_frame_header(frame);
         wal.write_frame_raw(
             self.buffer_pool.clone(),
@@ -1217,6 +1269,11 @@ impl Pager {
 
     #[instrument(skip_all, level = Level::DEBUG, name = "pager_checkpoint",)]
     pub fn checkpoint(&self) -> Result<IOResult<CheckpointResult>> {
+        let Some(wal) = self.wal.as_ref() else {
+            return Err(LimboError::InternalError(
+                "checkpoint() called on database without WAL".to_string(),
+            ));
+        };
         let mut checkpoint_result = CheckpointResult::default();
         loop {
             let state = *self.checkpoint_state.borrow();
@@ -1224,11 +1281,10 @@ impl Pager {
             match state {
                 CheckpointState::Checkpoint => {
                     let in_flight = self.checkpoint_inflight.clone();
-                    match self.wal.borrow_mut().checkpoint(
-                        self,
-                        in_flight,
-                        CheckpointMode::Passive,
-                    )? {
+                    match wal
+                        .borrow_mut()
+                        .checkpoint(self, in_flight, CheckpointMode::Passive)?
+                    {
                         IOResult::IO => return Ok(IOResult::IO),
                         IOResult::Done(res) => {
                             checkpoint_result = res;
@@ -1277,7 +1333,12 @@ impl Pager {
     pub fn checkpoint_shutdown(&self, wal_checkpoint_disabled: bool) -> Result<()> {
         let mut _attempts = 0;
         {
-            let mut wal = self.wal.borrow_mut();
+            let Some(wal) = self.wal.as_ref() else {
+                return Err(LimboError::InternalError(
+                    "checkpoint_shutdown() called on database without WAL".to_string(),
+                ));
+            };
+            let mut wal = wal.borrow_mut();
             // fsync the wal syncronously before beginning checkpoint
             while let Ok(IOResult::IO) = wal.sync() {
                 // TODO: for now forget about timeouts as they fail regularly in SIM
@@ -1302,14 +1363,18 @@ impl Pager {
         wal_checkpoint_disabled: bool,
         mode: CheckpointMode,
     ) -> Result<CheckpointResult> {
+        let Some(wal) = self.wal.as_ref() else {
+            return Err(LimboError::InternalError(
+                "wal_checkpoint() called on database without WAL".to_string(),
+            ));
+        };
         if wal_checkpoint_disabled {
             return Ok(CheckpointResult::default());
         }
 
         let write_counter = Rc::new(RefCell::new(0));
         let mut checkpoint_result = self.io.block(|| {
-            self.wal
-                .borrow_mut()
+            wal.borrow_mut()
                 .checkpoint(self, write_counter.clone(), mode)
         })?;
 
@@ -1823,7 +1888,9 @@ impl Pager {
             connection.schema.replace(connection._db.clone_schema()?);
         }
         if is_write {
-            self.wal.borrow_mut().rollback()?;
+            if let Some(wal) = self.wal.as_ref() {
+                wal.borrow_mut().rollback()?;
+            }
         }
 
         Ok(())
@@ -2166,7 +2233,7 @@ mod ptrmap_tests {
 
         let pager = Pager::new(
             db_file,
-            wal,
+            Some(wal),
             io,
             page_cache,
             buffer_pool,

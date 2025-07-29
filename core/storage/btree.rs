@@ -8323,7 +8323,7 @@ mod tests {
         let pager = Rc::new(
             Pager::new(
                 db_file,
-                wal,
+                Some(wal),
                 io,
                 Arc::new(parking_lot::RwLock::new(DumbLruPageCache::new(10))),
                 buffer_pool,

@@ -41,7 +41,6 @@ mod numeric;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use crate::storage::wal::DummyWAL;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::pragma::TURSO_CDC_DEFAULT_TABLE_NAME;
 #[cfg(feature = "fs")]
@@ -397,7 +396,7 @@ impl Database {
             )));
             let pager = Pager::new(
                 self.db_file.clone(),
-                wal,
+                Some(wal),
                 self.io.clone(),
                 Arc::new(RwLock::new(DumbLruPageCache::default())),
                 buffer_pool.clone(),
@@ -409,12 +408,10 @@ impl Database {
 
         let buffer_pool = Arc::new(BufferPool::new(page_size));
         // No existing WAL; create one.
-        // TODO: currently Pager needs to be instantiated with some implementation of trait Wal, so here's a workaround.
-        let dummy_wal = Rc::new(RefCell::new(DummyWAL {}));
         let db_state = self.db_state.clone();
         let mut pager = Pager::new(
             self.db_file.clone(),
-            dummy_wal,
+            None,
             self.io.clone(),
             Arc::new(RwLock::new(DumbLruPageCache::default())),
             buffer_pool.clone(),
@@ -1184,8 +1181,14 @@ impl Connection {
         {
             let pager = self.pager.borrow();
 
+            let Some(wal) = pager.wal.as_ref() else {
+                return Err(LimboError::InternalError(
+                    "wal_insert_end called without a wal".to_string(),
+                ));
+            };
+
             {
-                let wal = pager.wal.borrow_mut();
+                let wal = wal.borrow_mut();
                 wal.end_write_tx();
                 wal.end_read_tx();
             }
