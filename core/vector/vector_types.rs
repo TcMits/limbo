@@ -622,6 +622,20 @@ mod tests {
         assert_eq!(vector.vector_type, VectorType::Float32);
     }
 
+    #[test]
+    fn test_vector_concat() {
+        let input = "[1.0, 2.0, 3.0]";
+        let value = Value::from_text(input);
+    
+        let vec1 = parse_string_vector(VectorType::Float32, &value).unwrap();
+        let vec2 = parse_string_vector(VectorType::Float32, &value).unwrap();
+    
+        let result = vector_concat(&vec1, &vec2).unwrap();
+    
+        assert_eq!(result.dims, 6);
+        assert_eq!(result.vector_type, VectorType::Float32);
+    }
+
     #[quickcheck]
     fn prop_vector_text_roundtrip_2d(v: ArbitraryVector<2>) -> bool {
         test_vector_text_roundtrip(v.into())
