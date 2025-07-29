@@ -18,7 +18,7 @@ use crate::{
         find_compare, get_tie_breaker_from_seek_op, IndexInfo, ParseRecordState, RecordCompare,
         RecordCursor, SeekResult,
     },
-    MvCursor,
+    Completion, MvCursor,
 };
 
 use crate::{
@@ -137,7 +137,7 @@ macro_rules! return_if_locked_maybe_load {
             return Ok(IOResult::IO);
         }
         if !$btree_page.get().is_loaded() {
-            let page = $pager.read_page($btree_page.get().get().id)?;
+            let (page, c) = $pager.read_page($btree_page.get().get().id)?;
             $btree_page.page.replace(page);
             return Ok(IOResult::IO);
         }
@@ -684,7 +684,7 @@ impl BTreeCursor {
             let mv_cursor = mv_cursor.borrow();
             return Ok(IOResult::Done(mv_cursor.is_empty()));
         }
-        let page = self.pager.read_page(self.root_page)?;
+        let (page, c) = self.pager.read_page(self.root_page)?;
         return_if_locked!(page);
 
         let cell_count = page.get().contents.as_ref().unwrap().cell_count();
@@ -712,8 +712,8 @@ impl BTreeCursor {
                 if let Some(rightmost_pointer) = rightmost_pointer {
                     let past_rightmost_pointer = cell_count as i32 + 1;
                     self.stack.set_cell_index(past_rightmost_pointer);
-                    self.stack
-                        .push_backwards(self.read_page(rightmost_pointer as usize)?);
+                    let (page, c) = self.read_page(rightmost_pointer as usize)?;
+                    self.stack.push_backwards(page);
                     continue;
                 }
             }
@@ -761,7 +761,7 @@ impl BTreeCursor {
                 BTreeCell::TableInteriorCell(TableInteriorCell {
                     left_child_page, ..
                 }) => {
-                    let mem_page = self.read_page(left_child_page as usize)?;
+                    let (mem_page, c) = self.read_page(left_child_page as usize)?;
                     self.stack.push_backwards(mem_page);
                     continue;
                 }
@@ -779,7 +779,7 @@ impl BTreeCursor {
                         // this parent: key 666
                         // left child has: key 663, key 664, key 665
                         // we need to move to the previous parent (with e.g. key 662) when iterating backwards.
-                        let mem_page = self.read_page(left_child_page as usize)?;
+                        let (mem_page, c) = self.read_page(left_child_page as usize)?;
                         self.stack.retreat();
                         self.stack.push_backwards(mem_page);
                         continue;
@@ -808,7 +808,7 @@ impl BTreeCursor {
         payload_size: u64,
     ) -> Result<IOResult<()>> {
         if self.read_overflow_state.borrow().is_none() {
-            let page = self.read_page(start_next_page as usize)?;
+            let (page, c) = self.read_page(start_next_page as usize)?;
             *self.read_overflow_state.borrow_mut() = Some(ReadPayloadOverflow {
                 payload: payload.to_vec(),
                 next_page: start_next_page,
@@ -840,10 +840,13 @@ impl BTreeCursor {
         *remaining_to_read -= to_read;
 
         if *remaining_to_read != 0 && next != 0 {
-            let new_page = self.pager.read_page(next as usize).map(|page| {
-                Arc::new(BTreePageInner {
-                    page: RefCell::new(page),
-                })
+            let (new_page, c) = self.pager.read_page(next as usize).map(|(page, c)| {
+                (
+                    Arc::new(BTreePageInner {
+                        page: RefCell::new(page),
+                    }),
+                    c,
+                )
             })?;
             *page_btree = new_page;
             *next_page = next;
@@ -1044,7 +1047,7 @@ impl BTreeCursor {
                     is_write,
                 }) => {
                     if *pages_left_to_skip == 0 {
-                        let page = self.read_page(*next_page as usize)?;
+                        let (page, c) = self.read_page(*next_page as usize)?;
                         return_if_locked_maybe_load!(self.pager, page);
                         self.state =
                             CursorState::ReadWritePayload(PayloadOverflowWithOffset::ProcessPage {
@@ -1059,7 +1062,7 @@ impl BTreeCursor {
                         continue;
                     }
 
-                    let page = self.read_page(*next_page as usize)?;
+                    let (page, c) = self.read_page(*next_page as usize)?;
                     return_if_locked_maybe_load!(self.pager, page);
                     let page = page.get();
                     let contents = page.get_contents();
@@ -1154,7 +1157,8 @@ impl BTreeCursor {
                     // Load next page
                     *next_page = next;
                     *current_offset = 0; // Reset offset for new page
-                    *page_btree = self.read_page(next as usize)?;
+                    let (page, c) = self.read_page(next as usize)?;
+                    *page_btree = page;
 
                     // Return IO to allow other operations
                     return Ok(IOResult::IO);
@@ -1265,7 +1269,7 @@ impl BTreeCursor {
                     (Some(right_most_pointer), false) => {
                         // do rightmost
                         self.stack.advance();
-                        let mem_page = self.read_page(right_most_pointer as usize)?;
+                        let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
                         self.stack.push(mem_page);
                         continue;
                     }
@@ -1297,7 +1301,7 @@ impl BTreeCursor {
                 BTreeCell::TableInteriorCell(TableInteriorCell {
                     left_child_page, ..
                 }) => {
-                    let mem_page = self.read_page(*left_child_page as usize)?;
+                    let (mem_page, c) = self.read_page(*left_child_page as usize)?;
                     self.stack.push(mem_page);
                     continue;
                 }
@@ -1311,7 +1315,7 @@ impl BTreeCursor {
                         self.going_upwards = false;
                         return Ok(IOResult::Done(true));
                     } else {
-                        let mem_page = self.read_page(*left_child_page as usize)?;
+                        let (mem_page, c) = self.read_page(*left_child_page as usize)?;
                         self.stack.push(mem_page);
                         continue;
                     }
@@ -1346,7 +1350,7 @@ impl BTreeCursor {
         self.seek_state = CursorSeekState::Start;
         self.going_upwards = false;
         tracing::trace!(root_page = self.root_page);
-        let mem_page = self.read_page(self.root_page)?;
+        let (mem_page, c) = self.read_page(self.root_page)?;
         self.stack.clear();
         self.stack.push(mem_page);
         Ok(())
@@ -1360,7 +1364,7 @@ impl BTreeCursor {
         loop {
             let mem_page = self.stack.top();
             let page_idx = mem_page.get().get().id;
-            let page = self.read_page(page_idx)?;
+            let (page, c) = self.read_page(page_idx)?;
             return_if_locked_maybe_load!(self.pager, page);
             let page = page.get();
             let contents = page.get().contents.as_ref().unwrap();
@@ -1375,7 +1379,7 @@ impl BTreeCursor {
             match contents.rightmost_pointer() {
                 Some(right_most_pointer) => {
                     self.stack.set_cell_index(contents.cell_count() as i32 + 1);
-                    let mem_page = self.read_page(right_most_pointer as usize)?;
+                    let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
                     self.stack.push(mem_page);
                     continue;
                 }
@@ -1442,7 +1446,7 @@ impl BTreeCursor {
                         let left_child_page =
                             contents.cell_interior_read_left_child_page(nearest_matching_cell);
                         self.stack.set_cell_index(nearest_matching_cell as i32);
-                        let mem_page = self.read_page(left_child_page as usize)?;
+                        let (mem_page, c) = self.read_page(left_child_page as usize)?;
                         self.stack.push(mem_page);
                         self.seek_state = CursorSeekState::MovingBetweenPages {
                             eq_seen: Cell::new(eq_seen.get()),
@@ -1452,7 +1456,7 @@ impl BTreeCursor {
                     self.stack.set_cell_index(cell_count as i32 + 1);
                     match contents.rightmost_pointer() {
                         Some(right_most_pointer) => {
-                            let mem_page = self.read_page(right_most_pointer as usize)?;
+                            let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
                             self.stack.push(mem_page);
                             self.seek_state = CursorSeekState::MovingBetweenPages {
                                 eq_seen: Cell::new(eq_seen.get()),
@@ -1583,7 +1587,7 @@ impl BTreeCursor {
                         self.stack.set_cell_index(contents.cell_count() as i32 + 1);
                         match contents.rightmost_pointer() {
                             Some(right_most_pointer) => {
-                                let mem_page = self.read_page(right_most_pointer as usize)?;
+                                let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
                                 self.stack.push(mem_page);
                                 self.seek_state = CursorSeekState::MovingBetweenPages {
                                     eq_seen: Cell::new(eq_seen.get()),
@@ -1623,7 +1627,7 @@ impl BTreeCursor {
                         page.get().id
                     );
 
-                    let mem_page = self.read_page(*left_child_page as usize)?;
+                    let (mem_page, c) = self.read_page(*left_child_page as usize)?;
                     self.stack.push(mem_page);
                     self.seek_state = CursorSeekState::MovingBetweenPages {
                         eq_seen: Cell::new(eq_seen.get()),
@@ -2611,7 +2615,7 @@ impl BTreeCursor {
                 let mut pgno: u32 = unsafe { right_pointer.cast::<u32>().read().swap_bytes() };
                 let current_sibling = sibling_pointer;
                 for i in (0..=current_sibling).rev() {
-                    let page = self.read_page(pgno as usize)?;
+                    let (page, c) = self.read_page(pgno as usize)?;
                     {
                         // mark as dirty
                         let sibling_page = page.get();
@@ -4160,7 +4164,7 @@ impl BTreeCursor {
         loop {
             let mem_page = self.stack.top();
             let page_id = mem_page.get().get().id;
-            let page = self.read_page(page_id)?;
+            let (page, c) = self.read_page(page_id)?;
             return_if_locked_maybe_load!(self.pager, page);
 
             let page = page.get();
@@ -4174,7 +4178,7 @@ impl BTreeCursor {
             match contents.rightmost_pointer() {
                 Some(right_most_pointer) => {
                     self.stack.set_cell_index(contents.cell_count() as i32 + 1); // invalid on interior
-                    let child = self.read_page(right_most_pointer as usize)?;
+                    let (child, c) = self.read_page(right_most_pointer as usize)?;
                     self.stack.push(child);
                 }
                 None => unreachable!("interior page must have rightmost pointer"),
@@ -4964,7 +4968,7 @@ impl BTreeCursor {
                         self.overflow_state = None;
                         return Err(LimboError::Corrupt("Invalid overflow page number".into()));
                     }
-                    let page = self.read_page(next_page as usize)?;
+                    let (page, c) = self.read_page(next_page as usize)?;
                     return_if_locked_maybe_load!(self.pager, page);
 
                     let page = page.get();
@@ -5060,7 +5064,7 @@ impl BTreeCursor {
                             //  Non-leaf page which has processed all children but not it's potential right child
                             (false, n) if n == contents.cell_count() as i32 => {
                                 if let Some(rightmost) = contents.rightmost_pointer() {
-                                    let rightmost_page = self.read_page(rightmost as usize)?;
+                                    let (rightmost_page, c) = self.read_page(rightmost as usize)?;
                                     self.stack.push(rightmost_page);
                                     let destroy_info = self.state.mut_destroy_info().expect(
                                         "unable to get a mut reference to destroy state in cursor",
@@ -5117,7 +5121,7 @@ impl BTreeCursor {
                                     BTreeCell::IndexInteriorCell(cell) => cell.left_child_page,
                                     _ => panic!("expected interior cell"),
                                 };
-                                let child_page = self.read_page(child_page_id as usize)?;
+                                let (child_page, c) = self.read_page(child_page_id as usize)?;
                                 self.stack.push(child_page);
                                 let destroy_info = self.state.mut_destroy_info().expect(
                                     "unable to get a mut reference to destroy state in cursor",
@@ -5133,7 +5137,7 @@ impl BTreeCursor {
                         IOResult::Done(_) => match cell {
                             //  For an index interior cell, clear the left child page now that overflow pages have been cleared
                             BTreeCell::IndexInteriorCell(index_int_cell) => {
-                                let child_page =
+                                let (child_page, c) =
                                     self.read_page(index_int_cell.left_child_page as usize)?;
                                 self.stack.push(child_page);
                                 let destroy_info = self.state.mut_destroy_info().expect(
@@ -5378,7 +5382,7 @@ impl BTreeCursor {
                 // should be safe as contents is not a leaf page
                 let right_most_pointer = contents.rightmost_pointer().unwrap();
                 self.stack.advance();
-                let mem_page = self.read_page(right_most_pointer as usize)?;
+                let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
                 self.stack.push(mem_page);
             } else {
                 // Move to child left page
@@ -5392,7 +5396,7 @@ impl BTreeCursor {
                         left_child_page, ..
                     }) => {
                         self.stack.advance();
-                        let mem_page = self.read_page(left_child_page as usize)?;
+                        let (mem_page, c) = self.read_page(left_child_page as usize)?;
                         self.stack.push(mem_page);
                     }
                     _ => unreachable!(),
@@ -5449,7 +5453,7 @@ impl BTreeCursor {
         }
     }
 
-    pub fn read_page(&self, page_idx: usize) -> Result<BTreePage> {
+    pub fn read_page(&self, page_idx: usize) -> Result<(BTreePage, Completion)> {
         btree_read_page(&self.pager, page_idx)
     }
 
@@ -5572,7 +5576,7 @@ pub fn integrity_check(
     else {
         return Ok(IOResult::Done(()));
     };
-    let page = btree_read_page(pager, page_idx)?;
+    let (page, c) = btree_read_page(pager, page_idx)?;
     return_if_locked_maybe_load!(pager, page);
     state.page_stack.pop();
 
@@ -5719,11 +5723,14 @@ pub fn integrity_check(
     Ok(IOResult::Done(()))
 }
 
-pub fn btree_read_page(pager: &Rc<Pager>, page_idx: usize) -> Result<BTreePage> {
-    pager.read_page(page_idx).map(|page| {
-        Arc::new(BTreePageInner {
-            page: RefCell::new(page),
-        })
+pub fn btree_read_page(pager: &Rc<Pager>, page_idx: usize) -> Result<(BTreePage, Completion)> {
+    pager.read_page(page_idx).map(|(page, c)| {
+        (
+            Arc::new(BTreePageInner {
+                page: RefCell::new(page),
+            }),
+            c,
+        )
     })
 }
 
@@ -7181,7 +7188,7 @@ mod tests {
     fn validate_btree(pager: Rc<Pager>, page_idx: usize) -> (usize, bool) {
         let num_columns = 5;
         let cursor = BTreeCursor::new_table(None, pager.clone(), page_idx, num_columns);
-        let page = cursor.read_page(page_idx).unwrap();
+        let (page, c) = cursor.read_page(page_idx).unwrap();
         while page.get().is_locked() {
             pager.io.run_once().unwrap();
         }
@@ -7201,7 +7208,7 @@ mod tests {
                 BTreeCell::TableInteriorCell(TableInteriorCell {
                     left_child_page, ..
                 }) => {
-                    let child_page = cursor.read_page(left_child_page as usize).unwrap();
+                    let (child_page, c) = cursor.read_page(left_child_page as usize).unwrap();
                     while child_page.get().is_locked() {
                         pager.io.run_once().unwrap();
                     }
@@ -7258,7 +7265,7 @@ mod tests {
         }
         let first_page_type = child_pages.first().map(|p| {
             if !p.get().is_loaded() {
-                let new_page = pager.read_page(p.get().get().id).unwrap();
+                let (new_page, c) = pager.read_page(p.get().get().id).unwrap();
                 p.page.replace(new_page);
             }
             while p.get().is_locked() {
@@ -7269,7 +7276,7 @@ mod tests {
         if let Some(child_type) = first_page_type {
             for page in child_pages.iter().skip(1) {
                 if !page.get().is_loaded() {
-                    let new_page = pager.read_page(page.get().get().id).unwrap();
+                    let (new_page, c) = pager.read_page(page.get().get().id).unwrap();
                     page.page.replace(new_page);
                 }
                 while page.get().is_locked() {
@@ -7292,7 +7299,7 @@ mod tests {
         let num_columns = 5;
 
         let cursor = BTreeCursor::new_table(None, pager.clone(), page_idx, num_columns);
-        let page = cursor.read_page(page_idx).unwrap();
+        let (page, c) = cursor.read_page(page_idx).unwrap();
         while page.get().is_locked() {
             pager.io.run_once().unwrap();
         }
@@ -8340,7 +8347,7 @@ mod tests {
                 .write_page(current_page as usize, buf.clone(), c)?;
             pager.io.run_once()?;
 
-            let page = cursor.read_page(current_page as usize)?;
+            let (page, c) = cursor.read_page(current_page as usize)?;
             while page.get().is_locked() {
                 cursor.pager.io.run_once()?;
             }
@@ -8388,7 +8395,7 @@ mod tests {
                 let trunk_page_id = header_accessor::get_freelist_trunk_page(&pager)?;
                 if trunk_page_id > 0 {
                     // Verify trunk page structure
-                    let trunk_page = cursor.read_page(trunk_page_id as usize)?;
+                    let (trunk_page, c) = cursor.read_page(trunk_page_id as usize)?;
                     if let Some(contents) = trunk_page.get().get().contents.as_ref() {
                         // Read number of leaf pages in trunk
                         let n_leaf = contents.read_u32(4);
