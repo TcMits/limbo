@@ -237,7 +237,7 @@ pub trait Wal {
         page: PageRef,
         db_size: u32,
         write_counter: Rc<RefCell<usize>>,
-    ) -> Result<()>;
+    ) -> Result<Completion>;
 
     /// Complete append of frames by updating shared wal state. Before this
     /// all changes were stored locally.
@@ -310,8 +310,8 @@ impl Wal for DummyWAL {
         _page: crate::PageRef,
         _db_size: u32,
         _write_counter: Rc<RefCell<usize>>,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<Completion> {
+        Ok(Completion::new_write(|_| {}))
     }
 
     fn should_checkpoint(&self) -> bool {
@@ -758,12 +758,12 @@ impl Wal for WalFile {
         page: PageRef,
         db_size: u32,
         write_counter: Rc<RefCell<usize>>,
-    ) -> Result<()> {
+    ) -> Result<Completion> {
         let page_id = page.get().id;
         let frame_id = self.max_frame + 1;
         let offset = self.frame_offset(frame_id);
         tracing::debug!(frame_id, offset, page_id);
-        let checksums = {
+        let (c, checksums) = {
             let shared = self.get_shared();
             let header = shared.wal_header.clone();
             let header = header.lock();
@@ -799,10 +799,10 @@ impl Wal for WalFile {
                 *write_counter.borrow_mut() -= 1;
                 return Err(err);
             }
-            frame_checksums
+            (result.unwrap(), frame_checksums)
         };
         self.complete_append_frame(page_id as u64, frame_id, checksums);
-        Ok(())
+        Ok(c)
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]

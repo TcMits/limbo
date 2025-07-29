@@ -968,7 +968,7 @@ impl Pager {
                     page
                 };
 
-                self.wal.borrow_mut().append_frame(
+                let c = self.wal.borrow_mut().append_frame(
                     page.clone(),
                     0,
                     self.flush_info.borrow().in_flight_writes.clone(),
@@ -1080,7 +1080,7 @@ impl Pager {
                             0
                         }
                     };
-                    self.wal.borrow_mut().append_frame(
+                    let c = self.wal.borrow_mut().append_frame(
                         page.clone(),
                         db_size,
                         self.commit_info.borrow().in_flight_writes.clone(),
