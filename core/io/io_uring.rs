@@ -226,7 +226,7 @@ impl Clock for UringIO {
 /// use the callback pointer as the user_data for the operation as is
 /// common practice for io_uring to prevent more indirection
 fn get_key(c: Completion) -> u64 {
-    Arc::into_raw(c.inner) as u64
+    Arc::into_raw(c.inner.clone()) as u64
 }
 
 #[inline(always)]

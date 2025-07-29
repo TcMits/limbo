@@ -73,7 +73,8 @@ impl DatabaseStorage for DatabaseFile {
 
     #[instrument(skip_all, level = Level::INFO)]
     fn truncate(&self, len: usize, c: Completion) -> Result<Completion> {
-        self.file.truncate(len, c)
+        let c = self.file.truncate(len, c)?;
+        Ok(c)
     }
 }
 
@@ -131,7 +132,8 @@ impl DatabaseStorage for FileMemoryStorage {
 
     #[instrument(skip_all, level = Level::INFO)]
     fn truncate(&self, len: usize, c: Completion) -> Result<Completion> {
-        self.file.truncate(len, c)
+        let c = self.file.truncate(len, c)?;
+        Ok(c)
     }
 }
 

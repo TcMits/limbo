@@ -731,7 +731,8 @@ impl turso_core::DatabaseStorage for DatabaseFile {
         len: usize,
         c: turso_core::Completion,
     ) -> turso_core::Result<turso_core::Completion> {
-        self.file.truncate(len, c)
+        let c = self.file.truncate(len, c)?;
+        Ok(c)
     }
 }
 

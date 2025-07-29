@@ -6326,6 +6326,9 @@ pub fn op_open_ephemeral(
         }
         OpOpenEphemeralState::StartingTxn { pager } => {
             tracing::trace!("StartingTxn");
+            pager
+                .begin_read_tx() // we have to begin a read tx before beginning a write
+                .expect("Failed to start read transaction");
             return_if_io!(pager.begin_write_tx());
             state.op_open_ephemeral_state = OpOpenEphemeralState::CreateBtree {
                 pager: pager.clone(),
