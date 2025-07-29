@@ -316,6 +316,24 @@ pub fn vector_type(blob: &[u8]) -> Result<VectorType> {
     }
 }
 
+pub fn vector_concat(v1: &Vector, v2: &Vector) -> Result<Vector> {
+    if v1.vector_type != v2.vector_type {
+        return Err(LimboError::ConversionError(
+            "Mismatched vector types".into(),
+        ));
+    }
+
+    let mut data = Vec::with_capacity(v1.data.len() + v2.data.len());
+    data.extend_from_slice(&v1.data);
+    data.extend_from_slice(&v2.data);
+
+    Ok(Vector {
+        vector_type: v1.vector_type.clone(),
+        dims: v1.dims + v2.dims,
+        data,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
