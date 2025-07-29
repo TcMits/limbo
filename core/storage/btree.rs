@@ -701,6 +701,8 @@ impl BTreeCursor {
             return_if_locked_maybe_load!(self.pager, page);
             let page = page.get();
             let contents = page.get().contents.as_ref().unwrap();
+            let page_type = contents.page_type();
+            let is_index = page.is_index();
 
             let cell_count = contents.cell_count();
             let cell_idx = self.stack.current_cell_index();
@@ -720,10 +722,8 @@ impl BTreeCursor {
             if cell_idx >= cell_count as i32 {
                 self.stack.set_cell_index(cell_count as i32 - 1);
             } else if !self.stack.current_cell_index_less_than_min() {
-                let is_index = page.is_index();
                 // skip retreat in case we still haven't visited this cell in index
                 let should_visit_internal_node = is_index && self.going_upwards; // we are going upwards, this means we still need to visit divider cell in an index
-                let page_type = contents.page_type();
                 if should_visit_internal_node {
                     self.going_upwards = false;
                     return Ok(IOResult::Done(true));
@@ -753,48 +753,34 @@ impl BTreeCursor {
                 // continue to next loop to get record from the new page
                 continue;
             }
-            let cell_idx = self.stack.current_cell_index() as usize;
-
-            let cell = contents.cell_get(cell_idx, self.usable_space())?;
-
-            match cell {
-                BTreeCell::TableInteriorCell(TableInteriorCell {
-                    left_child_page, ..
-                }) => {
-                    let (mem_page, c) = self.read_page(left_child_page as usize)?;
-                    self.stack.push_backwards(mem_page);
-                    continue;
-                }
-                BTreeCell::TableLeafCell(TableLeafCell { .. }) => {
-                    return Ok(IOResult::Done(true));
-                }
-                BTreeCell::IndexInteriorCell(IndexInteriorCell {
-                    left_child_page, ..
-                }) => {
-                    if !self.going_upwards {
-                        // In backwards iteration, if we haven't just moved to this interior node from the
-                        // right child, but instead are about to move to the left child, we need to retreat
-                        // so that we don't come back to this node again.
-                        // For example:
-                        // this parent: key 666
-                        // left child has: key 663, key 664, key 665
-                        // we need to move to the previous parent (with e.g. key 662) when iterating backwards.
-                        let (mem_page, c) = self.read_page(left_child_page as usize)?;
-                        self.stack.retreat();
-                        self.stack.push_backwards(mem_page);
-                        continue;
-                    }
-
-                    // Going upwards = we just moved to an interior cell from the right child.
-                    // On the first pass we must take the record from the interior cell (since unlike table btrees, index interior cells have payloads)
-                    // We then mark going_upwards=false so that we go back down the tree on the next invocation.
-                    self.going_upwards = false;
-                    return Ok(IOResult::Done(true));
-                }
-                BTreeCell::IndexLeafCell(IndexLeafCell { .. }) => {
-                    return Ok(IOResult::Done(true));
-                }
+            if contents.is_leaf() {
+                return Ok(IOResult::Done(true));
             }
+
+            if is_index && self.going_upwards {
+                // If we are going upwards, we need to visit the divider cell before going back to another child page.
+                // This is because index interior cells have payloads, so unless we do this we will be skipping an entry when traversing the tree.
+                self.going_upwards = false;
+                return Ok(IOResult::Done(true));
+            }
+
+            let cell_idx = self.stack.current_cell_index() as usize;
+            let left_child_page = contents.cell_interior_read_left_child_page(cell_idx);
+
+            if page_type == PageType::IndexInterior {
+                // In backwards iteration, if we haven't just moved to this interior node from the
+                // right child, but instead are about to move to the left child, we need to retreat
+                // so that we don't come back to this node again.
+                // For example:
+                // this parent: key 666
+                // left child has: key 663, key 664, key 665
+                // we need to move to the previous parent (with e.g. key 662) when iterating backwards.
+                self.stack.retreat();
+            }
+
+            let (mem_page, _) = self.read_page(left_child_page as usize)?;
+            self.stack.push_backwards(mem_page);
+            continue;
         }
     }
 
@@ -1296,34 +1282,20 @@ impl BTreeCursor {
                 mem_page_rc.get().get().id
             );
 
-            let cell = contents.cell_get(cell_idx, self.usable_space())?;
-            match &cell {
-                BTreeCell::TableInteriorCell(TableInteriorCell {
-                    left_child_page, ..
-                }) => {
-                    let (mem_page, c) = self.read_page(*left_child_page as usize)?;
-                    self.stack.push(mem_page);
-                    continue;
-                }
-                BTreeCell::TableLeafCell(TableLeafCell { .. }) => {
-                    return Ok(IOResult::Done(true));
-                }
-                BTreeCell::IndexInteriorCell(IndexInteriorCell {
-                    left_child_page, ..
-                }) => {
-                    if self.going_upwards {
-                        self.going_upwards = false;
-                        return Ok(IOResult::Done(true));
-                    } else {
-                        let (mem_page, c) = self.read_page(*left_child_page as usize)?;
-                        self.stack.push(mem_page);
-                        continue;
-                    }
-                }
-                BTreeCell::IndexLeafCell(IndexLeafCell { .. }) => {
-                    return Ok(IOResult::Done(true));
-                }
+            if contents.is_leaf() {
+                return Ok(IOResult::Done(true));
             }
+            if is_index && self.going_upwards {
+                // This means we just came up from a child, so now we need to visit the divider cell before going back to another child page.
+                // This is because index interior cells have payloads, so unless we do this we will be skipping an entry when traversing the tree.
+                self.going_upwards = false;
+                return Ok(IOResult::Done(true));
+            }
+
+            let left_child_page = contents.cell_interior_read_left_child_page(cell_idx);
+            let (mem_page, _) = self.read_page(left_child_page as usize)?;
+            self.stack.push(mem_page);
+            continue;
         }
     }
 
