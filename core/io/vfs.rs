@@ -43,8 +43,11 @@ impl IO for VfsMod {
         Ok(())
     }
 
-    fn wait_for_completion(&self, _c: Completion) -> Result<()> {
-        todo!();
+    fn wait_for_completion(&self, c: Completion) -> Result<()> {
+        while !c.is_completed() {
+            self.run_once()?;
+        }
+        Ok(())
     }
 
     fn generate_random_number(&self) -> i64 {
