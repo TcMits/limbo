@@ -858,12 +858,11 @@ impl Pager {
         page.set_locked();
 
         if let Some(frame_id) = self.wal.borrow().find_frame(page_idx as u64)? {
-            self.wal
-                .borrow()
-                .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
-            {
-                page.set_uptodate();
-            }
+            let c =
+                self.wal
+                    .borrow()
+                    .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
+            page.set_uptodate();
             // TODO(pere) should probably first insert to page cache, and if successful,
             // read frame or page
             match page_cache.insert(page_key, page.clone()) {

@@ -206,7 +206,12 @@ pub trait Wal {
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>>;
 
     /// Read a frame from the WAL.
-    fn read_frame(&self, frame_id: u64, page: PageRef, buffer_pool: Arc<BufferPool>) -> Result<()>;
+    fn read_frame(
+        &self,
+        frame_id: u64,
+        page: PageRef,
+        buffer_pool: Arc<BufferPool>,
+    ) -> Result<Completion>;
 
     /// Read a raw frame (header included) from the WAL.
     fn read_frame_raw(&self, frame_id: u64, frame: &mut [u8]) -> Result<Completion>;
@@ -280,8 +285,9 @@ impl Wal for DummyWAL {
         _frame_id: u64,
         _page: crate::PageRef,
         _buffer_pool: Arc<BufferPool>,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<Completion> {
+        // Dummy completion
+        Ok(Completion::new_write(|_| {}))
     }
 
     fn read_frame_raw(&self, _frame_id: u64, _frame: &mut [u8]) -> Result<Completion> {
@@ -612,7 +618,12 @@ impl Wal for WalFile {
 
     /// Read a frame from the WAL.
     #[instrument(skip_all, level = Level::DEBUG)]
-    fn read_frame(&self, frame_id: u64, page: PageRef, buffer_pool: Arc<BufferPool>) -> Result<()> {
+    fn read_frame(
+        &self,
+        frame_id: u64,
+        page: PageRef,
+        buffer_pool: Arc<BufferPool>,
+    ) -> Result<Completion> {
         tracing::debug!("read_frame({})", frame_id);
         let offset = self.frame_offset(frame_id);
         page.set_locked();
@@ -626,13 +637,12 @@ impl Wal for WalFile {
             let frame = frame.clone();
             finish_read_page(page.get().id, buf, frame).unwrap();
         });
-        let c = begin_read_wal_frame(
+        begin_read_wal_frame(
             &self.get_shared().file,
             offset + WAL_FRAME_HEADER_SIZE,
             buffer_pool,
             complete,
-        )?;
-        Ok(())
+        )
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
@@ -894,7 +904,7 @@ impl Wal for WalFile {
                             );
                             self.ongoing_checkpoint.page.get().id = page as usize;
 
-                            self.read_frame(
+                            let c = self.read_frame(
                                 *frame,
                                 self.ongoing_checkpoint.page.clone(),
                                 self.buffer_pool.clone(),
