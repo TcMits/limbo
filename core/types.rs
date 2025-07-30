@@ -329,6 +329,13 @@ impl Value {
         }
     }
 
+    pub fn as_int(&self) -> i64 {
+        match self {
+            Value::Integer(i) => *i,
+            _ => panic!("as_int must be called only for Value::Int"),
+        }
+    }
+
     pub fn from_text(text: &str) -> Self {
         Value::Text(Text::new(text))
     }
