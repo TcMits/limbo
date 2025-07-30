@@ -27,7 +27,7 @@ pub mod sorter;
 use crate::{
     error::LimboError,
     function::{AggFunc, FuncCtx},
-    storage::{pager, sqlite3_ondisk::SmallVec},
+    storage::sqlite3_ondisk::SmallVec,
     translate::plan::TableReferences,
     types::{IOResult, RawSlice, TextRef},
     vdbe::execute::{OpIdxInsertState, OpInsertState, OpNewRowidState, OpSeekState},
