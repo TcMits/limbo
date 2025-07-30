@@ -334,21 +334,26 @@ pub fn vector_concat(v1: &Vector, v2: &Vector) -> Result<Vector> {
     })
 }
 
-pub fn vector_slice(vector: &Vector, start_idx: usize, length: usize) -> Result<Vector> {
+pub fn vector_slice(vector: &Vector, start_idx: usize, end_idx: usize) -> Result<Vector> {
     fn extract_bytes<T, const N: usize>(
         slice: &[T],
         start: usize,
-        len: usize,
+        end: usize,
         to_bytes: impl Fn(&T) -> [u8; N],
     ) -> Result<Vec<u8>> {
-        if start + len > slice.len() {
+        if start > end {
+            return Err(LimboError::InvalidArgument(
+                "start index must not be greater than end index".into(),
+            ));
+        }
+        if end > slice.len() || start >= slice.len() {
             return Err(LimboError::ConversionError(
                 "vector_slice range out of bounds".into(),
             ));
         }
 
-        let mut buf = Vec::with_capacity(len * N);
-        for item in &slice[start..start + len] {
+        let mut buf = Vec::with_capacity((end - start) * N);
+        for item in &slice[start..end] {
             buf.extend_from_slice(&to_bytes(item));
         }
         Ok(buf)
@@ -357,13 +362,13 @@ pub fn vector_slice(vector: &Vector, start_idx: usize, length: usize) -> Result<
     let (vector_type, data) = match vector.vector_type {
         VectorType::Float32 => (
             VectorType::Float32,
-            extract_bytes::<f32, 4>(vector.as_f32_slice(), start_idx, length, |v| {
+            extract_bytes::<f32, 4>(vector.as_f32_slice(), start_idx, end_idx, |v| {
                 v.to_le_bytes()
             })?,
         ),
         VectorType::Float64 => (
             VectorType::Float64,
-            extract_bytes::<f64, 8>(vector.as_f64_slice(), start_idx, length, |v| {
+            extract_bytes::<f64, 8>(vector.as_f64_slice(), start_idx, end_idx, |v| {
                 v.to_le_bytes()
             })?,
         ),
@@ -371,7 +376,7 @@ pub fn vector_slice(vector: &Vector, start_idx: usize, length: usize) -> Result<
 
     Ok(Vector {
         vector_type,
-        dims: length,
+        dims: end_idx - start_idx,
         data,
     })
 }

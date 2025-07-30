@@ -142,18 +142,18 @@ pub fn vector_slice(args: &[Register]) -> Result<Value> {
         .as_int()
         .ok_or_else(|| LimboError::InvalidArgument("start index must be an integer".into()))?;
 
-    let length = args[2]
+    let end_index = args[2]
         .get_owned_value()
         .as_int()
-        .ok_or_else(|| LimboError::InvalidArgument("length must be an integer".into()))?;
+        .ok_or_else(|| LimboError::InvalidArgument("end_index must be an integer".into()))?;
 
-    if start_index < 0 || length < 0 {
+    if start_index < 0 || end_index < 0 {
         return Err(LimboError::InvalidArgument(
-            "start index and length must be non-negative".into(),
+            "start index and end_index must be non-negative".into(),
         ));
     }
 
-    let result = vector_types::vector_slice(&vector, start_index as usize, length as usize)?;
+    let result = vector_types::vector_slice(&vector, start_index as usize, end_index as usize)?;
 
     Ok(match result.vector_type {
         VectorType::Float32 => vector_serialize_f32(result),
