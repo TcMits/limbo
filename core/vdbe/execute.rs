@@ -2031,12 +2031,7 @@ pub fn op_transaction(
             match pager.begin_write_tx()? {
                 IOResult::Done(r) => {
                     if let LimboResult::Busy = r {
-                        if matches!(
-                            current_state,
-                            TransactionState::Read | TransactionState::PendingUpgrade
-                        ) {
-                            pager.end_read_tx()?;
-                        }
+                        pager.end_read_tx()?;
                         conn.transaction_state.replace(TransactionState::None);
                         conn.auto_commit.replace(true);
                         return Ok(InsnFunctionStepResult::Busy);
