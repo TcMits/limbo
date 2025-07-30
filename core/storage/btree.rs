@@ -10,7 +10,7 @@ use crate::{
             TableInteriorCell, TableLeafCell, CELL_PTR_SIZE_BYTES, INTERIOR_PAGE_HEADER_SIZE_BYTES,
             LEAF_PAGE_HEADER_SIZE_BYTES, LEFT_CHILD_PTR_SIZE_BYTES,
         },
-        state_machines::{EmptyTableState, MoveToRightState},
+        state_machines::{EmptyTableState, MoveToRightState, SeekToLastState},
     },
     translate::plan::IterationDirection,
     turso_assert,
@@ -575,6 +575,7 @@ pub struct BTreeCursor {
     is_empty_table_state: RefCell<EmptyTableState>,
     /// State machine for [BTreeCursor::move_to_rightmost]
     move_to_right_state: MoveToRightState,
+    seek_to_last_state: SeekToLastState,
 }
 
 /// We store the cell index and cell count for each page in the stack.
@@ -631,6 +632,7 @@ impl BTreeCursor {
             record_cursor: RefCell::new(RecordCursor::with_capacity(num_columns)),
             is_empty_table_state: RefCell::new(EmptyTableState::Start),
             move_to_right_state: MoveToRightState::Start,
+            seek_to_last_state: SeekToLastState::Start,
         }
     }
 
@@ -4185,16 +4187,27 @@ impl BTreeCursor {
 
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn seek_to_last(&mut self) -> Result<IOResult<()>> {
-        assert!(self.mv_cursor.is_none());
-        let has_record = return_if_io!(self.move_to_rightmost());
-        self.invalidate_record();
-        self.has_record.replace(has_record);
-        if !has_record {
-            let is_empty = return_if_io!(self.is_empty_table());
-            assert!(is_empty);
-            return Ok(IOResult::Done(()));
+        loop {
+            match self.seek_to_last_state {
+                SeekToLastState::Start => {
+                    assert!(self.mv_cursor.is_none());
+                    let has_record = return_if_io!(self.move_to_rightmost());
+                    self.invalidate_record();
+                    self.has_record.replace(has_record);
+                    if !has_record {
+                        self.seek_to_last_state = SeekToLastState::IsEmpty;
+                        continue;
+                    }
+                    return Ok(IOResult::Done(()));
+                }
+                SeekToLastState::IsEmpty => {
+                    let is_empty = return_if_io!(self.is_empty_table());
+                    assert!(is_empty);
+                    self.seek_to_last_state = SeekToLastState::Start;
+                    return Ok(IOResult::Done(()));
+                }
+            }
         }
-        Ok(IOResult::Done(()))
     }
 
     pub fn is_empty(&self) -> bool {

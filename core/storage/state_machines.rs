@@ -11,3 +11,9 @@ pub enum MoveToRightState {
     Start,
     ProcessPage,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum SeekToLastState {
+    Start,
+    IsEmpty,
+}
