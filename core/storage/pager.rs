@@ -818,7 +818,10 @@ impl Pager {
     ) -> Result<IOResult<PagerCommitResult>> {
         tracing::trace!("end_tx(rollback={})", rollback);
         if rollback {
-            if matches!(connection.transaction_state.get(), TransactionState::Write { .. }) {
+            if matches!(
+                connection.transaction_state.get(),
+                TransactionState::Write { .. }
+            ) {
                 self.wal.borrow().end_write_tx();
             }
             self.wal.borrow().end_read_tx();
