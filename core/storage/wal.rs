@@ -2063,6 +2063,25 @@ pub mod test {
         }
     }
 
+    fn count_test_table(conn: &Arc<Connection>) -> i64 {
+        let mut stmt = conn.prepare("select count(*) from test").unwrap();
+        loop {
+            match stmt.step() {
+                Ok(StepResult::Row) => {
+                    break;
+                }
+                Ok(StepResult::IO) => {
+                    stmt.run_once().unwrap();
+                }
+                _ => {
+                    panic!("Failed to step through the statement");
+                }
+            }
+        }
+        let count: i64 = stmt.row().unwrap().get(0).unwrap();
+        count
+    }
+
     fn run_checkpoint_until_done(
         wal: &mut dyn Wal,
         pager: &crate::Pager,
@@ -2638,6 +2657,75 @@ pub mod test {
         assert_eq!(hdr.file_format, 3007000);
         assert_eq!(hdr.page_size, 4096, "invalid page size");
         assert_eq!(hdr.checkpoint_seq, 1, "invalid checkpoint_seq");
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn test_wal_checkpoint_truncate_db_file_contains_data() {
+        let (db, path) = get_database();
+        let conn = db.connect().unwrap();
+
+        let walpath = {
+            let mut p = path.clone().into_os_string().into_string().unwrap();
+            p.push_str("/test.db-wal");
+            std::path::PathBuf::from(p)
+        };
+
+        conn.execute("create table test(id integer primary key, value text)")
+            .unwrap();
+        bulk_inserts(&conn, 10, 100);
+
+        // Get size before checkpoint
+        let size_before = std::fs::metadata(&walpath).unwrap().len();
+        assert!(size_before > 0, "WAL file should have content");
+
+        // Do a TRUNCATE checkpoint
+        {
+            let pager = conn.pager.borrow();
+            let mut wal = pager.wal.borrow_mut();
+            run_checkpoint_until_done(&mut *wal, &pager, CheckpointMode::Truncate);
+        }
+
+        // Check file size after truncate
+        let size_after = std::fs::metadata(&walpath).unwrap().len();
+        assert_eq!(size_after, 0, "WAL file should be truncated to 0 bytes");
+
+        // Verify we can still write to the database
+        conn.execute("INSERT INTO test VALUES (1001, 'after-truncate')")
+            .unwrap();
+
+        // Check WAL has new content
+        let new_size = std::fs::metadata(&walpath).unwrap().len();
+        assert!(new_size >= 32, "WAL file too small");
+        let hdr = read_wal_header(&walpath);
+        let expected_magic = if cfg!(target_endian = "big") {
+            sqlite3_ondisk::WAL_MAGIC_BE
+        } else {
+            sqlite3_ondisk::WAL_MAGIC_LE
+        };
+        assert!(
+            hdr.magic == expected_magic,
+            "bad WAL magic: {:#X}, expected: {:#X}",
+            hdr.magic,
+            sqlite3_ondisk::WAL_MAGIC_BE
+        );
+        assert_eq!(hdr.file_format, 3007000);
+        assert_eq!(hdr.page_size, 4096, "invalid page size");
+        assert_eq!(hdr.checkpoint_seq, 1, "invalid checkpoint_seq");
+        {
+            let pager = conn.pager.borrow();
+            let mut wal = pager.wal.borrow_mut();
+            run_checkpoint_until_done(&mut *wal, &pager, CheckpointMode::Passive);
+        }
+        // delete the WAL file so we can read right from db and assert
+        // that everything was backfilled properly
+        std::fs::remove_file(&walpath).unwrap();
+
+        let count = count_test_table(&conn);
+        assert_eq!(
+            count, 1001,
+            "we should have 1001 rows in the table all together"
+        );
         std::fs::remove_dir_all(path).unwrap();
     }
 
