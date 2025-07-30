@@ -6197,6 +6197,37 @@ pub fn op_shift_left(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub fn op_add_imm(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Rc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::AddImm { register, value } = insn else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    let current = &state.registers[*register];
+    let current_value = match current {
+        Register::Value(val) => val,
+        Register::Aggregate(_) => &Value::Null,
+        Register::Record(_) => &Value::Null,
+    };
+
+    let int_val = match current_value {
+        Value::Integer(i) => i + value,
+        Value::Float(f) => (*f as i64) + value,
+        Value::Text(s) => s.as_str().parse::<i64>().unwrap_or(0) + value,
+        Value::Blob(_) => *value, // BLOB becomes the added value
+        Value::Null => *value,    // NULL becomes the added value
+    };
+
+    state.registers[*register] = Register::Value(Value::Integer(int_val));
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 pub fn op_variable(
     program: &Program,
     state: &mut ProgramState,

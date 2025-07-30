@@ -1358,6 +1358,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{dest}]=r[{lhs}] << r[{rhs}]"),
             ),
+            Insn::AddImm { register, value } => (
+                "AddImm",
+                *register as i32,
+                *value as i32,
+                0,
+                Value::build_text(""),
+                0,
+                format!("r[{register}]=r[{register}]+{value}"),
+            ),
             Insn::Variable { index, dest } => (
                 "Variable",
                 usize::from(*index) as i32,

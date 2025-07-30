@@ -415,7 +415,7 @@ Modifiers:
 | Opcode         | Status | Comment |
 |----------------|--------|---------|
 | Add            | Yes    |         |
-| AddImm         | No     |         |
+| AddImm         | Yes    |         |
 | Affinity       | No     |         |
 | AggFinal       | Yes    |         |
 | AggStep        | Yes    |         |
