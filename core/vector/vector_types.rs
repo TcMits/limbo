@@ -2,7 +2,7 @@ use crate::types::{Value, ValueType};
 use crate::vdbe::Register;
 use crate::{LimboError, Result};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum VectorType {
     Float32,
     Float64,
@@ -328,7 +328,7 @@ pub fn vector_concat(v1: &Vector, v2: &Vector) -> Result<Vector> {
     data.extend_from_slice(&v2.data);
 
     Ok(Vector {
-        vector_type: v1.vector_type.clone(),
+        vector_type: v1.vector_type,
         dims: v1.dims + v2.dims,
         data,
     })
@@ -491,7 +491,7 @@ mod tests {
 
     /// Test if the vector type identification is correct for a given vector.
     fn test_vector_type<const DIMS: usize>(v: Vector) -> bool {
-        let vtype = v.vector_type.clone();
+        let vtype = v.vector_type;
         let value = match &vtype {
             VectorType::Float32 => vector_serialize_f32(v),
             VectorType::Float64 => vector_serialize_f64(v),
@@ -746,7 +746,7 @@ mod tests {
 
     #[test]
     fn test_vector_slice_single_element() {
-        let input_vec = float32_vec_from(&[3.14, 2.71]);
+        let input_vec = float32_vec_from(&[4.40, 2.71]);
         let result = vector_slice(&input_vec, 1, 2).unwrap();
 
         assert_eq!(result.dims, 1);
@@ -813,7 +813,7 @@ mod tests {
 
         // Parse back from text
         let value = Value::from_text(&text);
-        let parsed = parse_string_vector(v.vector_type.clone(), &value);
+        let parsed = parse_string_vector(v.vector_type, &value);
 
         match parsed {
             Ok(parsed_vector) => {
