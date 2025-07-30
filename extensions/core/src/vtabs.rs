@@ -222,6 +222,8 @@ pub struct IndexInfo {
     /// Estimated number of rows that the query will return
     pub estimated_rows: u32,
     /// List of constraints that can be used to optimize the query.
+    /// Each `ConstraintInfo` passed to `best_index` must have a corresponding entry in `constraint_usages`.
+    /// The length and order are important—they must exactly match the input `ConstraintInfo` array.
     pub constraint_usages: Vec<ConstraintUsage>,
 }
 impl Default for IndexInfo {

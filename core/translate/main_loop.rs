@@ -14,7 +14,7 @@ use crate::{
         insn::{CmpInsFlags, IdxInsertFlags, Insn},
         BranchOffset, CursorID,
     },
-    Result,
+    LimboError, Result,
 };
 
 use super::{
@@ -482,6 +482,14 @@ pub fn open_loop(
                             // TODO: get proper order_by information to pass to the vtab.
                             // maybe encode more info on t_ctx? we need: [col_idx, is_descending]
                             let index_info = vtab.best_index(&converted_constraints, &[]);
+
+                            if index_info.constraint_usages.len() != converted_constraints.len() {
+                                return Err(LimboError::ExtensionError(format!(
+                                    "Constraint usage count mismatch (expected {}, got {})",
+                                    converted_constraints.len(),
+                                    index_info.constraint_usages.len()
+                                )));
+                            }
 
                             // Determine the number of VFilter arguments (constraints with an argv_index).
                             let args_needed = index_info
