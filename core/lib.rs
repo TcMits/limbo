@@ -1151,7 +1151,9 @@ impl Connection {
             result::LimboResult::Busy => return Err(LimboError::Busy),
             result::LimboResult::Ok => {}
         }
-        match pager.io.block(|| pager.begin_write_tx())? {
+        match pager.io.block(|| pager.begin_write_tx()).inspect_err(|_| {
+            pager.end_read_tx().expect("read txn must be closed");
+        })? {
             result::LimboResult::Busy => {
                 pager.end_read_tx().expect("read txn must be closed");
                 return Err(LimboError::Busy);
