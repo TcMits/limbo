@@ -495,12 +495,16 @@ impl<Clock: LogicalClock> MvStore<Clock> {
     /// This function starts a new transaction in the database and returns a `TxID` value
     /// that you can use to perform operations within the transaction. All changes made within the
     /// transaction are isolated from other transactions until you commit the transaction.
-    pub fn begin_tx(&self) -> TxID {
+    pub fn begin_tx(&self, pager: Rc<Pager>) -> TxID {
         let tx_id = self.get_tx_id();
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
         tracing::trace!("begin_tx(tx_id={})", tx_id);
         self.txs.insert(tx_id, RwLock::new(tx));
+
+        // TODO: we need to tie a pager's read transaction to a transaction ID, so that future refactors to read
+        // pages from WAL/DB read from a consistent state to maintiain snapshot isolation.
+        pager.begin_read_tx().unwrap();
         tx_id
     }
 

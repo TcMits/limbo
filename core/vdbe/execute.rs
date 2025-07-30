@@ -1984,7 +1984,7 @@ pub fn op_transaction(
         if state.mv_tx_id.is_none() {
             // We allocate the first page lazily in the first transaction.
             return_if_io!(pager.maybe_allocate_page1());
-            let tx_id = mv_store.begin_tx();
+            let tx_id = mv_store.begin_tx(pager.clone());
             conn.mv_transactions.borrow_mut().push(tx_id);
             state.mv_tx_id = Some(tx_id);
         }
