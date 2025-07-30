@@ -10,7 +10,7 @@ use crate::{
             TableInteriorCell, TableLeafCell, CELL_PTR_SIZE_BYTES, INTERIOR_PAGE_HEADER_SIZE_BYTES,
             LEAF_PAGE_HEADER_SIZE_BYTES, LEFT_CHILD_PTR_SIZE_BYTES,
         },
-        state_machines::EmptyTableState,
+        state_machines::{EmptyTableState, MoveToRightState},
     },
     translate::plan::IterationDirection,
     turso_assert,
@@ -571,7 +571,10 @@ pub struct BTreeCursor {
     /// - Moving to a different record/row
     /// - The underlying `ImmutableRecord` is modified
     pub record_cursor: RefCell<RecordCursor>,
+    /// State machine for [BTreeCursor::is_empty_table]
     is_empty_table_state: RefCell<EmptyTableState>,
+    /// State machine for [BTreeCursor::move_to_rightmost]
+    move_to_right_state: MoveToRightState,
 }
 
 /// We store the cell index and cell count for each page in the stack.
@@ -627,6 +630,7 @@ impl BTreeCursor {
             parse_record_state: RefCell::new(ParseRecordState::Init),
             record_cursor: RefCell::new(RecordCursor::with_capacity(num_columns)),
             is_empty_table_state: RefCell::new(EmptyTableState::Start),
+            move_to_right_state: MoveToRightState::Start,
         }
     }
 
@@ -1342,33 +1346,39 @@ impl BTreeCursor {
     /// Move the cursor to the rightmost record in the btree.
     #[instrument(skip(self), level = Level::DEBUG)]
     fn move_to_rightmost(&mut self) -> Result<IOResult<bool>> {
-        let c = self.move_to_root()?;
-
-        loop {
-            let mem_page = self.stack.top();
-            let page_idx = mem_page.get().get().id;
-            let (page, c) = self.read_page(page_idx)?;
-            return_if_locked_maybe_load!(self.pager, page);
-            let page = page.get();
-            let contents = page.get().contents.as_ref().unwrap();
-            if contents.is_leaf() {
-                if contents.cell_count() > 0 {
-                    self.stack.set_cell_index(contents.cell_count() as i32 - 1);
-                    return Ok(IOResult::Done(true));
-                }
-                return Ok(IOResult::Done(false));
+        match self.move_to_right_state {
+            MoveToRightState::Start => {
+                let c = self.move_to_root()?;
+                self.move_to_right_state = MoveToRightState::ProcessPage;
+                return Ok(IOResult::IO);
             }
-
-            match contents.rightmost_pointer() {
-                Some(right_most_pointer) => {
-                    self.stack.set_cell_index(contents.cell_count() as i32 + 1);
-                    let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
-                    self.stack.push(mem_page);
-                    continue;
+            MoveToRightState::ProcessPage => {
+                let mem_page = self.stack.top();
+                let page_idx = mem_page.get().get().id;
+                let (page, c) = self.read_page(page_idx)?;
+                return_if_locked_maybe_load!(self.pager, page);
+                let page = page.get();
+                let contents = page.get().contents.as_ref().unwrap();
+                if contents.is_leaf() {
+                    self.move_to_right_state = MoveToRightState::Start;
+                    if contents.cell_count() > 0 {
+                        self.stack.set_cell_index(contents.cell_count() as i32 - 1);
+                        return Ok(IOResult::Done(true));
+                    }
+                    return Ok(IOResult::Done(false));
                 }
 
-                None => {
-                    unreachable!("interior page should have a rightmost pointer");
+                match contents.rightmost_pointer() {
+                    Some(right_most_pointer) => {
+                        self.stack.set_cell_index(contents.cell_count() as i32 + 1);
+                        let (mem_page, c) = self.read_page(right_most_pointer as usize)?;
+                        self.stack.push(mem_page);
+                        return Ok(IOResult::IO);
+                    }
+
+                    None => {
+                        unreachable!("interior page should have a rightmost pointer");
+                    }
                 }
             }
         }
