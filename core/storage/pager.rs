@@ -818,11 +818,11 @@ impl Pager {
     ) -> Result<IOResult<PagerCommitResult>> {
         tracing::trace!("end_tx(rollback={})", rollback);
         if rollback {
-            self.rollback(schema_did_change, connection)?;
             if matches!(connection.transaction_state.get(), TransactionState::Write { .. }) {
                 self.wal.borrow().end_write_tx();
             }
             self.wal.borrow().end_read_tx();
+            self.rollback(schema_did_change, connection)?;
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
         }
         let commit_status = self.commit_dirty_pages(wal_checkpoint_disabled)?;
