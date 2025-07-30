@@ -107,8 +107,8 @@ pub fn vector_distance_l2(args: &[Register]) -> Result<Value> {
 
 pub fn vector_concat(args: &[Register]) -> Result<Value> {
     if args.len() != 2 {
-        return Err(LimboError::ConversionError(
-            "concat requires exactly two arguments".to_string(),
+        return Err(LimboError::InvalidArgument(
+            "concat requires exactly two arguments".into(),
         ));
     }
 
@@ -116,8 +116,8 @@ pub fn vector_concat(args: &[Register]) -> Result<Value> {
     let y = parse_vector(&args[1], None)?;
 
     if x.vector_type != y.vector_type {
-        return Err(LimboError::ConversionError(
-            "Vectors must be of the same type".to_string(),
+        return Err(LimboError::InvalidArgument(
+            "Vectors must be of the same type".into(),
         ));
     }
 
@@ -130,25 +130,33 @@ pub fn vector_concat(args: &[Register]) -> Result<Value> {
 
 pub fn vector_slice(args: &[Register]) -> Result<Value> {
     if args.len() != 3 {
-        return Err(LimboError::ConversionError(
-            "vector_sub requires exactly three arguments".to_string(),
+        return Err(LimboError::InvalidArgument(
+            "vector_slice requires exactly three arguments".into(),
         ));
     }
 
     let vector = parse_vector(&args[0], None)?;
-    let start_index = args[1].get_owned_value().as_int();
-    let length = args[2].get_owned_value().as_int();
+
+    let start_index = args[1]
+        .get_owned_value()
+        .as_int()
+        .ok_or_else(|| LimboError::InvalidArgument("start index must be an integer".into()))?;
+
+    let length = args[2]
+        .get_owned_value()
+        .as_int()
+        .ok_or_else(|| LimboError::InvalidArgument("length must be an integer".into()))?;
 
     if start_index < 0 || length < 0 {
         return Err(LimboError::InvalidArgument(
-            "start index or length can't be negative".into(),
+            "start index and length must be non-negative".into(),
         ));
     }
 
     let result = vector_types::vector_slice(&vector, start_index as usize, length as usize)?;
 
-    match result.vector_type {
-        VectorType::Float32 => Ok(vector_serialize_f32(result)),
-        VectorType::Float64 => Ok(vector_serialize_f64(result)),
-    }
+    Ok(match result.vector_type {
+        VectorType::Float32 => vector_serialize_f32(result),
+        VectorType::Float64 => vector_serialize_f64(result),
+    })
 }

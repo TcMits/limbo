@@ -329,10 +329,10 @@ impl Value {
         }
     }
 
-    pub fn as_int(&self) -> i64 {
+    pub fn as_int(&self) -> Option<i64> {
         match self {
-            Value::Integer(i) => *i,
-            _ => panic!("as_int must be called only for Value::Int"),
+            Value::Integer(i) => Some(*i),
+            _ => None,
         }
     }
 
