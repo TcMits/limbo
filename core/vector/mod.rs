@@ -108,7 +108,7 @@ pub fn vector_distance_l2(args: &[Register]) -> Result<Value> {
 pub fn vector_concat(args: &[Register]) -> Result<Value> {
     if args.len() != 2 {
         return Err(LimboError::ConversionError(
-            "distance_concat requires exactly two arguments".to_string(),
+            "concat requires exactly two arguments".to_string(),
         ));
     }
 
@@ -125,5 +125,30 @@ pub fn vector_concat(args: &[Register]) -> Result<Value> {
     match vector.vector_type {
         VectorType::Float32 => Ok(vector_serialize_f32(vector)),
         VectorType::Float64 => Ok(vector_serialize_f64(vector)),
+    }
+}
+
+pub fn subvector(args: &[Register]) -> Result<Value> {
+    if args.len() != 3 {
+        return Err(LimboError::ConversionError(
+            "vector_sub requires exactly three arguments".to_string(),
+        ));
+    }
+
+    let vector = parse_vector(&args[0], None)?;
+    let start_index = args[1].get_owned_value().as_int();
+    let length = args[2].get_owned_value().as_int();
+
+    if start_index < 0 || length < 0 {
+        return Err(LimboError::InvalidArgument(
+            "start index or length can't be negative".into(),
+        ));
+    }
+
+    let result = vector_types::subvector(&vector, start_index as usize, length as usize)?;
+
+    match result.vector_type {
+        VectorType::Float32 => Ok(vector_serialize_f32(result)),
+        VectorType::Float64 => Ok(vector_serialize_f64(result)),
     }
 }

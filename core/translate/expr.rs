@@ -929,6 +929,16 @@ pub fn translate_expr(
                         emit_function_call(program, func_ctx, &[regs, regs + 1], target_register)?;
                         Ok(target_register)
                     }
+                    VectorFunc::VectorSlice => {
+                        let args = expect_arguments_exact!(args, 3, vector_func);
+                        let regs = program.alloc_registers(3);
+                        translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
+                        translate_expr(program, referenced_tables, &args[1], regs + 1, resolver)?;
+                        translate_expr(program, referenced_tables, &args[2], regs + 2, resolver)?;
+
+                        emit_function_call(program, func_ctx, &[regs, regs + 2], target_register)?;
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
