@@ -1803,7 +1803,11 @@ impl Pager {
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
-    fn rollback(&self, schema_did_change: bool, connection: &Connection) -> Result<(), LimboError> {
+    pub fn rollback(
+        &self,
+        schema_did_change: bool,
+        connection: &Connection,
+    ) -> Result<(), LimboError> {
         tracing::debug!(schema_did_change);
         self.dirty_pages.borrow_mut().clear();
         let mut cache = self.page_cache.write();
