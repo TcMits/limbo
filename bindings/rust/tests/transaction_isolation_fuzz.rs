@@ -1,7 +1,7 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use turso::{Builder, Value};
 
 // In-memory representation of the database state
@@ -217,7 +217,7 @@ fn rng_from_time_or_env() -> (ChaCha8Rng, u64) {
 /// This test is ignored because it still fails sometimes; unsure if it fails due to a bug in the test or a bug in the implementation.
 async fn test_multiple_connections_fuzz() {
     let (mut rng, seed) = rng_from_time_or_env();
-    println!("Multiple connections fuzz test seed: {}", seed);
+    println!("Multiple connections fuzz test seed: {seed}");
 
     const NUM_ITERATIONS: usize = 50;
     const OPERATIONS_PER_CONNECTION: usize = 30;
@@ -269,7 +269,7 @@ async fn test_multiple_connections_fuzz() {
                 let operation =
                     generate_operation(&mut rng, current_tx_id.is_some(), &visible_rows);
 
-                println!("Connection {conn_id}(op={op_num}): {}", operation);
+                println!("Connection {conn_id}(op={op_num}): {operation}");
 
                 match operation {
                     Operation::Begin => {
@@ -300,10 +300,8 @@ async fn test_multiple_connections_fuzz() {
                                 }
 
                                 // Check if it's an acceptable error
-                                if !e.to_string().contains("Busy")
-                                    && !e.to_string().contains("database is locked")
-                                {
-                                    panic!("Unexpected error during commit: {}", e);
+                                if !e.to_string().contains("database is locked") {
+                                    panic!("Unexpected error during commit: {e}");
                                 }
                             }
                         }
@@ -468,12 +466,12 @@ async fn test_multiple_connections_fuzz() {
                             let diff = {
                                 let mut diff = Vec::new();
                                 for row in expected_rows.iter() {
-                                    if !real_rows.contains(&row) {
+                                    if !real_rows.contains(row) {
                                         diff.push(row);
                                     }
                                 }
                                 for row in real_rows.iter() {
-                                    if !expected_rows.contains(&row) {
+                                    if !expected_rows.contains(row) {
                                         diff.push(row);
                                     }
                                 }
