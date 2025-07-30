@@ -1329,20 +1329,20 @@ impl BTreeCursor {
 
     /// Move the cursor to the root page of the btree.
     #[instrument(skip_all, level = Level::DEBUG)]
-    fn move_to_root(&mut self) -> Result<()> {
+    fn move_to_root(&mut self) -> Result<Completion> {
         self.seek_state = CursorSeekState::Start;
         self.going_upwards = false;
         tracing::trace!(root_page = self.root_page);
         let (mem_page, c) = self.read_page(self.root_page)?;
         self.stack.clear();
         self.stack.push(mem_page);
-        Ok(())
+        Ok(c)
     }
 
     /// Move the cursor to the rightmost record in the btree.
     #[instrument(skip(self), level = Level::DEBUG)]
     fn move_to_rightmost(&mut self) -> Result<IOResult<bool>> {
-        self.move_to_root()?;
+        let c = self.move_to_root()?;
 
         loop {
             let mem_page = self.stack.top();
@@ -2112,7 +2112,7 @@ impl BTreeCursor {
             self.seek_state = CursorSeekState::Start;
         }
         if matches!(self.seek_state, CursorSeekState::Start) {
-            self.move_to_root()?;
+            let c = self.move_to_root()?;
         }
 
         let ret = match key {
@@ -4147,7 +4147,7 @@ impl BTreeCursor {
 
     pub fn seek_end(&mut self) -> Result<IOResult<()>> {
         assert!(self.mv_cursor.is_none()); // unsure about this -_-
-        self.move_to_root()?;
+        let c = self.move_to_root()?;
         loop {
             let mem_page = self.stack.top();
             let page_id = mem_page.get().get().id;
@@ -4206,7 +4206,7 @@ impl BTreeCursor {
             self.invalidate_record();
             self.has_record.replace(cursor_has_record);
         } else {
-            self.move_to_root()?;
+            let c = self.move_to_root()?;
 
             let cursor_has_record = return_if_io!(self.get_next_record());
             self.invalidate_record();
@@ -5000,7 +5000,7 @@ impl BTreeCursor {
     #[instrument(skip(self), level = Level::DEBUG)]
     pub fn btree_destroy(&mut self) -> Result<IOResult<Option<usize>>> {
         if let CursorState::None = &self.state {
-            self.move_to_root()?;
+            let c = self.move_to_root()?;
             self.state = CursorState::Destroy(DestroyInfo {
                 state: DestroyState::Start,
             });
@@ -5309,7 +5309,7 @@ impl BTreeCursor {
     #[instrument(skip(self), level = Level::DEBUG)]
     pub fn count(&mut self) -> Result<IOResult<usize>> {
         if self.count == 0 {
-            self.move_to_root()?;
+            let c = self.move_to_root()?;
         }
 
         if let Some(_mv_cursor) = &self.mv_cursor {
@@ -5342,7 +5342,7 @@ impl BTreeCursor {
                 loop {
                     if !self.stack.has_parent() {
                         // All pages of the b-tree have been visited. Return successfully
-                        self.move_to_root()?;
+                        let c = self.move_to_root()?;
 
                         return Ok(IOResult::Done(self.count));
                     }
@@ -7658,10 +7658,10 @@ mod tests {
                 }
                 pager.begin_read_tx().unwrap();
                 // FIXME: add sorted vector instead, should be okay for small amounts of keys for now :P, too lazy to fix right now
-                cursor.move_to_root().unwrap();
+                let c = cursor.move_to_root().unwrap();
                 let mut valid = true;
                 if do_validate {
-                    cursor.move_to_root().unwrap();
+                    let c = cursor.move_to_root().unwrap();
                     for key in keys.iter() {
                         tracing::trace!("seeking key: {}", key);
                         run_until_done(|| cursor.next(), pager.deref()).unwrap();
@@ -7694,7 +7694,7 @@ mod tests {
             if matches!(validate_btree(pager.clone(), root_page), (_, false)) {
                 panic!("invalid btree");
             }
-            cursor.move_to_root().unwrap();
+            let c = cursor.move_to_root().unwrap();
             for key in keys.iter() {
                 tracing::trace!("seeking key: {}", key);
                 run_until_done(|| cursor.next(), pager.deref()).unwrap();
@@ -7805,7 +7805,7 @@ mod tests {
                     pager.deref(),
                 )
                 .unwrap();
-                cursor.move_to_root().unwrap();
+                let c = cursor.move_to_root().unwrap();
                 loop {
                     match pager.end_tx(false, false, &conn, false).unwrap() {
                         IOResult::Done(_) => break,
@@ -7818,7 +7818,7 @@ mod tests {
 
             // Check that all keys can be found by seeking
             pager.begin_read_tx().unwrap();
-            cursor.move_to_root().unwrap();
+            let c = cursor.move_to_root().unwrap();
             for (i, key) in keys.iter().enumerate() {
                 tracing::info!("seeking key {}/{}: {:?}", i + 1, keys.len(), key);
                 let exists = run_until_done(
@@ -7842,7 +7842,7 @@ mod tests {
                 assert!(found, "key {key:?} is not found");
             }
             // Check that key count is right
-            cursor.move_to_root().unwrap();
+            let c = cursor.move_to_root().unwrap();
             let mut count = 0;
             while run_until_done(|| cursor.next(), pager.deref()).unwrap() {
                 count += 1;
@@ -7855,7 +7855,7 @@ mod tests {
                 keys.len()
             );
             // Check that all keys can be found in-order, by iterating the btree
-            cursor.move_to_root().unwrap();
+            let c = cursor.move_to_root().unwrap();
             let mut prev = None;
             for (i, key) in keys.iter().enumerate() {
                 tracing::info!("iterating key {}/{}: {:?}", i + 1, keys.len(), key);
@@ -8023,7 +8023,7 @@ mod tests {
                     }
                 }
 
-                cursor.move_to_root().unwrap();
+                let c = cursor.move_to_root().unwrap();
                 loop {
                     match pager.end_tx(false, false, &conn, false).unwrap() {
                         IOResult::Done(_) => break,
@@ -8051,7 +8051,7 @@ mod tests {
     ) {
         // Check that all expected keys can be found by seeking
         pager.begin_read_tx().unwrap();
-        cursor.move_to_root().unwrap();
+        let c = cursor.move_to_root().unwrap();
         for (i, key) in expected_keys.iter().enumerate() {
             tracing::info!(
                 "validating key {}/{}, seed: {seed}",
@@ -8077,7 +8077,7 @@ mod tests {
         }
 
         // Check key count
-        cursor.move_to_root().unwrap();
+        let c = cursor.move_to_root().unwrap();
         run_until_done(|| cursor.rewind(), pager.deref()).unwrap();
         if !cursor.has_record.get() {
             panic!("no keys in tree");
@@ -8099,7 +8099,7 @@ mod tests {
         );
 
         // Check that all keys can be found in-order, by iterating the btree
-        cursor.move_to_root().unwrap();
+        let c = cursor.move_to_root().unwrap();
         for (i, key) in expected_keys.iter().enumerate() {
             run_until_done(|| cursor.next(), pager.deref()).unwrap();
             tracing::info!(
@@ -9402,7 +9402,7 @@ mod tests {
             );
         }
         let mut cursor = BTreeCursor::new_table(None, pager.clone(), root_page, num_columns);
-        cursor.move_to_root().unwrap();
+        let c = cursor.move_to_root().unwrap();
         for i in 0..iterations {
             let has_next = run_until_done(|| cursor.next(), pager.deref()).unwrap();
             if !has_next {
