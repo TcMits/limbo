@@ -10,6 +10,7 @@ use crate::{
             TableInteriorCell, TableLeafCell, CELL_PTR_SIZE_BYTES, INTERIOR_PAGE_HEADER_SIZE_BYTES,
             LEAF_PAGE_HEADER_SIZE_BYTES, LEFT_CHILD_PTR_SIZE_BYTES,
         },
+        state_machines::EmptyTableState,
     },
     translate::plan::IterationDirection,
     turso_assert,
@@ -570,6 +571,7 @@ pub struct BTreeCursor {
     /// - Moving to a different record/row
     /// - The underlying `ImmutableRecord` is modified
     pub record_cursor: RefCell<RecordCursor>,
+    is_empty_table_state: RefCell<EmptyTableState>,
 }
 
 /// We store the cell index and cell count for each page in the stack.
@@ -624,6 +626,7 @@ impl BTreeCursor {
             read_overflow_state: RefCell::new(None),
             parse_record_state: RefCell::new(ParseRecordState::Init),
             record_cursor: RefCell::new(RecordCursor::with_capacity(num_columns)),
+            is_empty_table_state: RefCell::new(EmptyTableState::Start),
         }
     }
 
@@ -679,15 +682,24 @@ impl BTreeCursor {
     /// This is done by checking if the root page has no cells.
     #[instrument(skip_all, level = Level::DEBUG)]
     fn is_empty_table(&self) -> Result<IOResult<bool>> {
-        if let Some(mv_cursor) = &self.mv_cursor {
-            let mv_cursor = mv_cursor.borrow();
-            return Ok(IOResult::Done(mv_cursor.is_empty()));
+        let state = self.is_empty_table_state.borrow().clone();
+        match state {
+            EmptyTableState::Start => {
+                if let Some(mv_cursor) = &self.mv_cursor {
+                    let mv_cursor = mv_cursor.borrow();
+                    return Ok(IOResult::Done(mv_cursor.is_empty()));
+                }
+                let (page, c) = self.pager.read_page(self.root_page)?;
+                *self.is_empty_table_state.borrow_mut() = EmptyTableState::ReadPage { page };
+                Ok(IOResult::IO)
+            }
+            EmptyTableState::ReadPage { page } => {
+                // TODO: Remove this line after we start awaiting for completions
+                return_if_locked!(page);
+                let cell_count = page.get().contents.as_ref().unwrap().cell_count();
+                Ok(IOResult::Done(cell_count == 0))
+            }
         }
-        let (page, c) = self.pager.read_page(self.root_page)?;
-        return_if_locked!(page);
-
-        let cell_count = page.get().contents.as_ref().unwrap().cell_count();
-        Ok(IOResult::Done(cell_count == 0))
     }
 
     /// Move the cursor to the previous record and return it.
