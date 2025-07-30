@@ -5,7 +5,6 @@ use std::{
 };
 
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
-use turso_core::turso_assert;
 
 use crate::{
     database_tape::{
@@ -124,7 +123,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         // we will copy Synced WAL to the Draft WAL later without pushing it to the remote
         // so, we pass 'capture: true' as we need to preserve all changes for future push of WAL
         let _ = self.transfer_draft_to_synced(true).await?;
-        turso_assert!(
+        assert!(
             self.synced_is_dirty,
             "synced_is_dirty must be set after transfer_draft_to_synced"
         );
@@ -148,7 +147,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
 
         // Synced DB now has extra WAL frames from [transfer_draft_to_synced] call, so we need to reset them
         self.reset_synced().await?;
-        turso_assert!(
+        assert!(
             !self.synced_is_dirty,
             "synced_is_dirty must not be set after reset_synced"
         );
@@ -215,7 +214,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         // sync WAL from the remote
         self.sync_from_remote().await?;
 
-        turso_assert!(
+        assert!(
             self.meta().active_db == ActiveDatabase::Draft,
             "active_db must be Draft after init"
         );
@@ -315,7 +314,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
     async fn pull_synced_from_remote(&mut self) -> Result<()> {
         tracing::debug!("pull_synced_from_remote");
         let database = self.database.read().await;
-        turso_assert!(
+        assert!(
             database.active_type == ActiveDatabase::Draft,
             "Draft database must be active as we will modify Clean"
         );
@@ -359,7 +358,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
                     let to_fill = FRAME_SIZE - buffer.len();
                     let prefix = chunk.split_to(to_fill.min(chunk.len()));
                     buffer.extend_from_slice(&prefix);
-                    turso_assert!(
+                    assert!(
                         buffer.capacity() == FRAME_SIZE,
                         "buffer should not extend its capacity"
                     );
@@ -484,7 +483,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         let mut changes = draft.iterate_changes(opts).await?;
         while let Some(operation) = changes.next().await? {
             if let DatabaseTapeOperation::RowChange(change) = &operation {
-                turso_assert!(
+                assert!(
                     last_change_id.is_none() || last_change_id.unwrap() < change.change_id,
                     "change id must be strictly increasing: last_change_id={:?}, change.change_id={}",
                     last_change_id, change.change_id
