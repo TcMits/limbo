@@ -1156,6 +1156,12 @@ impl ImmutableRecord {
             Err(_) => None,
         }
     }
+
+    pub fn column_count(&self) -> usize {
+        let mut cursor = RecordCursor::new();
+        cursor.parse_full_header(self).unwrap();
+        cursor.offsets.len()
+    }
 }
 
 /// A cursor for lazily parsing SQLite record format data.

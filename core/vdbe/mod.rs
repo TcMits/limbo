@@ -439,9 +439,10 @@ impl Program {
             let conn = self.connection.clone();
             let auto_commit = conn.auto_commit.get();
             if auto_commit {
+                // FIXME: we don't want to commit stuff from other programs.
                 let mut mv_transactions = conn.mv_transactions.borrow_mut();
                 for tx_id in mv_transactions.iter() {
-                    mv_store.commit_tx(*tx_id).unwrap();
+                    mv_store.commit_tx(*tx_id, pager.clone(), &conn).unwrap();
                 }
                 mv_transactions.clear();
             }
