@@ -1171,12 +1171,7 @@ impl Connection {
             let pager = self.pager.borrow();
 
             // remove all non-commited changes in case if WAL session left some suffix without commit frame
-            while let IOResult::IO = pager
-                .end_tx(false, false, self, false)
-                .expect("rollback must succeed")
-            {
-                self.run_once()?;
-            }
+            pager.rollback(false, self)?;
 
             let wal = pager.wal.borrow_mut();
             wal.end_write_tx();
