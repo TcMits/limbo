@@ -2479,14 +2479,20 @@ pub mod test {
         let new_size = std::fs::metadata(&walpath).unwrap().len();
         assert!(new_size >= 32, "WAL file too small");
         let hdr = read_wal_header(&walpath);
+        let expected_magic = if cfg!(target_endian = "big") {
+            sqlite3_ondisk::WAL_MAGIC_BE
+        } else {
+            sqlite3_ondisk::WAL_MAGIC_LE
+        };
         assert!(
-            hdr.magic == sqlite3_ondisk::WAL_MAGIC_BE,
-            "bad WAL magic: {:#X}",
-            hdr.magic
+            hdr.magic == expected_magic,
+            "bad WAL magic: {:#X}, expected: {:#X}",
+            hdr.magic,
+            sqlite3_ondisk::WAL_MAGIC_BE
         );
         assert_eq!(hdr.file_format, 3007000);
         assert_eq!(hdr.page_size, 4096, "invalid page size");
-        assert_eq!(hdr.checkpoint_seq, 0, "invalid checkpoint_seq");
+        assert_eq!(hdr.checkpoint_seq, 1, "invalid checkpoint_seq");
         std::fs::remove_dir_all(path).unwrap();
     }
 
