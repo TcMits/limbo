@@ -9,7 +9,7 @@ use crate::storage::sqlite3_ondisk::{
 use crate::storage::wal::{CheckpointResult, Wal};
 use crate::types::{IOResult, WalInsertInfo};
 use crate::util::IOExt as _;
-use crate::{return_if_io, Completion};
+use crate::{return_if_io, Completion, TransactionState};
 use crate::{turso_assert, Buffer, Connection, LimboError, Result};
 use parking_lot::RwLock;
 use std::cell::{Cell, OnceCell, RefCell, UnsafeCell};
@@ -819,7 +819,9 @@ impl Pager {
         tracing::trace!("end_tx(rollback={})", rollback);
         if rollback {
             self.rollback(schema_did_change, connection)?;
-            self.wal.borrow().end_write_tx();
+            if matches!(connection.transaction_state.get(), TransactionState::Write { .. }) {
+                self.wal.borrow().end_write_tx();
+            }
             self.wal.borrow().end_read_tx();
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
         }

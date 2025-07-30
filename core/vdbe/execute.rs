@@ -2087,6 +2087,7 @@ pub fn op_auto_commit(
         if *rollback {
             // TODO(pere): add rollback I/O logic once we implement rollback journal
             return_if_io!(pager.end_tx(true, schema_did_change, &conn, false));
+            conn.transaction_state.replace(TransactionState::None);
             conn.auto_commit.replace(true);
         } else {
             conn.auto_commit.replace(*auto_commit);
