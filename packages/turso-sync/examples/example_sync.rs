@@ -28,16 +28,21 @@ async fn main() {
         }
 
         let trimmed = input.trim();
-        if trimmed == ".exit" || trimmed == ".quit" {
-            break;
-        }
-        if trimmed.starts_with(".sync-from-remote") {
-            db.sync_from_remote().await.unwrap();
-            continue;
-        }
-        if trimmed.starts_with(".sync-to-remote") {
-            db.sync_to_remote().await.unwrap();
-            continue;
+        match trimmed {
+            ".exit" | ".quit" => break,
+            ".pull" => {
+                db.pull().await.unwrap();
+                continue;
+            }
+            ".push" => {
+                db.push().await.unwrap();
+                continue;
+            }
+            ".sync" => {
+                db.sync().await.unwrap();
+                continue;
+            }
+            _ => {}
         }
         let mut rows = db.query(&input, ()).await.unwrap();
         while let Some(row) = rows.next().await.unwrap() {
@@ -46,13 +51,13 @@ async fn main() {
                 let value = row.get_value(i).unwrap();
                 match value {
                     turso::Value::Null => values.push(format!("NULL")),
-                    turso::Value::Integer(x) => values.push(format!("{}", x)),
-                    turso::Value::Real(x) => values.push(format!("{}", x)),
-                    turso::Value::Text(x) => values.push(format!("'{}'", x)),
+                    turso::Value::Integer(x) => values.push(format!("{x}")),
+                    turso::Value::Real(x) => values.push(format!("{x}")),
+                    turso::Value::Text(x) => values.push(format!("'{x}'")),
                     turso::Value::Blob(x) => values.push(format!(
                         "x'{}'",
                         x.iter()
-                            .map(|x| format!("{:02x}", x))
+                            .map(|x| format!("{x:02x}"))
                             .collect::<Vec<_>>()
                             .join(""),
                     )),

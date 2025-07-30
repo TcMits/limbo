@@ -68,14 +68,14 @@ impl Builder {
 }
 
 impl Database {
-    pub async fn sync_full(&mut self) -> Result<()> {
-        self.0.sync_full().await
+    pub async fn sync(&mut self) -> Result<()> {
+        self.0.sync().await
     }
-    pub async fn sync_from_remote(&mut self) -> Result<()> {
-        self.0.sync_from_remote().await
+    pub async fn pull(&mut self) -> Result<()> {
+        self.0.pull().await
     }
-    pub async fn sync_to_remote(&mut self) -> Result<()> {
-        self.0.sync_to_remote().await
+    pub async fn push(&mut self) -> Result<()> {
+        self.0.push().await
     }
     pub async fn execute(&self, sql: &str, params: impl turso::IntoParams) -> Result<u64> {
         self.0.execute(sql, params).await

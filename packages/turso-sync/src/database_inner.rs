@@ -115,7 +115,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
     /// Sync any new changes from remote DB and apply them locally
     /// This method will **not** send local changed to the remote
     /// This method will block writes for the period of sync
-    pub async fn sync_from_remote(&mut self) -> Result<()> {
+    pub async fn pull(&mut self) -> Result<()> {
         tracing::debug!("sync_from_remote");
         self.cleanup_synced().await?;
 
@@ -157,7 +157,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
     /// Sync local changes to remote DB
     /// This method will **not** pull remote changes to the local DB
     /// This method will **not** block writes for the period of sync
-    pub async fn sync_to_remote(&mut self) -> Result<()> {
+    pub async fn push(&mut self) -> Result<()> {
         tracing::debug!("sync to remote");
         self.cleanup_synced().await?;
 
@@ -174,13 +174,13 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         Ok(())
     }
 
-    /// Sync local chnages to remote DB and bring new changes from remote to local
+    /// Sync local changes to remote DB and bring new changes from remote to local
     /// This method will block writes for the period of sync
-    pub async fn sync_full(&mut self) -> Result<()> {
+    pub async fn sync(&mut self) -> Result<()> {
         // todo(sivukhin): this is bit suboptimal as both sync_to_remote and sync_from_remote will call pull_synced_from_remote
         // but for now - keep it simple
-        self.sync_to_remote().await?;
-        self.sync_from_remote().await?;
+        self.push().await?;
+        self.pull().await?;
         Ok(())
     }
 
@@ -212,7 +212,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
         }
 
         // sync WAL from the remote
-        self.sync_from_remote().await?;
+        self.pull().await?;
 
         assert!(
             self.meta().active_db == ActiveDatabase::Draft,
@@ -648,7 +648,7 @@ mod tests {
             ));
 
             // 1 rows synced
-            db.sync_from_remote().await.unwrap();
+            db.pull().await.unwrap();
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
                 vec![vec![Value::Integer(1)]]
@@ -662,7 +662,7 @@ mod tests {
             db.execute("INSERT INTO t VALUES (3)", ()).await.unwrap();
 
             // changes are synced from the remote - but remote changes are not propagated locally
-            db.sync_to_remote().await.unwrap();
+            db.push().await.unwrap();
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
                 vec![vec![Value::Integer(1)], vec![Value::Integer(3)]]
@@ -682,7 +682,7 @@ mod tests {
             );
 
             db.execute("INSERT INTO t VALUES (4)", ()).await.unwrap();
-            db.sync_to_remote().await.unwrap();
+            db.push().await.unwrap();
 
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
@@ -705,7 +705,7 @@ mod tests {
                 ]
             );
 
-            db.sync_from_remote().await.unwrap();
+            db.pull().await.unwrap();
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
                 vec![
@@ -761,21 +761,21 @@ mod tests {
                 Err(Error::TursoError(turso::Error::SqlExecutionFailure(x))) if x.contains("no such table: t")
             ));
 
-            db.sync_full().await.unwrap();
+            db.sync().await.unwrap();
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
                 vec![vec![Value::Integer(1)]]
             );
 
             db.execute("INSERT INTO t VALUES (2)", ()).await.unwrap();
-            db.sync_full().await.unwrap();
+            db.sync().await.unwrap();
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
                 vec![vec![Value::Integer(1)], vec![Value::Integer(2)]]
             );
 
             db.execute("INSERT INTO t VALUES (3)", ()).await.unwrap();
-            db.sync_full().await.unwrap();
+            db.sync().await.unwrap();
             assert_eq!(
                 query_rows(&db, "SELECT * FROM t").await.unwrap(),
                 vec![
@@ -817,7 +817,7 @@ mod tests {
 
             for db in &mut dbs {
                 let mut db = db.lock().await;
-                db.sync_from_remote().await.unwrap();
+                db.pull().await.unwrap();
             }
             for (i, db) in dbs.iter().enumerate() {
                 let db = db.lock().await;
@@ -832,7 +832,7 @@ mod tests {
                     let db = db.clone();
                     tasks.push(async move {
                         let mut db = db.lock().await;
-                        db.sync_to_remote().await
+                        db.push().await
                     });
                 }
                 futures::future::join_all(tasks).await
@@ -891,12 +891,12 @@ mod tests {
                             .await
                             .unwrap();
 
-                        db.sync_from_remote().await.unwrap();
+                        db.pull().await.unwrap();
                         for query in queries {
                             db.execute(&query, ()).await.unwrap();
                         }
                         let guard = sync_lock.lock().await;
-                        db.sync_to_remote().await.unwrap();
+                        db.push().await.unwrap();
                         drop(guard);
                     }
                 }));
@@ -943,7 +943,7 @@ mod tests {
                 let has_fault = matches!(strategy, FaultInjectionStrategy::Enabled { .. });
 
                 ctx.switch_mode(strategy).await;
-                let result = db.sync_from_remote().await;
+                let result = db.pull().await;
                 ctx.switch_mode(FaultInjectionStrategy::Disabled).await;
 
                 if !has_fault {
@@ -963,7 +963,7 @@ mod tests {
                     ]
                 );
 
-                db.sync_from_remote().await.unwrap();
+                db.pull().await.unwrap();
 
                 let rows = query_rows(&db, "SELECT * FROM t").await.unwrap();
                 assert_eq!(
@@ -1011,7 +1011,7 @@ mod tests {
                 let has_fault = matches!(strategy, FaultInjectionStrategy::Enabled { .. });
 
                 ctx.switch_mode(strategy).await;
-                let result = db.sync_from_remote().await;
+                let result = db.pull().await;
                 ctx.switch_mode(FaultInjectionStrategy::Disabled).await;
 
                 if !has_fault {
@@ -1024,7 +1024,7 @@ mod tests {
                 let rows = query_rows(&db, "SELECT * FROM t").await.unwrap();
                 assert!(rows.len() <= 3);
 
-                db.sync_from_remote().await.unwrap();
+                db.pull().await.unwrap();
 
                 let rows = query_rows(&db, "SELECT * FROM t").await.unwrap();
                 assert_eq!(
@@ -1079,7 +1079,7 @@ mod tests {
                 let has_fault = matches!(strategy, FaultInjectionStrategy::Enabled { .. });
 
                 ctx.switch_mode(strategy).await;
-                let result = db.sync_to_remote().await;
+                let result = db.push().await;
                 ctx.switch_mode(FaultInjectionStrategy::Disabled).await;
 
                 if !has_fault {
@@ -1097,7 +1097,7 @@ mod tests {
                         .unwrap();
                 assert!(rows.len() <= 3);
 
-                db.sync_to_remote().await.unwrap();
+                db.push().await.unwrap();
 
                 let rows =
                     convert_rows(&mut server_conn.query("SELECT * FROM t", ()).await.unwrap())
