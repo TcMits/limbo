@@ -52,9 +52,13 @@ export interface SequenceRequest {
   sql: string;
 }
 
+export interface CloseRequest {
+  type: 'close';
+}
+
 export interface PipelineRequest {
   baton: string | null;
-  requests: (ExecuteRequest | BatchRequest | SequenceRequest)[];
+  requests: (ExecuteRequest | BatchRequest | SequenceRequest | CloseRequest)[];
 }
 
 export interface PipelineResponse {
@@ -63,7 +67,7 @@ export interface PipelineResponse {
   results: Array<{
     type: 'ok' | 'error';
     response?: {
-      type: 'execute' | 'batch' | 'sequence';
+      type: 'execute' | 'batch' | 'sequence' | 'close';
       result?: ExecuteResult;
     };
     error?: {

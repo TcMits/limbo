@@ -90,6 +90,15 @@ export class Connection {
     const sql = `PRAGMA ${pragma}`;
     return this.session.execute(sql);
   }
+
+  /**
+   * Close the connection.
+   * 
+   * This sends a close request to the server to properly clean up the stream.
+   */
+  async close(): Promise<void> {
+    await this.session.close();
+  }
 }
 
 /**

@@ -307,6 +307,11 @@ class LibSQLClient implements Client {
 
   close(): void {
     this._closed = true;
+    // Note: The libSQL client interface expects synchronous close,
+    // but our underlying session needs async close. We'll fire and forget.
+    this.session.close().catch(error => {
+      console.error('Error closing session:', error);
+    });
   }
 }
 

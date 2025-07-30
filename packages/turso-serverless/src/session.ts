@@ -7,7 +7,8 @@ import {
   type CursorResponse,
   type CursorEntry,
   type PipelineRequest,
-  type SequenceRequest
+  type SequenceRequest,
+  type CloseRequest
 } from './protocol.js';
 import { DatabaseError } from './error.js';
 
@@ -247,5 +248,34 @@ export class Session {
         throw new DatabaseError(result.error?.message || 'Sequence execution failed');
       }
     }
+  }
+
+  /**
+   * Close the session.
+   * 
+   * This sends a close request to the server to properly clean up the stream
+   * before resetting the local state.
+   */
+  async close(): Promise<void> {
+    // Only send close request if we have an active baton
+    if (this.baton) {
+      try {
+        const request: PipelineRequest = {
+          baton: this.baton,
+          requests: [{
+            type: "close"
+          } as CloseRequest]
+        };
+
+        await executePipeline(this.baseUrl, this.config.authToken, request);
+      } catch (error) {
+        // Ignore errors during close, as the connection might already be closed
+        console.error('Error closing session:', error);
+      }
+    }
+
+    // Reset local state
+    this.baton = null;
+    this.baseUrl = '';
   }
 }
