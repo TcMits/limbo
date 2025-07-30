@@ -346,7 +346,7 @@ pub fn vector_slice(vector: &Vector, start_idx: usize, end_idx: usize) -> Result
                 "start index must not be greater than end index".into(),
             ));
         }
-        if end > slice.len() || start >= slice.len() {
+        if end > slice.len() || end < start {
             return Err(LimboError::ConversionError(
                 "vector_slice range out of bounds".into(),
             ));
@@ -751,6 +751,14 @@ mod tests {
 
         assert_eq!(result.dims, 1);
         assert_eq!(f32_slice_from_vector(&result), vec![2.71]);
+    }
+
+    #[test]
+    fn test_vector_slice_empty_list() {
+        let input_vec = float32_vec_from(&[1.0, 2.0]);
+        let result = vector_slice(&input_vec, 2, 2).unwrap();
+
+        assert_eq!(result.dims, 0);
     }
 
     #[test]
