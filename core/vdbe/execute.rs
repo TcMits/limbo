@@ -7506,24 +7506,21 @@ fn exec_concat_ws(registers: &[Register]) -> Value {
         return Value::Null;
     }
 
-    let separator = match &registers[0].get_owned_value() {
+    let separator = match registers[0].get_owned_value() {
         Value::Null | Value::Blob(_) => return Value::Null,
         v => format!("{v}"),
     };
 
-    let mut result = String::new();
-    for (i, reg) in registers.iter().enumerate().skip(1) {
-        if i > 1 {
-            result.push_str(&separator);
-        }
-        match reg.get_owned_value() {
-            v if matches!(v, Value::Text(_) | Value::Integer(_) | Value::Float(_)) => {
-                result.push_str(&format!("{v}"))
+    let parts = registers[1..]
+        .iter()
+        .filter_map(|reg| match reg.get_owned_value() {
+            Value::Text(_) | Value::Integer(_) | Value::Float(_) => {
+                Some(format!("{}", reg.get_owned_value()))
             }
-            _ => continue,
-        }
-    }
+            _ => None,
+        });
 
+    let result = parts.collect::<Vec<_>>().join(&separator);
     Value::build_text(result)
 }
 
