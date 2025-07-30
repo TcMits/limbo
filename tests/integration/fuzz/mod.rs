@@ -1509,6 +1509,51 @@ mod tests {
     }
 
     #[test]
+    fn concat_ws_fuzz() {
+        let _ = env_logger::try_init();
+
+        let (mut rng, seed) = rng_from_time();
+        log::info!("seed: {seed}");
+
+        for _ in 0..100 {
+            let db = TempDatabase::new_empty(false);
+            let limbo_conn = db.connect_limbo();
+            let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
+
+            let num_args = rng.random_range(7..=17);
+            let mut args = Vec::new();
+            for _ in 0..num_args {
+                let arg = match rng.random_range(0..3) {
+                    0 => rng.random_range(-100..100).to_string(),
+                    1 => format!(
+                        "'{}'",
+                        (0..rng.random_range(1..=5))
+                            .map(|_| rng.random_range(b'a'..=b'z') as char)
+                            .collect::<String>()
+                    ),
+                    2 => "NULL".to_string(),
+                    _ => unreachable!(),
+                };
+                args.push(arg);
+            }
+
+            let sep = match rng.random_range(0..=2) {
+                0 => "','",
+                1 => "'-'",
+                2 => "NULL",
+                _ => unreachable!(),
+            };
+
+            let query = format!("SELECT concat_ws({}, {})", sep, args.join(", "));
+
+            let limbo = limbo_exec_rows(&db, &limbo_conn, &query);
+            let sqlite = sqlite_exec_rows(&sqlite_conn, &query);
+
+            assert_eq!(limbo, sqlite, "seed: {seed}, sep: {sep}, args: {args:?}");
+        }
+    }
+
+    #[test]
     // Simple fuzz test for TOTAL with mixed numeric/non-numeric values
     pub fn total_agg_fuzz() {
         let _ = env_logger::try_init();
