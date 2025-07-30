@@ -141,6 +141,138 @@ macro_rules! expect_arguments_even {
     }};
 }
 
+/// Core implementation of IN expression logic that can be used in both conditional and expression contexts.
+/// This follows SQLite's approach where a single core function handles all InList cases.
+///
+/// This is extracted from the original conditional implementation to be reusable.
+/// The logic exactly matches the original conditional InList implementation.
+#[instrument(skip(program, referenced_tables, resolver), level = Level::DEBUG)]
+fn translate_in_list(
+    program: &mut ProgramBuilder,
+    referenced_tables: Option<&TableReferences>,
+    lhs: &ast::Expr,
+    rhs: &Option<Vec<ast::Expr>>,
+    not: bool,
+    condition_metadata: ConditionMetadata,
+    resolver: &Resolver,
+) -> Result<()> {
+    // lhs is e.g. a column reference
+    // rhs is an Option<Vec<Expr>>
+    // If rhs is None, it means the IN expression is always false, i.e. tbl.id IN ().
+    // If rhs is Some, it means the IN expression has a list of values to compare against, e.g. tbl.id IN (1, 2, 3).
+    //
+    // The IN expression is equivalent to a series of OR expressions.
+    // For example, `a IN (1, 2, 3)` is equivalent to `a = 1 OR a = 2 OR a = 3`.
+    // The NOT IN expression is equivalent to a series of AND expressions.
+    // For example, `a NOT IN (1, 2, 3)` is equivalent to `a != 1 AND a != 2 AND a != 3`.
+    //
+    // SQLite typically optimizes IN expressions to use a binary search on an ephemeral index if there are many values.
+    // For now we don't have the plumbing to do that, so we'll just emit a series of comparisons,
+    // which is what SQLite also does for small lists of values.
+    // TODO: Let's refactor this later to use a more efficient implementation conditionally based on the number of values.
+
+    if rhs.is_none() {
+        // If rhs is None, IN expressions are always false and NOT IN expressions are always true.
+        if not {
+            // On a trivially true NOT IN () expression we can only jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'; otherwise me must fall through.
+            // This is because in a more complex condition we might need to evaluate the rest of the condition.
+            // Note that we are already breaking up our WHERE clauses into a series of terms at "AND" boundaries, so right now we won't be running into cases where jumping on true would be incorrect,
+            // but once we have e.g. parenthesization and more complex conditions, not having this 'if' here would introduce a bug.
+            if condition_metadata.jump_if_condition_is_true {
+                program.emit_insn(Insn::Goto {
+                    target_pc: condition_metadata.jump_target_when_true,
+                });
+            }
+        } else {
+            program.emit_insn(Insn::Goto {
+                target_pc: condition_metadata.jump_target_when_false,
+            });
+        }
+        return Ok(());
+    }
+
+    // The left hand side only needs to be evaluated once we have a list of values to compare against.
+    let lhs_reg = program.alloc_register();
+    let _ = translate_expr(program, referenced_tables, lhs, lhs_reg, resolver)?;
+
+    let rhs = rhs.as_ref().unwrap();
+
+    // The difference between a local jump and an "upper level" jump is that for example in this case:
+    // WHERE foo IN (1,2,3) OR bar = 5,
+    // we can immediately jump to the 'jump_target_when_true' label of the ENTIRE CONDITION if foo = 1, foo = 2, or foo = 3 without evaluating the bar = 5 condition.
+    // This is why in Binary-OR expressions we set jump_if_condition_is_true to true for the first condition.
+    // However, in this example:
+    // WHERE foo IN (1,2,3) AND bar = 5,
+    // we can't jump to the 'jump_target_when_true' label of the entire condition foo = 1, foo = 2, or foo = 3, because we still need to evaluate the bar = 5 condition later.
+    // This is why in that case we just jump over the rest of the IN conditions in this "local" branch which evaluates the IN condition.
+    let jump_target_when_true = if condition_metadata.jump_if_condition_is_true {
+        condition_metadata.jump_target_when_true
+    } else {
+        program.allocate_label()
+    };
+
+    if !not {
+        // If it's an IN expression, we need to jump to the 'jump_target_when_true' label if any of the conditions are true.
+        for (i, expr) in rhs.iter().enumerate() {
+            let rhs_reg = program.alloc_register();
+            let last_condition = i == rhs.len() - 1;
+            let _ = translate_expr(program, referenced_tables, expr, rhs_reg, resolver)?;
+            // If this is not the last condition, we need to jump to the 'jump_target_when_true' label if the condition is true.
+            if !last_condition {
+                program.emit_insn(Insn::Eq {
+                    lhs: lhs_reg,
+                    rhs: rhs_reg,
+                    target_pc: jump_target_when_true,
+                    flags: CmpInsFlags::default(),
+                    collation: program.curr_collation(),
+                });
+            } else {
+                // If this is the last condition, we need to jump to the 'jump_target_when_false' label if there is no match.
+                program.emit_insn(Insn::Ne {
+                    lhs: lhs_reg,
+                    rhs: rhs_reg,
+                    target_pc: condition_metadata.jump_target_when_false,
+                    flags: CmpInsFlags::default().jump_if_null(),
+                    collation: program.curr_collation(),
+                });
+            }
+        }
+        // If we got here, then the last condition was a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
+        // If not, we can just fall through without emitting an unnecessary instruction.
+        if condition_metadata.jump_if_condition_is_true {
+            program.emit_insn(Insn::Goto {
+                target_pc: condition_metadata.jump_target_when_true,
+            });
+        }
+    } else {
+        // If it's a NOT IN expression, we need to jump to the 'jump_target_when_false' label if any of the conditions are true.
+        for expr in rhs.iter() {
+            let rhs_reg = program.alloc_register();
+            let _ = translate_expr(program, referenced_tables, expr, rhs_reg, resolver)?;
+            program.emit_insn(Insn::Eq {
+                lhs: lhs_reg,
+                rhs: rhs_reg,
+                target_pc: condition_metadata.jump_target_when_false,
+                flags: CmpInsFlags::default().jump_if_null(),
+                collation: program.curr_collation(),
+            });
+        }
+        // If we got here, then none of the conditions were a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
+        // If not, we can just fall through without emitting an unnecessary instruction.
+        if condition_metadata.jump_if_condition_is_true {
+            program.emit_insn(Insn::Goto {
+                target_pc: condition_metadata.jump_target_when_true,
+            });
+        }
+    }
+
+    if !condition_metadata.jump_if_condition_is_true {
+        program.preassign_label_to_next_insn(jump_target_when_true);
+    }
+
+    Ok(())
+}
+
 #[instrument(skip(program, referenced_tables, expr, resolver), level = Level::DEBUG)]
 pub fn translate_condition_expr(
     program: &mut ProgramBuilder,
@@ -219,121 +351,15 @@ pub fn translate_condition_expr(
             emit_cond_jump(program, condition_metadata, reg);
         }
         ast::Expr::InList { lhs, not, rhs } => {
-            // lhs is e.g. a column reference
-            // rhs is an Option<Vec<Expr>>
-            // If rhs is None, it means the IN expression is always false, i.e. tbl.id IN ().
-            // If rhs is Some, it means the IN expression has a list of values to compare against, e.g. tbl.id IN (1, 2, 3).
-            //
-            // The IN expression is equivalent to a series of OR expressions.
-            // For example, `a IN (1, 2, 3)` is equivalent to `a = 1 OR a = 2 OR a = 3`.
-            // The NOT IN expression is equivalent to a series of AND expressions.
-            // For example, `a NOT IN (1, 2, 3)` is equivalent to `a != 1 AND a != 2 AND a != 3`.
-            //
-            // SQLite typically optimizes IN expressions to use a binary search on an ephemeral index if there are many values.
-            // For now we don't have the plumbing to do that, so we'll just emit a series of comparisons,
-            // which is what SQLite also does for small lists of values.
-            // TODO: Let's refactor this later to use a more efficient implementation conditionally based on the number of values.
-
-            if rhs.is_none() {
-                // If rhs is None, IN expressions are always false and NOT IN expressions are always true.
-                if *not {
-                    // On a trivially true NOT IN () expression we can only jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'; otherwise me must fall through.
-                    // This is because in a more complex condition we might need to evaluate the rest of the condition.
-                    // Note that we are already breaking up our WHERE clauses into a series of terms at "AND" boundaries, so right now we won't be running into cases where jumping on true would be incorrect,
-                    // but once we have e.g. parenthesization and more complex conditions, not having this 'if' here would introduce a bug.
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Goto {
-                            target_pc: condition_metadata.jump_target_when_true,
-                        });
-                    }
-                } else {
-                    program.emit_insn(Insn::Goto {
-                        target_pc: condition_metadata.jump_target_when_false,
-                    });
-                }
-                return Ok(());
-            }
-
-            // The left hand side only needs to be evaluated once we have a list of values to compare against.
-            let lhs_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, resolver)?;
-
-            let rhs = rhs.as_ref().unwrap();
-
-            // The difference between a local jump and an "upper level" jump is that for example in this case:
-            // WHERE foo IN (1,2,3) OR bar = 5,
-            // we can immediately jump to the 'jump_target_when_true' label of the ENTIRE CONDITION if foo = 1, foo = 2, or foo = 3 without evaluating the bar = 5 condition.
-            // This is why in Binary-OR expressions we set jump_if_condition_is_true to true for the first condition.
-            // However, in this example:
-            // WHERE foo IN (1,2,3) AND bar = 5,
-            // we can't jump to the 'jump_target_when_true' label of the entire condition foo = 1, foo = 2, or foo = 3, because we still need to evaluate the bar = 5 condition later.
-            // This is why in that case we just jump over the rest of the IN conditions in this "local" branch which evaluates the IN condition.
-            let jump_target_when_true = if condition_metadata.jump_if_condition_is_true {
-                condition_metadata.jump_target_when_true
-            } else {
-                program.allocate_label()
-            };
-
-            if !*not {
-                // If it's an IN expression, we need to jump to the 'jump_target_when_true' label if any of the conditions are true.
-                for (i, expr) in rhs.iter().enumerate() {
-                    let rhs_reg = program.alloc_register();
-                    let last_condition = i == rhs.len() - 1;
-                    let _ =
-                        translate_expr(program, Some(referenced_tables), expr, rhs_reg, resolver)?;
-                    // If this is not the last condition, we need to jump to the 'jump_target_when_true' label if the condition is true.
-                    if !last_condition {
-                        program.emit_insn(Insn::Eq {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: jump_target_when_true,
-                            flags: CmpInsFlags::default(),
-                            collation: program.curr_collation(),
-                        });
-                    } else {
-                        // If this is the last condition, we need to jump to the 'jump_target_when_false' label if there is no match.
-                        program.emit_insn(Insn::Ne {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                            flags: CmpInsFlags::default().jump_if_null(),
-                            collation: program.curr_collation(),
-                        });
-                    }
-                }
-                // If we got here, then the last condition was a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
-                // If not, we can just fall through without emitting an unnecessary instruction.
-                if condition_metadata.jump_if_condition_is_true {
-                    program.emit_insn(Insn::Goto {
-                        target_pc: condition_metadata.jump_target_when_true,
-                    });
-                }
-            } else {
-                // If it's a NOT IN expression, we need to jump to the 'jump_target_when_false' label if any of the conditions are true.
-                for expr in rhs.iter() {
-                    let rhs_reg = program.alloc_register();
-                    let _ =
-                        translate_expr(program, Some(referenced_tables), expr, rhs_reg, resolver)?;
-                    program.emit_insn(Insn::Eq {
-                        lhs: lhs_reg,
-                        rhs: rhs_reg,
-                        target_pc: condition_metadata.jump_target_when_false,
-                        flags: CmpInsFlags::default().jump_if_null(),
-                        collation: program.curr_collation(),
-                    });
-                }
-                // If we got here, then none of the conditions were a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
-                // If not, we can just fall through without emitting an unnecessary instruction.
-                if condition_metadata.jump_if_condition_is_true {
-                    program.emit_insn(Insn::Goto {
-                        target_pc: condition_metadata.jump_target_when_true,
-                    });
-                }
-            }
-
-            if !condition_metadata.jump_if_condition_is_true {
-                program.preassign_label_to_next_insn(jump_target_when_true);
-            }
+            translate_in_list(
+                program,
+                Some(referenced_tables),
+                lhs,
+                rhs,
+                *not,
+                condition_metadata,
+                resolver,
+            )?;
         }
         ast::Expr::Like { not, .. } => {
             let cur_reg = program.alloc_register();
@@ -2047,7 +2073,61 @@ pub fn translate_expr(
             }
             Ok(target_register)
         }
-        ast::Expr::InList { .. } => todo!(),
+        ast::Expr::InList { lhs, rhs, not } => {
+            // Following SQLite's approach: use the same core logic as conditional InList,
+            // but wrap it with appropriate expression context handling
+            let result_reg = target_register;
+
+            // Set result to NULL initially (matches SQLite behavior)
+            program.emit_insn(Insn::Null {
+                dest: result_reg,
+                dest_end: None,
+            });
+
+            let dest_if_false = program.allocate_label();
+            let label_integer_conversion = program.allocate_label();
+
+            // Call the core InList logic with expression-appropriate condition metadata
+            translate_in_list(
+                program,
+                referenced_tables,
+                lhs,
+                rhs,
+                *not,
+                ConditionMetadata {
+                    jump_if_condition_is_true: false,
+                    jump_target_when_true: label_integer_conversion, // will be resolved below
+                    jump_target_when_false: dest_if_false,
+                },
+                resolver,
+            )?;
+
+            // condition true: set result to 1
+            program.emit_insn(Insn::Integer {
+                value: 1,
+                dest: result_reg,
+            });
+            program.emit_insn(Insn::Goto {
+                target_pc: label_integer_conversion,
+            });
+
+            // False path: set result to 0
+            program.resolve_label(dest_if_false, program.offset());
+            program.emit_insn(Insn::Integer {
+                value: 0,
+                dest: result_reg,
+            });
+
+            program.resolve_label(label_integer_conversion, program.offset());
+
+            // Force integer conversion with AddImm 0
+            program.emit_insn(Insn::AddImm {
+                register: result_reg,
+                value: 0,
+            });
+
+            Ok(result_reg)
+        }
         ast::Expr::InSelect { .. } => todo!(),
         ast::Expr::InTable { .. } => todo!(),
         ast::Expr::IsNull(expr) => {

@@ -687,3 +687,15 @@ do_execsql_test_skip_lines_on_specific_db 1 {:memory:} select-double-quotes-lite
     SELECT "literal_string" AS col;
 } {literal_string}
 
+do_execsql_test_on_specific_db {:memory:} select-in-simple {
+  SELECT 1 IN (1, 2, 3);
+  SELECT 4 IN (1, 2, 3);
+} {1
+0}
+
+do_execsql_test_on_specific_db {:memory:} select-in-complex {
+  CREATE TABLE test_table (id INTEGER, category TEXT, value INTEGER);
+  INSERT INTO test_table VALUES (1, 'A', 10), (2, 'B', 20), (3, 'A', 30), (4, 'C', 40);
+  SELECT * FROM test_table WHERE category IN ('A', 'B') AND value IN (10, 30, 40);
+} {1|A|10
+3|A|30}
