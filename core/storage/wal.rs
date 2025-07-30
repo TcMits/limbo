@@ -1393,7 +1393,7 @@ impl WalFile {
                 }
                 CheckpointState::WritePage => {
                     self.ongoing_checkpoint.page.set_dirty();
-                    begin_write_btree_page(
+                    let _ = begin_write_btree_page(
                         pager,
                         &self.ongoing_checkpoint.page,
                         write_counter.clone(),
@@ -1616,12 +1616,9 @@ impl WalFile {
                 .wait_for_completion(
                     shared
                         .file
-                        .sync(
-                            Completion::new_sync(|_| {
-                                tracing::trace!("WAL file synced after reset/truncation");
-                            })
-                            .into(),
-                        )
+                        .sync(Completion::new_sync(|_| {
+                            tracing::trace!("WAL file synced after reset/truncation");
+                        }))
                         .inspect_err(handle_err)?,
                 )
                 .inspect_err(handle_err)?;

@@ -62,7 +62,10 @@ use crate::{
     vector::{vector32, vector64, vector_distance_cos, vector_distance_l2, vector_extract},
 };
 
-use crate::{info, BufferPool, MvCursor, OpenFlags, RefValue, Row, StepResult, TransactionState};
+use crate::{
+    info, turso_assert, BufferPool, MvCursor, OpenFlags, RefValue, Row, StepResult,
+    TransactionState,
+};
 
 use super::{
     insn::{Cookie, RegisterOrLiteral},
@@ -1983,6 +1986,20 @@ pub fn op_transaction(
     } else {
         let current_state = conn.transaction_state.get();
         let (new_transaction_state, updated) = match (current_state, write) {
+            // pending state means that we tried beginning a tx and the method returned IO.
+            // instead of ending the read tx, just update the state to pending.
+            (TransactionState::PendingUpgrade, write) => {
+                turso_assert!(
+                    write,
+                    "pending upgrade should only be set for write transactions"
+                );
+                (
+                    TransactionState::Write {
+                        schema_did_change: false,
+                    },
+                    true,
+                )
+            }
             (TransactionState::Write { schema_did_change }, true) => {
                 (TransactionState::Write { schema_did_change }, false)
             }
@@ -2004,7 +2021,6 @@ pub fn op_transaction(
             ),
             (TransactionState::None, false) => (TransactionState::Read, true),
         };
-
         if updated && matches!(current_state, TransactionState::None) {
             if let LimboResult::Busy = pager.begin_read_tx()? {
                 return Ok(InsnFunctionStepResult::Busy);
@@ -2015,12 +2031,24 @@ pub fn op_transaction(
             match pager.begin_write_tx()? {
                 IOResult::Done(r) => {
                     if let LimboResult::Busy = r {
-                        pager.end_read_tx()?;
+                        if matches!(
+                            current_state,
+                            TransactionState::Read | TransactionState::PendingUpgrade
+                        ) {
+                            pager.end_read_tx()?;
+                        }
+                        conn.transaction_state.replace(TransactionState::None);
+                        conn.auto_commit.replace(true);
                         return Ok(InsnFunctionStepResult::Busy);
                     }
                 }
                 IOResult::IO => {
-                    pager.end_read_tx()?;
+                    // set the transaction state to pending so we don't have to
+                    // end the read transaction.
+                    program
+                        .connection
+                        .transaction_state
+                        .replace(TransactionState::PendingUpgrade);
                     return Ok(InsnFunctionStepResult::IO);
                 }
             }
@@ -6102,6 +6130,7 @@ pub fn op_set_cookie(
                     },
                     TransactionState::Read => unreachable!("invalid transaction state for SetCookie: TransactionState::Read, should be write"),
                     TransactionState::None => unreachable!("invalid transaction state for SetCookie: TransactionState::None, should be write"),
+                    TransactionState::PendingUpgrade => unreachable!("invalid transaction state for SetCookie: TransactionState::PendingUpgrade, should be write"),
                 }
             }
             program

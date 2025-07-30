@@ -1311,19 +1311,19 @@ impl Pager {
             let page_size = self.page_size.get().unwrap_or(DEFAULT_PAGE_SIZE);
             let expected = (db_size * page_size) as u64;
             if expected < self.db_file.size()? {
-                self.db_file.truncate(
+                self.io.wait_for_completion(self.db_file.truncate(
                     expected as usize,
                     Completion::new_trunc(move |_| {
                         tracing::trace!(
                             "Database file truncated to expected size: {} bytes",
                             expected
                         );
-                    })
-                    .into(),
-                )?;
-                self.db_file.sync(Completion::new_sync(move |_| {
-                    tracing::trace!("Database file syncd after truncation");
-                }))?;
+                    }),
+                )?)?;
+                self.io
+                    .wait_for_completion(self.db_file.sync(Completion::new_sync(move |_| {
+                        tracing::trace!("Database file syncd after truncation");
+                    }))?)?;
             }
             checkpoint_result.release_guard();
         }

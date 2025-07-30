@@ -481,6 +481,9 @@ impl Program {
                         Ok(StepResult::Done)
                     }
                     TransactionState::None => Ok(StepResult::Done),
+                    TransactionState::PendingUpgrade => {
+                        panic!("Unexpected transaction state: {current_state:?} during auto-commit",)
+                    }
                 }
             } else {
                 if self.change_cnt_on {
