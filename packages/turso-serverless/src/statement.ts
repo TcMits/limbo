@@ -26,7 +26,7 @@ export class Statement {
   /**
    * Executes the prepared statement.
    * 
-   * @param args - Optional array of parameter values for the SQL statement
+   * @param args - Optional array of parameter values or object with named parameters
    * @returns Promise resolving to the result of the statement
    * 
    * @example
@@ -36,7 +36,7 @@ export class Statement {
    * console.log(`Inserted user with ID ${result.lastInsertRowid}`);
    * ```
    */
-  async run(args: any[] = []): Promise<any> {
+  async run(args: any[] | Record<string, any> = []): Promise<any> {
     const result = await this.session.execute(this.sql, args);
     return { changes: result.rowsAffected, lastInsertRowid: result.lastInsertRowid };
   }
@@ -44,7 +44,7 @@ export class Statement {
   /**
    * Execute the statement and return the first row.
    * 
-   * @param args - Optional array of parameter values for the SQL statement
+   * @param args - Optional array of parameter values or object with named parameters
    * @returns Promise resolving to the first row or null if no results
    * 
    * @example
@@ -56,7 +56,7 @@ export class Statement {
    * }
    * ```
    */
-  async get(args: any[] = []): Promise<any> {
+  async get(args: any[] | Record<string, any> = []): Promise<any> {
     const result = await this.session.execute(this.sql, args);
     return result.rows[0] || null;
   }
@@ -64,7 +64,7 @@ export class Statement {
   /**
    * Execute the statement and return all rows.
    * 
-   * @param args - Optional array of parameter values for the SQL statement
+   * @param args - Optional array of parameter values or object with named parameters
    * @returns Promise resolving to an array of all result rows
    * 
    * @example
@@ -74,7 +74,7 @@ export class Statement {
    * console.log(`Found ${activeUsers.length} active users`);
    * ```
    */
-  async all(args: any[] = []): Promise<any[]> {
+  async all(args: any[] | Record<string, any> = []): Promise<any[]> {
     const result = await this.session.execute(this.sql, args);
     return result.rows;
   }
@@ -85,7 +85,7 @@ export class Statement {
    * This method provides memory-efficient processing of large result sets
    * by streaming rows one at a time instead of loading everything into memory.
    * 
-   * @param args - Optional array of parameter values for the SQL statement
+   * @param args - Optional array of parameter values or object with named parameters
    * @returns AsyncGenerator that yields individual rows
    * 
    * @example
@@ -97,7 +97,7 @@ export class Statement {
    * }
    * ```
    */
-  async *iterate(args: any[] = []): AsyncGenerator<any> {
+  async *iterate(args: any[] | Record<string, any> = []): AsyncGenerator<any> {
     const { response, entries } = await this.session.executeRaw(this.sql, args);
     
     let columns: string[] = [];

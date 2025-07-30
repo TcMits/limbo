@@ -8,7 +8,9 @@ import {
   type CursorEntry,
   type PipelineRequest,
   type SequenceRequest,
-  type CloseRequest
+  type CloseRequest,
+  type NamedArg,
+  type Value
 } from './protocol.js';
 import { DatabaseError } from './error.js';
 
@@ -50,10 +52,10 @@ export class Session {
    * Execute a SQL statement and return all results.
    * 
    * @param sql - The SQL statement to execute
-   * @param args - Optional array of parameter values
+   * @param args - Optional array of parameter values or object with named parameters
    * @returns Promise resolving to the complete result set
    */
-  async execute(sql: string, args: any[] = []): Promise<any> {
+  async execute(sql: string, args: any[] | Record<string, any> = []): Promise<any> {
     const { response, entries } = await this.executeRaw(sql, args);
     const result = await this.processCursorEntries(entries);
     return result;
@@ -63,17 +65,31 @@ export class Session {
    * Execute a SQL statement and return the raw response and entries.
    * 
    * @param sql - The SQL statement to execute
-   * @param args - Optional array of parameter values
+   * @param args - Optional array of parameter values or object with named parameters
    * @returns Promise resolving to the raw response and cursor entries
    */
-  async executeRaw(sql: string, args: any[] = []): Promise<{ response: CursorResponse; entries: AsyncGenerator<CursorEntry> }> {
+  async executeRaw(sql: string, args: any[] | Record<string, any> = []): Promise<{ response: CursorResponse; entries: AsyncGenerator<CursorEntry> }> {
+    let positionalArgs: Value[] = [];
+    let namedArgs: NamedArg[] = [];
+
+    if (Array.isArray(args)) {
+      positionalArgs = args.map(encodeValue);
+    } else {
+      // Convert object with named parameters to NamedArg array
+      namedArgs = Object.entries(args).map(([name, value]) => ({
+        name,
+        value: encodeValue(value)
+      }));
+    }
+
     const request: CursorRequest = {
       baton: this.baton,
       batch: {
         steps: [{
           stmt: {
             sql,
-            args: args.map(encodeValue),
+            args: positionalArgs,
+            named_args: namedArgs,
             want_rows: true
           }
         }]
@@ -181,6 +197,7 @@ export class Session {
           stmt: {
             sql,
             args: [],
+            named_args: [],
             want_rows: false
           }
         }))

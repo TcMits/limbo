@@ -18,12 +18,17 @@ export interface ExecuteResult {
   last_insert_rowid?: string;
 }
 
+export interface NamedArg {
+  name: string;
+  value: Value;
+}
+
 export interface ExecuteRequest {
   type: 'execute';
   stmt: {
     sql: string;
     args: Value[];
-    named_args: Value[];
+    named_args: NamedArg[];
     want_rows: boolean;
   };
 }
@@ -32,6 +37,7 @@ export interface BatchStep {
   stmt: {
     sql: string;
     args: Value[];
+    named_args?: NamedArg[];
     want_rows: boolean;
   };
   condition?: {
