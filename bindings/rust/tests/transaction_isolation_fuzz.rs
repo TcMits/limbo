@@ -212,7 +212,6 @@ fn rng_from_time_or_env() -> (ChaCha8Rng, u64) {
 }
 
 #[tokio::test]
-#[ignore]
 /// Verify translation isolation semantics with multiple concurrent connections.
 /// This test is ignored because it still fails sometimes; unsure if it fails due to a bug in the test or a bug in the implementation.
 async fn test_multiple_connections_fuzz() {
