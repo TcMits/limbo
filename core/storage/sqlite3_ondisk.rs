@@ -963,7 +963,10 @@ pub fn write_pages_vectored(
 }
 
 #[instrument(skip_all, level = Level::DEBUG)]
-pub fn begin_sync(db_file: Arc<dyn DatabaseStorage>, syncing: Rc<RefCell<bool>>) -> Result<()> {
+pub fn begin_sync(
+    db_file: Arc<dyn DatabaseStorage>,
+    syncing: Rc<RefCell<bool>>,
+) -> Result<Completion> {
     assert!(!*syncing.borrow());
     *syncing.borrow_mut() = true;
     let completion = Completion::new_sync(move |_| {

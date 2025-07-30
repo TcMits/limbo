@@ -415,6 +415,9 @@ impl Batch {
             items: BTreeMap::new(),
         }
     }
+    fn is_full(&self) -> bool {
+        self.items.len() >= CKPT_BATCH_PAGES
+    }
     fn add_to_batch(&mut self, scratch: &PageRef, pool: &Arc<BufferPool>) {
         let (id, buf_clone) = unsafe {
             let inner = &*scratch.inner.get();
@@ -1560,13 +1563,12 @@ impl WalFile {
                 // In Restart or Truncate mode, we need to restart the log over and possibly truncate the file
                 // Release all locks and return the current num of wal frames and the amount we backfilled
                 CheckpointState::Done => {
-                    turso_assert!(
-                        self.ongoing_checkpoint
-                            .pending_flush
-                            .as_ref()
-                            .is_some_and(|pf| pf.done.load(Ordering::Relaxed)),
-                        "checkpoint pending flush must have finished"
-                    );
+                    if let Some(pf) = self.ongoing_checkpoint.pending_flush.as_ref() {
+                        turso_assert!(
+                            pf.done.load(Ordering::Relaxed),
+                            "checkpoint pending flush must have finished"
+                        );
+                    }
                     let mut checkpoint_result = {
                         let shared = self.get_shared();
                         let current_mx = shared.max_frame.load(Ordering::SeqCst);
