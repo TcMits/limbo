@@ -175,6 +175,7 @@ fn test_wal_frame_transfer_no_schema_changes_rollback() {
     assert_eq!(conn1.wal_frame_count().unwrap(), 14);
     let mut frame = [0u8; 24 + 4096];
     conn2.wal_insert_begin().unwrap();
+    // Intentionally leave out the final commit frame, so the big randomblob is not committed and should not be visible to transactions.
     for frame_id in 1..=(conn1.wal_frame_count().unwrap() as u32 - 1) {
         conn1.wal_get_frame(frame_id, &mut frame).unwrap();
         conn2.wal_insert_frame(frame_id, &frame).unwrap();
