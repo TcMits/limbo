@@ -1167,6 +1167,9 @@ impl Wal for WalFile {
     fn finish_append_frames_commit(&mut self) -> Result<()> {
         let shared = self.get_shared();
         shared.max_frame.store(self.max_frame, Ordering::SeqCst);
+        shared.read_locks[self.max_frame_read_lock_index.get()]
+            .value
+            .store(self.max_frame as u32, Ordering::SeqCst);
         tracing::trace!(self.max_frame, ?self.last_checksum);
         shared.last_checksum = self.last_checksum;
         Ok(())
