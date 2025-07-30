@@ -1,11 +1,14 @@
 use crate::mvcc::clock::LogicalClock;
 use crate::mvcc::errors::DatabaseError;
 use crate::mvcc::persistent_storage::Storage;
+use crate::storage::btree::BTreeCursor;
 use crate::storage::btree::BTreeKey;
+use crate::types::IOResult;
 use crate::types::ImmutableRecord;
 use crate::{Connection, Pager};
 use crossbeam_skiplist::{SkipMap, SkipSet};
 use parking_lot::RwLock;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -240,6 +243,7 @@ pub struct MvStore<Clock: LogicalClock> {
     next_rowid: AtomicU64,
     clock: Clock,
     storage: Storage,
+    loaded_tables: RwLock<HashSet<u64>>,
 }
 
 impl<Clock: LogicalClock> MvStore<Clock> {
@@ -252,6 +256,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
             next_rowid: AtomicU64::new(0), // TODO: determine this from B-Tree
             clock,
             storage,
+            loaded_tables: RwLock::new(HashSet::new()),
         }
     }
 
@@ -417,25 +422,6 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         tracing::trace!("scan_row_ids");
         let keys = self.rows.iter().map(|entry| *entry.key());
         Ok(keys.collect())
-    }
-
-    /// Gets all row ids in the database for a given table.
-    pub fn scan_row_ids_for_table(&self, table_id: u64) -> Result<Vec<RowID>> {
-        tracing::trace!("scan_row_ids_for_table(table_id={})", table_id);
-        let rows: Vec<RowID> = self
-            .rows
-            .range(
-                RowID {
-                    table_id,
-                    row_id: 0,
-                }..RowID {
-                    table_id,
-                    row_id: i64::MAX,
-                },
-            )
-            .map(|entry| *entry.key())
-            .collect();
-        Ok(rows)
     }
 
     pub fn get_row_id_range(
@@ -667,7 +653,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                 )
                 .map_err(|e| DatabaseError::Io(e.to_string()))
                 .unwrap();
-            if let crate::types::IOResult::Done(result) = result {
+            if let crate::types::IOResult::Done(_) = result {
                 break;
             }
         }
@@ -928,6 +914,94 @@ impl<Clock: LogicalClock> MvStore<Clock> {
             row.id.row_id
         );
         Ok(())
+    }
+
+    /// Try to scan for row ids in the table.
+    ///
+    /// This function loads all row ids of a table if the rowids of table were not populated yet.
+    /// TODO: This is quite expensive so we should try and load rowids in a lazy way.
+    ///
+    /// # Arguments
+    ///
+    pub fn maybe_initialize_table(&self, table_id: u64, pager: Rc<Pager>) -> Result<()> {
+        tracing::trace!("scan_row_ids_for_table(table_id={})", table_id);
+
+        // First, check if the table is already loaded.
+        if self.loaded_tables.read().unwrap().contains(&table_id) {
+            return Ok(());
+        }
+
+        // Then, scan the disk B-tree to find existing rows
+        self.scan_load_table(table_id, pager)?;
+
+        self.loaded_tables.write().unwrap().insert(table_id);
+
+        Ok(())
+    }
+
+    /// Scans the table and inserts the rows into the database.
+    ///
+    /// This is initialization step for a table, where we still don't have any rows so we need to insert them if there are.
+    fn scan_load_table(&self, table_id: u64, pager: Rc<Pager>) -> Result<()> {
+        let root_page = table_id as usize;
+        let mut cursor = BTreeCursor::new_table(
+            None, // No MVCC cursor for scanning
+            pager, root_page, 1, // We'll adjust this as needed
+        );
+        loop {
+            match cursor
+                .rewind()
+                .map_err(|e| DatabaseError::Io(e.to_string()))?
+            {
+                IOResult::Done(()) => {
+                    break;
+                }
+                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
+            }
+        }
+        Ok(loop {
+            let rowid_result = cursor
+                .rowid()
+                .map_err(|e| DatabaseError::Io(e.to_string()))?;
+            let row_id = match rowid_result {
+                IOResult::Done(Some(row_id)) => row_id,
+                IOResult::Done(None) => break,
+                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
+            };
+            match cursor
+                .record()
+                .map_err(|e| DatabaseError::Io(e.to_string()))?
+            {
+                IOResult::Done(Some(record)) => {
+                    let id = RowID { table_id, row_id };
+                    let column_count = record.column_count();
+                    // We insert row with 0 timestamp, because it's the only version we have on initialization.
+                    self.insert_version(
+                        id,
+                        RowVersion {
+                            begin: TxTimestampOrID::Timestamp(0),
+                            end: None,
+                            row: Row::new(id, record.get_payload().to_vec(), column_count),
+                        },
+                    );
+                }
+                IOResult::Done(None) => break,
+                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
+            }
+
+            // Move to next record
+            match cursor
+                .next()
+                .map_err(|e| DatabaseError::Io(e.to_string()))?
+            {
+                IOResult::Done(has_next) => {
+                    if !has_next {
+                        break;
+                    }
+                }
+                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
+            }
+        })
     }
 }
 

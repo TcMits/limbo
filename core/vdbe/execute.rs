@@ -919,7 +919,7 @@ pub fn op_open_read(
             let table_id = *root_page as u64;
             let mv_store = mv_store.unwrap().clone();
             let mv_cursor = Rc::new(RefCell::new(
-                MvCursor::new(mv_store.clone(), tx_id, table_id).unwrap(),
+                MvCursor::new(mv_store, tx_id, table_id, pager.clone()).unwrap(),
             ));
             Some(mv_cursor)
         }
@@ -5829,7 +5829,7 @@ pub fn op_open_write(
             let table_id = root_page;
             let mv_store = mv_store.unwrap().clone();
             let mv_cursor = Rc::new(RefCell::new(
-                MvCursor::new(mv_store.clone(), tx_id, table_id).unwrap(),
+                MvCursor::new(mv_store.clone(), tx_id, table_id, pager.clone()).unwrap(),
             ));
             Some(mv_cursor)
         }
@@ -6439,7 +6439,7 @@ pub fn op_open_ephemeral(
                     let table_id = root_page as u64;
                     let mv_store = mv_store.unwrap().clone();
                     let mv_cursor = Rc::new(RefCell::new(
-                        MvCursor::new(mv_store.clone(), tx_id, table_id).unwrap(),
+                        MvCursor::new(mv_store.clone(), tx_id, table_id, pager.clone()).unwrap(),
                     ));
                     Some(mv_cursor)
                 }
