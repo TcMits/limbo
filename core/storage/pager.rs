@@ -818,6 +818,7 @@ impl Pager {
     ) -> Result<IOResult<PagerCommitResult>> {
         tracing::trace!("end_tx(rollback={})", rollback);
         if rollback {
+            self.rollback(schema_did_change, connection)?;
             self.wal.borrow().end_write_tx();
             self.wal.borrow().end_read_tx();
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
@@ -1797,11 +1798,7 @@ impl Pager {
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
-    pub fn rollback(
-        &self,
-        schema_did_change: bool,
-        connection: &Connection,
-    ) -> Result<(), LimboError> {
+    fn rollback(&self, schema_did_change: bool, connection: &Connection) -> Result<(), LimboError> {
         tracing::debug!(schema_did_change);
         self.dirty_pages.borrow_mut().clear();
         let mut cache = self.page_cache.write();

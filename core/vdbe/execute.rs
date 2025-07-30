@@ -2086,7 +2086,7 @@ pub fn op_auto_commit(
     if *auto_commit != conn.auto_commit.get() {
         if *rollback {
             // TODO(pere): add rollback I/O logic once we implement rollback journal
-            pager.rollback(schema_did_change, &conn)?;
+            return_if_io!(pager.end_tx(true, schema_did_change, &conn, false));
             conn.auto_commit.replace(true);
         } else {
             conn.auto_commit.replace(*auto_commit);

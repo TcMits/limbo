@@ -1169,7 +1169,12 @@ impl Connection {
             let pager = self.pager.borrow();
 
             // remove all non-commited changes in case if WAL session left some suffix without commit frame
-            pager.rollback(false, self).expect("rollback must succeed");
+            while let IOResult::IO = pager
+                .end_tx(false, false, self, false)
+                .expect("rollback must succeed")
+            {
+                self.run_once()?;
+            }
 
             let wal = pager.wal.borrow_mut();
             wal.end_write_tx();
@@ -1726,13 +1731,6 @@ impl Statement {
         if res.is_err() {
             let state = self.program.connection.transaction_state.get();
             if let TransactionState::Write { schema_did_change } = state {
-                if let Err(e) = self
-                    .pager
-                    .rollback(schema_did_change, &self.program.connection)
-                {
-                    // Let's panic for now as we don't want to leave state in a bad state.
-                    panic!("rollback failed: {e:?}");
-                }
                 let end_tx_res =
                     self.pager
                         .end_tx(true, schema_did_change, &self.program.connection, true)?;
