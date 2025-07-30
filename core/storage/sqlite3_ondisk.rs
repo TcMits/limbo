@@ -1695,7 +1695,7 @@ pub fn read_entire_wal_dumb(file: &Arc<dyn File>) -> Result<Arc<UnsafeCell<WalFi
         wfs_data.loaded.store(true, Ordering::SeqCst);
     });
     let c = Completion::new_read(buf_for_pread, complete);
-    let c = file.pread(0, c)?;
+    let _c = file.pread(0, c)?;
 
     Ok(wal_file_shared_ret)
 }

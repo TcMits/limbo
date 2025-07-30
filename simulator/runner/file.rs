@@ -121,7 +121,7 @@ impl SimulatorFile {
             if queued_io[i].time <= now {
                 let io = queued_io.remove(i);
                 // your code here
-                let c = (io.op)(self)?;
+                let _c = (io.op)(self)?;
             } else {
                 i += 1;
             }

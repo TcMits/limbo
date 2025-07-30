@@ -281,7 +281,7 @@ impl Connection {
             .inner
             .lock()
             .map_err(|e| Error::MutexError(e.to_string()))?;
-        let res = conn.cacheflush()?;
+        let _res = conn.cacheflush()?;
         Ok(())
     }
 
