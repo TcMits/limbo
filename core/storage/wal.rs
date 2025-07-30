@@ -1378,7 +1378,7 @@ impl WalFile {
                                 *frame
                             );
                             self.ongoing_checkpoint.page.get().id = page as usize;
-                            self.read_frame(
+                            let _ = self.read_frame(
                                 *frame,
                                 self.ongoing_checkpoint.page.clone(),
                                 self.buffer_pool.clone(),
