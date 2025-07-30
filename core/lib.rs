@@ -312,9 +312,13 @@ impl Database {
 
             db.with_schema_mut(|schema| {
                 schema.schema_version = get_schema_version(&conn)?;
-                if let Err(LimboError::ExtensionError(e)) =
-                    schema.make_from_btree(None, pager, &syms)
-                {
+                let result = schema
+                    .make_from_btree(None, pager.clone(), &syms)
+                    .or_else(|e| {
+                        pager.end_read_tx()?;
+                        Err(e)
+                    });
+                if let Err(LimboError::ExtensionError(e)) = result {
                     // this means that a vtab exists and we no longer have the module loaded. we print
                     // a warning to the user to load the module
                     eprintln!("Warning: {e}");
