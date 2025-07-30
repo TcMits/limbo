@@ -335,16 +335,42 @@ pub fn vector_concat(v1: &Vector, v2: &Vector) -> Result<Vector> {
 }
 
 pub fn subvector(vector: &Vector, start_idx: usize, length: usize) -> Result<Vector> {
-    if start_idx + length > vector.data.len() {
-        return Err(LimboError::ConversionError(
-            "Subvector range out of bounds".into(),
-        ));
+    fn extract_bytes<T, const N: usize>(
+        slice: &[T],
+        start: usize,
+        len: usize,
+        to_bytes: impl Fn(&T) -> [u8; N],
+    ) -> Result<Vec<u8>> {
+        if start + len > slice.len() {
+            return Err(LimboError::ConversionError(
+                "Subvector range out of bounds".into(),
+            ));
+        }
+
+        let mut buf = Vec::with_capacity(len * N);
+        for item in &slice[start..start + len] {
+            buf.extend_from_slice(&to_bytes(item));
+        }
+        Ok(buf)
     }
 
-    let data = vector.data[start_idx..start_idx + length].to_vec();
+    let (vector_type, data) = match vector.vector_type {
+        VectorType::Float32 => (
+            VectorType::Float32,
+            extract_bytes::<f32, 4>(vector.as_f32_slice(), start_idx, length, |v| {
+                v.to_le_bytes()
+            })?,
+        ),
+        VectorType::Float64 => (
+            VectorType::Float64,
+            extract_bytes::<f64, 8>(vector.as_f64_slice(), start_idx, length, |v| {
+                v.to_le_bytes()
+            })?,
+        ),
+    };
 
     Ok(Vector {
-        vector_type: vector.vector_type.clone(),
+        vector_type,
         dims: length,
         data,
     })
