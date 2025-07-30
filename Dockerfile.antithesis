@@ -22,6 +22,7 @@ COPY ./cli ./cli/
 COPY ./core ./core/
 COPY ./extensions ./extensions/
 COPY ./macros ./macros/
+COPY ./packages ./packages/
 COPY ./simulator ./simulator/
 COPY ./sqlite3 ./sqlite3/
 COPY ./tests ./tests/
@@ -61,6 +62,7 @@ COPY --from=planner /app/bindings/go ./bindings/go/
 COPY --from=planner /app/bindings/javascript ./bindings/javascript/
 COPY --from=planner /app/bindings/java ./bindings/java/
 COPY --from=planner /app/bindings/python ./bindings/python/
+COPY --from=planner /app/packages ./packages/
 COPY --from=planner /app/core ./core/
 COPY --from=planner /app/extensions ./extensions/
 COPY --from=planner /app/macros ./macros/
