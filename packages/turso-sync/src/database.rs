@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
+use hyper_rustls::{ConfigBuilderExt, HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor};
 
 use crate::{
@@ -86,9 +86,12 @@ impl Database {
 }
 
 pub fn default_connector() -> Result<HttpsConnector<HttpConnector>> {
-    Ok(HttpsConnectorBuilder::new()
+    let tls_config = rustls::ClientConfig::builder()
         .with_native_roots()
         .map_err(|e| Error::DatabaseSyncError(format!("unable to configure CA roots: {e}")))?
+        .with_no_client_auth();
+    Ok(HttpsConnectorBuilder::new()
+        .with_tls_config(tls_config)
         .https_or_http()
         .enable_http1()
         .build())
