@@ -26,6 +26,7 @@ typedef struct {
 typedef struct {
     sqlite3_vtab_cursor base;
     int current;
+    int last;
     kv_table *table;
 } kv_cursor;
 
@@ -88,7 +89,30 @@ static int kvstoreFilter(
     int argc, sqlite3_value **argv
 ) {
     kv_cursor *cursor = (kv_cursor *)pVtabCursor;
-    cursor->current = 0;
+    kv_table *table = cursor->table;
+
+    // If filtering by key, only return the matching row (or EOF)
+    if (idxNum == 1 && idxStr && strcmp(idxStr, "key_eq") == 0 && argc >= 1) {
+        const char *key = (const char *)sqlite3_value_text(argv[0]);
+        int found = 0;
+        for (int i = 0; i < table->row_count; i++) {
+            if (strcmp(table->rows[i].key, key) == 0) {
+                cursor->current = i;
+                cursor->last = i + 1; // Only this row
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            // EOF
+            cursor->current = table->row_count;
+            cursor->last = table->row_count;
+        }
+    } else {
+        // full scan
+        cursor->current = 0;
+        cursor->last = table->row_count;
+    }
     return SQLITE_OK;
 }
 
@@ -100,7 +124,7 @@ static int kvstoreNext(sqlite3_vtab_cursor *cur) {
 
 static int kvstoreEof(sqlite3_vtab_cursor *cur) {
     kv_cursor *cursor = (kv_cursor *)cur;
-    return cursor->current >= cursor->table->row_count;
+    return cursor->current >= cursor->last;
 }
 
 static int kvstoreColumn(sqlite3_vtab_cursor *cur, sqlite3_context *ctx, int col) {
@@ -139,7 +163,37 @@ static int kvstoreCreate(
 static int kvstoreBestIndex(
     sqlite3_vtab *tab,
     sqlite3_index_info *pIdxInfo) {
-    pIdxInfo->estimatedCost = 1000000;
+    int key_eq_idx = -1;
+    for (int i = 0; i < pIdxInfo->nConstraint; i++) {
+        struct sqlite3_index_constraint *c = &pIdxInfo->aConstraint[i];
+        if (c->usable && c->op == SQLITE_INDEX_CONSTRAINT_EQ && c->iColumn == 1) {
+            key_eq_idx = i;
+            break;
+        }
+    }
+    if (key_eq_idx >= 0) {
+        pIdxInfo->idxNum = 1;
+        pIdxInfo->idxStr = (char *)"key_eq";
+        pIdxInfo->orderByConsumed = (pIdxInfo->nOrderBy > 0 &&
+                                     pIdxInfo->aOrderBy[0].iColumn == 2 &&
+                                     !pIdxInfo->aOrderBy[0].desc) ? 1 : 0;
+        pIdxInfo->estimatedCost = 10.0;
+        pIdxInfo->estimatedRows = 4;
+        for (int i = 0; i < pIdxInfo->nConstraint; i++) {
+            pIdxInfo->aConstraintUsage[i].omit = (i == key_eq_idx) ? 1 : 0;
+            pIdxInfo->aConstraintUsage[i].argvIndex = (i == key_eq_idx) ? 1 : 0;
+        }
+    } else {
+        pIdxInfo->idxNum = -1;
+        pIdxInfo->idxStr = NULL;
+        pIdxInfo->orderByConsumed = 0;
+        pIdxInfo->estimatedCost = 1000.0;
+        pIdxInfo->estimatedRows = 1000;
+        for (int i = 0; i < pIdxInfo->nConstraint; i++) {
+            pIdxInfo->aConstraintUsage[i].omit = 0;
+            pIdxInfo->aConstraintUsage[i].argvIndex = 0;
+        }
+    }
     return SQLITE_OK;
 }
 
