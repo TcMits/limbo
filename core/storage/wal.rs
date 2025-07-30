@@ -1307,7 +1307,7 @@ impl WalFile {
                 &shared.wal_header.lock(),
             )?)?;
         self.io
-            .wait_for_completion(shared.file.sync(Completion::new_sync(|_| {}).into())?)?;
+            .wait_for_completion(shared.file.sync(Completion::new_sync(|_| {}))?)?;
         Ok(())
     }
 
@@ -1959,7 +1959,9 @@ pub mod test {
         conn.execute("create table test(id integer primary key, value text)")
             .unwrap();
         bulk_inserts(&conn, 20, 3);
-        conn.pager.borrow_mut().cacheflush().unwrap();
+        while let IOResult::IO = conn.pager.borrow_mut().cacheflush().unwrap() {
+            conn.run_once().unwrap();
+        }
 
         // Snapshot header & counters before the RESTART checkpoint.
         let wal_shared = db.maybe_shared_wal.read().as_ref().unwrap().clone();
@@ -2049,7 +2051,9 @@ pub mod test {
             .execute("create table test(id integer primary key, value text)")
             .unwrap();
         bulk_inserts(&conn1.clone(), 15, 2);
-        conn1.pager.borrow_mut().cacheflush().unwrap();
+        while let IOResult::IO = conn1.pager.borrow_mut().cacheflush().unwrap() {
+            conn1.run_once().unwrap();
+        }
 
         // Force a read transaction that will freeze a lower read mark
         let readmark = {
@@ -2061,7 +2065,9 @@ pub mod test {
 
         // generate more frames that the reader will not see.
         bulk_inserts(&conn1.clone(), 15, 2);
-        conn1.pager.borrow_mut().cacheflush().unwrap();
+        while let IOResult::IO = conn1.pager.borrow_mut().cacheflush().unwrap() {
+            conn1.run_once().unwrap();
+        }
 
         // Run passive checkpoint, expect partial
         let (res1, max_before) = {

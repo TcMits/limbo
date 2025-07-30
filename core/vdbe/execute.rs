@@ -1990,7 +1990,7 @@ pub fn op_transaction(
             // instead of ending the read tx, just update the state to pending.
             (TransactionState::PendingUpgrade, write) => {
                 turso_assert!(
-                    write,
+                    *write,
                     "pending upgrade should only be set for write transactions"
                 );
                 (
