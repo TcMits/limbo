@@ -104,3 +104,26 @@ pub fn vector_distance_l2(args: &[Register]) -> Result<Value> {
     let dist = Euclidean::calculate(&x, &y)?;
     Ok(Value::Float(dist))
 }
+
+pub fn vector_concat(args: &[Register]) -> Result<Value> {
+    if args.len() != 2 {
+        return Err(LimboError::ConversionError(
+            "distance_concat requires exactly two arguments".to_string(),
+        ));
+    }
+
+    let x = parse_vector(&args[0], None)?;
+    let y = parse_vector(&args[1], None)?;
+
+    if x.vector_type != y.vector_type {
+        return Err(LimboError::ConversionError(
+            "Vectors must be of the same type".to_string(),
+        ));
+    }
+
+    let vector = vector_types::vector_concat(&x, &y)?;
+    match vector.vector_type {
+        VectorType::Float32 => Ok(vector_serialize_f32(vector)),
+        VectorType::Float64 => Ok(vector_serialize_f64(vector)),
+    }
+}

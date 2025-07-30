@@ -158,6 +158,7 @@ pub enum VectorFunc {
     VectorExtract,
     VectorDistanceCos,
     VectorDistanceEuclidean,
+    VectorConcat,
 }
 
 impl VectorFunc {
@@ -176,6 +177,7 @@ impl Display for VectorFunc {
             Self::VectorDistanceCos => "vector_distance_cos".to_string(),
             // We use `distance_l2` to reduce user input
             Self::VectorDistanceEuclidean => "vector_distance_l2".to_string(),
+            Self::VectorConcat => "vector_concat".to_string(),
         };
         write!(f, "{str}")
     }
@@ -838,6 +840,7 @@ impl Func {
             "vector_extract" => Ok(Self::Vector(VectorFunc::VectorExtract)),
             "vector_distance_cos" => Ok(Self::Vector(VectorFunc::VectorDistanceCos)),
             "vector_distance_l2" => Ok(Self::Vector(VectorFunc::VectorDistanceEuclidean)),
+            "vector_concat" => Ok(Self::Vector(VectorFunc::VectorConcat)),
             _ => crate::bail_parse_error!("no such function: {}", name),
         }
     }

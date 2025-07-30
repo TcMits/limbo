@@ -16,6 +16,7 @@ use crate::types::{
 use crate::util::normalize_ident;
 use crate::vdbe::insn::InsertFlags;
 use crate::vdbe::registers_to_ref_values;
+use crate::vector::vector_concat;
 use crate::{
     error::{
         LimboError, SQLITE_CONSTRAINT, SQLITE_CONSTRAINT_NOTNULL, SQLITE_CONSTRAINT_PRIMARYKEY,
@@ -4559,6 +4560,10 @@ pub fn op_function(
             VectorFunc::VectorDistanceEuclidean => {
                 let result =
                     vector_distance_l2(&state.registers[*start_reg..*start_reg + arg_count])?;
+                state.registers[*dest] = Register::Value(result);
+            }
+            VectorFunc::VectorConcat => {
+                let result = vector_concat(&state.registers[*start_reg..*start_reg + arg_count])?;
                 state.registers[*dest] = Register::Value(result);
             }
         },
