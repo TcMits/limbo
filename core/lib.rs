@@ -1170,12 +1170,13 @@ impl Connection {
         {
             let pager = self.pager.borrow();
 
+            {
+                let wal = pager.wal.borrow_mut();
+                wal.end_write_tx();
+                wal.end_read_tx();
+            }
             // remove all non-commited changes in case if WAL session left some suffix without commit frame
             pager.rollback(false, self)?;
-
-            let wal = pager.wal.borrow_mut();
-            wal.end_write_tx();
-            wal.end_read_tx();
         }
 
         // let's re-parse schema from scratch if schema cookie changed compared to the our in-memory view of schema
