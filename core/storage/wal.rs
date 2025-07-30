@@ -401,10 +401,56 @@ pub enum CheckpointState {
 
 /// IOV_MAX is 1024 on most systems, lets use 512 to be safe
 pub const CKPT_BATCH_PAGES: usize = 512;
+type PageId = usize;
 
-#[derive(Clone)]
-pub(super) struct BatchItem {
-    pub(super) buf: Arc<RefCell<Buffer>>,
+/// Batch is a collection of pages that are being checkpointed together. It is used to
+/// aggregate contiguous pages into a single write operation to the database file.
+pub(super) struct Batch {
+    items: BTreeMap<PageId, Arc<RefCell<Buffer>>>,
+}
+// TODO(preston): implement the same thing for `readv`
+impl Batch {
+    fn new() -> Self {
+        Self {
+            items: BTreeMap::new(),
+        }
+    }
+    fn add_to_batch(&mut self, scratch: &PageRef, pool: &Arc<BufferPool>) {
+        let (id, buf_clone) = unsafe {
+            let inner = &*scratch.inner.get();
+            let id = inner.id;
+            let contents = inner.contents.as_ref().expect("scratch has contents");
+            let buf = contents.buffer.clone();
+            (id, buf)
+        };
+        // Insert the new batch item at the correct position
+        self.items.insert(id, buf_clone);
+
+        // Re-initialize scratch with a fresh buffer
+        let raw = pool.get();
+        let pool_clone = pool.clone();
+        let drop_fn = Rc::new(move |b| pool_clone.put(b));
+        let new_buf = Arc::new(RefCell::new(Buffer::new(raw, drop_fn)));
+
+        unsafe {
+            let inner = &mut *scratch.inner.get();
+            inner.contents = Some(PageContent::new(0, new_buf));
+            // reset flags on scratch so it won't be cleared later with the real page
+            inner.flags.store(0, Ordering::SeqCst);
+        }
+    }
+}
+
+impl std::ops::Deref for Batch {
+    type Target = BTreeMap<PageId, Arc<RefCell<Buffer>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.items
+    }
+}
+impl std::ops::DerefMut for Batch {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.items
+    }
 }
 
 // Checkpointing is a state machine that has multiple steps. Since there are multiple steps we save
@@ -417,7 +463,7 @@ pub(super) struct BatchItem {
 // range. This is inefficient for now.
 struct OngoingCheckpoint {
     scratch_page: PageRef,
-    batch: BTreeMap<usize, BatchItem>,
+    batch: Batch,
     state: CheckpointState,
     pending_flush: Option<PendingFlush>,
     min_frame: u64,
@@ -703,35 +749,6 @@ impl Drop for CheckpointLocks {
                 (*shared.get()).checkpoint_lock.unlock();
             },
         }
-    }
-}
-
-fn take_page_into_batch(
-    scratch: &PageRef,
-    pool: &Arc<BufferPool>,
-    batch: &mut BTreeMap<usize, BatchItem>,
-) {
-    let (id, buf_clone) = unsafe {
-        let inner = &*scratch.inner.get();
-        let id = inner.id;
-        let contents = inner.contents.as_ref().expect("scratch has contents");
-        let buf = contents.buffer.clone();
-        (id, buf)
-    };
-    // Insert the new batch item at the correct position
-    batch.insert(id, BatchItem { buf: buf_clone });
-
-    // Re-initialize scratch with a fresh buffer
-    let raw = pool.get();
-    let pool_clone = pool.clone();
-    let drop_fn = Rc::new(move |b| pool_clone.put(b));
-    let new_buf = Arc::new(RefCell::new(Buffer::new(raw, drop_fn)));
-
-    unsafe {
-        let inner = &mut *scratch.inner.get();
-        inner.contents = Some(PageContent::new(0, new_buf));
-        // reset flags on scratch so it won't be cleared later with the real page
-        inner.flags.store(0, Ordering::SeqCst);
     }
 }
 
@@ -1275,7 +1292,7 @@ impl WalFile {
             shared,
             ongoing_checkpoint: OngoingCheckpoint {
                 scratch_page: checkpoint_page,
-                batch: BTreeMap::new(),
+                batch: Batch::new(),
                 pending_flush: None,
                 state: CheckpointState::Start,
                 min_frame: 0,
@@ -1432,7 +1449,14 @@ impl WalFile {
                     let frame_cache = frame_cache.lock();
                     assert!(self.ongoing_checkpoint.current_page as usize <= pages_in_frames.len());
                     if self.ongoing_checkpoint.current_page as usize == pages_in_frames.len() {
-                        self.ongoing_checkpoint.state = CheckpointState::Done;
+                        if self.ongoing_checkpoint.batch.is_empty() {
+                            // no more pages to checkpoint, we are done
+                            tracing::info!("checkpoint done, no more pages to checkpoint");
+                            self.ongoing_checkpoint.state = CheckpointState::Done;
+                        } else {
+                            // flush the batch
+                            self.ongoing_checkpoint.state = CheckpointState::FlushBatch;
+                        }
                         continue 'checkpoint_loop;
                     }
                     let page = pages_in_frames[self.ongoing_checkpoint.current_page as usize];
@@ -1471,18 +1495,25 @@ impl WalFile {
                     // mark before batching
                     self.ongoing_checkpoint.scratch_page.set_dirty();
                     // we read the frame into memory, add it to our batch
-                    take_page_into_batch(
-                        &self.ongoing_checkpoint.scratch_page,
-                        &self.buffer_pool,
-                        &mut self.ongoing_checkpoint.batch,
-                    );
+                    self.ongoing_checkpoint
+                        .batch
+                        .add_to_batch(&self.ongoing_checkpoint.scratch_page, &self.buffer_pool);
+
                     let more_pages = (self.ongoing_checkpoint.current_page as usize)
-                        < self.get_shared().pages_in_frames.lock().len() - 1
-                        && self.ongoing_checkpoint.batch.len() < CKPT_BATCH_PAGES;
+                        < self
+                            .get_shared()
+                            .pages_in_frames
+                            .lock()
+                            .len()
+                            .saturating_sub(1)
+                        && !self.ongoing_checkpoint.batch.is_full();
+
+                    // if we can read more pages, continue reading and accumulating pages
                     if more_pages {
                         self.ongoing_checkpoint.current_page += 1;
                         self.ongoing_checkpoint.state = CheckpointState::ReadFrame;
                     } else {
+                        // if we have enough pages in the batch, flush it
                         self.ongoing_checkpoint.state = CheckpointState::FlushBatch;
                     }
                 }

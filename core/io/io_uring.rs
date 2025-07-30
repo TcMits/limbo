@@ -20,7 +20,8 @@ use tracing::{debug, trace};
 const ENTRIES: u32 = 512;
 
 /// Idle timeout for the sqpoll kernel thread before it needs
-/// to be woken back up by a call to IORING_ENTER
+/// to be woken back up by a call IORING_ENTER_SQ_WAKEUP flag.
+/// (handled by the io_uring crate in `submit_and_wait`)
 const SQPOLL_IDLE: u32 = 1000;
 
 /// Number of file descriptors we preallocate for io_uring.
@@ -35,7 +36,7 @@ const IOVEC_POOL_SIZE: usize = 64;
 const MAX_IOVEC_ENTRIES: usize = CKPT_BATCH_PAGES;
 
 /// Maximum number of I/O operations to wait for in a single run,
-/// waiting for > 1 can reduce the amount of IOURING_ENTER syscalls we
+/// waiting for > 1 can reduce the amount of `io_uring_enter` syscalls we
 /// make, but can increase single operation latency.
 const MAX_WAIT: usize = 4;
 
@@ -137,8 +138,9 @@ macro_rules! with_fd {
     };
 }
 
-/// wrapper type to represent a possibly registered file desriptor,
-/// only used in WritevState
+/// wrapper type to represent a possibly registered file descriptor,
+/// only used in WritevState, and piggy-backs on the available methods from
+/// `UringFile`, so we don't have to store the file on `WritevState`.
 enum Fd {
     Fixed(u32),
     RawFd(i32),
