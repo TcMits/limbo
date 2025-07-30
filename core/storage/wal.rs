@@ -674,7 +674,9 @@ impl Wal for WalFile {
     fn begin_read_tx(&mut self) -> Result<(LimboResult, bool)> {
         turso_assert!(
             self.max_frame_read_lock_index.get().eq(&NO_LOCK_HELD),
-            "cannot start a new read tx without ending an existing one"
+            "cannot start a new read tx without ending an existing one, lock_value={}, expected={}",
+            self.max_frame_read_lock_index.get(),
+            NO_LOCK_HELD
         );
         let (shared_max, nbackfills, last_checksum, checkpoint_seq) = {
             let shared = self.get_shared();
