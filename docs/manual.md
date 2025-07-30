@@ -331,6 +331,10 @@ Installing the WebAssembly package:
 npm i @tursodatabase/turso --cpu wasm32
 ```
 
+### API reference
+
+See [JavaScript API reference](docs/javascript-api-reference.md) for more information.
+
 ### Getting Started
 
 To use Turso from JavaScript application, you need to import `Database` type from the `@tursodatabase/turso` package.
