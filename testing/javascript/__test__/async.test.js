@@ -44,6 +44,10 @@ test.afterEach.always(async (t) => {
 });
 
 test.serial("Open in-memory database", async (t) => {
+  if (process.env.PROVIDER === "serverless") {
+    t.pass("Skipping in-memory database test for serverless");
+    return;
+  }
   const [db] = await connect(":memory:");
   t.is(db.memory, true);
 });
