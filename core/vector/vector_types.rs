@@ -334,7 +334,7 @@ pub fn vector_concat(v1: &Vector, v2: &Vector) -> Result<Vector> {
     })
 }
 
-pub fn subvector(vector: &Vector, start_idx: usize, length: usize) -> Result<Vector> {
+pub fn vector_slice(vector: &Vector, start_idx: usize, length: usize) -> Result<Vector> {
     fn extract_bytes<T, const N: usize>(
         slice: &[T],
         start: usize,
@@ -343,7 +343,7 @@ pub fn subvector(vector: &Vector, start_idx: usize, length: usize) -> Result<Vec
     ) -> Result<Vec<u8>> {
         if start + len > slice.len() {
             return Err(LimboError::ConversionError(
-                "Subvector range out of bounds".into(),
+                "vector_slice range out of bounds".into(),
             ));
         }
 
@@ -663,12 +663,12 @@ mod tests {
     }
 
     #[test]
-    fn test_subvector() {
+    fn test_vector_slice() {
         let input = "[1.0, 2.0, 3.0, 4.0, 5.0]";
         let value = Value::from_text(input);
         let vector = parse_string_vector(VectorType::Float32, &value).unwrap();
 
-        let result = subvector(&vector, 1, 3).unwrap();
+        let result = vector_slice(&vector, 1, 3).unwrap();
 
         assert_eq!(result.dims, 3);
         assert_eq!(result.vector_type, VectorType::Float32);

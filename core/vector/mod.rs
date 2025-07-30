@@ -128,7 +128,7 @@ pub fn vector_concat(args: &[Register]) -> Result<Value> {
     }
 }
 
-pub fn subvector(args: &[Register]) -> Result<Value> {
+pub fn vector_slice(args: &[Register]) -> Result<Value> {
     if args.len() != 3 {
         return Err(LimboError::ConversionError(
             "vector_sub requires exactly three arguments".to_string(),
@@ -145,7 +145,7 @@ pub fn subvector(args: &[Register]) -> Result<Value> {
         ));
     }
 
-    let result = vector_types::subvector(&vector, start_index as usize, length as usize)?;
+    let result = vector_types::vector_slice(&vector, start_index as usize, length as usize)?;
 
     match result.vector_type {
         VectorType::Float32 => Ok(vector_serialize_f32(result)),
