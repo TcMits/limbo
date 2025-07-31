@@ -1609,6 +1609,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}] = data", *dest),
             ),
+            Insn::Cast { reg, affinity } => (
+                "Cast",
+                *reg as i32,
+                0,
+                0,
+                Value::build_text(""),
+                0,
+                format!("affinity(r[{}]={:?})", *reg, affinity),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

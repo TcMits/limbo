@@ -427,6 +427,7 @@ Modifiers:
 | BitOr          | Yes    |         |
 | Blob           | Yes    |         |
 | BeginSubrtn    | Yes    |         |
+| Cast           | Yes    |         |
 | Checkpoint     | Yes    |         |
 | Clear          | No     |         |
 | Close          | Yes    |         |
@@ -554,11 +555,6 @@ Modifiers:
 | String8        | Yes    |         |
 | Subtract       | Yes    |         |
 | TableLock      | No     |         |
-| ToBlob         | No     |         |
-| ToInt          | No     |         |
-| ToNumeric      | No     |         |
-| ToReal         | No     |         |
-| ToText         | No     |         |
 | Trace          | No     |         |
 | Transaction    | Yes    |         |
 | VBegin         | No     |         |

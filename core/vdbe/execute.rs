@@ -6651,6 +6651,31 @@ pub fn op_integrity_check(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub fn op_cast(
+    _program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    _pager: &Rc<Pager>,
+    _mv_store: Option<&Rc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::Cast { reg, affinity } = insn else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    let value = state.registers[*reg].get_owned_value().clone();
+    let result = match affinity {
+        Affinity::Blob => value.exec_cast("BLOB"),
+        Affinity::Text => value.exec_cast("TEXT"),
+        Affinity::Numeric => value.exec_cast("NUMERIC"),
+        Affinity::Integer => value.exec_cast("INTEGER"),
+        Affinity::Real => value.exec_cast("REAL"),
+    };
+
+    state.registers[*reg] = Register::Value(result);
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 impl Value {
     pub fn exec_lower(&self) -> Option<Self> {
         match self {

@@ -706,6 +706,12 @@ pub enum Insn {
         func: FuncCtx,      // P4
     },
 
+    /// Cast register P1 to affinity P2 and store in register P1
+    Cast {
+        reg: usize,
+        affinity: Affinity,
+    },
+
     InitCoroutine {
         yield_reg: usize,
         jump_on_definition: BranchOffset,
@@ -1075,6 +1081,7 @@ impl Insn {
             Insn::SorterData { .. } => execute::op_sorter_data,
             Insn::SorterNext { .. } => execute::op_sorter_next,
             Insn::Function { .. } => execute::op_function,
+            Insn::Cast { .. } => execute::op_cast,
             Insn::InitCoroutine { .. } => execute::op_init_coroutine,
             Insn::EndCoroutine { .. } => execute::op_end_coroutine,
             Insn::Yield { .. } => execute::op_yield,

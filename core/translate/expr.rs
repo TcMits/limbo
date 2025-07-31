@@ -8,7 +8,7 @@ use super::plan::TableReferences;
 use crate::function::JsonFunc;
 use crate::function::{Func, FuncCtx, MathFuncArity, ScalarFunc, VectorFunc};
 use crate::functions::datetime;
-use crate::schema::{Affinity, Table, Type};
+use crate::schema::{affinity, Affinity, Table, Type};
 use crate::util::{exprs_are_equivalent, parse_numeric_literal};
 use crate::vdbe::builder::CursorKey;
 use crate::vdbe::{
@@ -651,24 +651,11 @@ pub fn translate_expr(
         }
         ast::Expr::Cast { expr, type_name } => {
             let type_name = type_name.as_ref().unwrap(); // TODO: why is this optional?
-            let reg_expr = program.alloc_registers(2);
-            translate_expr(program, referenced_tables, expr, reg_expr, resolver)?;
-            program.emit_insn(Insn::String8 {
-                // we make a comparison against uppercase static strs in the affinity() function,
-                // so we need to make sure we're comparing against the uppercase version,
-                // and it's better to do this once instead of every time we check affinity
-                value: type_name.name.to_uppercase(),
-                dest: reg_expr + 1,
-            });
-            program.mark_last_insn_constant();
-            program.emit_insn(Insn::Function {
-                constant_mask: 0,
-                start_reg: reg_expr,
-                dest: target_register,
-                func: FuncCtx {
-                    func: Func::Scalar(ScalarFunc::Cast),
-                    arg_count: 2,
-                },
+            translate_expr(program, referenced_tables, expr, target_register, resolver)?;
+            let type_affinity = affinity(&type_name.name.to_uppercase());
+            program.emit_insn(Insn::Cast {
+                reg: target_register,
+                affinity: type_affinity,
             });
             Ok(target_register)
         }
