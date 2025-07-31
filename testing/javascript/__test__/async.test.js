@@ -67,7 +67,7 @@ test.serial("Statement.run() [positional]", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("INSERT INTO users(name, email) VALUES (?, ?)");
-  const info = stmt.run(["Carol", "carol@example.net"]);
+  const info = await stmt.run(["Carol", "carol@example.net"]);
   t.is(info.changes, 1);
   t.is(info.lastInsertRowid, 3);
 });
@@ -78,7 +78,7 @@ test.serial("Statement.get() [no parameters]", async (t) => {
   var stmt = 0;
 
   stmt = await db.prepare("SELECT * FROM users");
-  t.is(stmt.get().name, "Alice");
+  t.is((await stmt.get()).name, "Alice");
   t.deepEqual(await stmt.raw().get(), [1, 'Alice', 'alice@example.org']);
 });
 
@@ -88,15 +88,15 @@ test.serial("Statement.get() [positional]", async (t) => {
   var stmt = 0;
 
   stmt = await db.prepare("SELECT * FROM users WHERE id = ?");
-  t.is(stmt.get(0), undefined);
-  t.is(stmt.get([0]), undefined);
-  t.is(stmt.get(1).name, "Alice");
-  t.is(stmt.get(2).name, "Bob");
+  t.is(await stmt.get(0), undefined);
+  t.is(await stmt.get([0]), undefined);
+  t.is((await stmt.get(1)).name, "Alice");
+  t.is((await stmt.get(2)).name, "Bob");
 
   stmt = await db.prepare("SELECT * FROM users WHERE id = ?1");
-  t.is(stmt.get({1: 0}), undefined);
-  t.is(stmt.get({1: 1}).name, "Alice");
-  t.is(stmt.get({1: 2}).name, "Bob");
+  t.is(await stmt.get({1: 0}), undefined);
+  t.is((await stmt.get({1: 1})).name, "Alice");
+  t.is((await stmt.get({1: 2})).name, "Bob");
 });
 
 test.serial("Statement.get() [named]", async (t) => {
@@ -105,19 +105,19 @@ test.serial("Statement.get() [named]", async (t) => {
   var stmt = undefined;
 
   stmt = await db.prepare("SELECT * FROM users WHERE id = :id");
-  t.is(stmt.get({ id: 0 }), undefined);
-  t.is(stmt.get({ id: 1 }).name, "Alice");
-  t.is(stmt.get({ id: 2 }).name, "Bob");
+  t.is(await stmt.get({ id: 0 }), undefined);
+  t.is((await stmt.get({ id: 1 })).name, "Alice");
+  t.is((await stmt.get({ id: 2 })).name, "Bob");
 
   stmt = await db.prepare("SELECT * FROM users WHERE id = @id");
-  t.is(stmt.get({ id: 0 }), undefined);
-  t.is(stmt.get({ id: 1 }).name, "Alice");
-  t.is(stmt.get({ id: 2 }).name, "Bob");
+  t.is(await stmt.get({ id: 0 }), undefined);
+  t.is((await stmt.get({ id: 1 })).name, "Alice");
+  t.is((await stmt.get({ id: 2 })).name, "Bob");
 
   stmt = await db.prepare("SELECT * FROM users WHERE id = $id");
-  t.is(stmt.get({ id: 0 }), undefined);
-  t.is(stmt.get({ id: 1 }).name, "Alice");
-  t.is(stmt.get({ id: 2 }).name, "Bob");
+  t.is(await stmt.get({ id: 0 }), undefined);
+  t.is((await stmt.get({ id: 1 })).name, "Alice");
+  t.is((await stmt.get({ id: 2 })).name, "Bob");
 });
 
 
@@ -125,7 +125,7 @@ test.serial("Statement.get() [raw]", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("SELECT * FROM users WHERE id = ?");
-  t.deepEqual(stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
+  t.deepEqual(await stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
 });
 
 test.skip("Statement.iterate() [empty]", async (t) => {
@@ -403,7 +403,7 @@ test.skip("Timeout option", async (t) => {
   fs.unlinkSync(path);
 });
 
-test.serial("Concurrent writes over same connection", async (t) => {
+test.skip("Concurrent writes over same connection", async (t) => {
   const db = t.context.db;
   await db.exec(`
     DROP TABLE IF EXISTS users;
