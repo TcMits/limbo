@@ -92,7 +92,7 @@ def wrap_text(text, width=72):
     return "\n".join(wrapped_lines)
 
 
-def merge_pr(pr_number):
+def merge_pr(pr_number, use_api=True):
     # GitHub authentication
     token = os.getenv("GITHUB_TOKEN")
     g = Github(token)
@@ -120,39 +120,66 @@ def merge_pr(pr_number):
     # Add Closes line
     commit_message += f"\n\nCloses #{pr_info['number']}"
 
-    # Create a temporary file for the commit message
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
-        temp_file.write(commit_message)
-        temp_file_path = temp_file.name
-
-    try:
-        # Instead of fetching to a branch, fetch the specific commit
-        cmd = f"git fetch origin pull/{pr_number}/head"
-        output, error, returncode = run_command(cmd)
-        if returncode != 0:
-            print(f"Error fetching PR: {error}")
+    if use_api:
+        # Merge using GitHub API
+        try:
+            pr = pr_info["pr_object"]
+            # Check if PR is mergeable
+            if not pr.mergeable:
+                print(f"Error: PR #{pr_number} is not mergeable. State: {pr.mergeable_state}")
+                sys.exit(1)
+            result = pr.merge(
+                commit_title=commit_title,
+                commit_message=commit_message.replace(commit_title + "\n\n", ""),
+                merge_method="merge",
+            )
+            if result.merged:
+                print(f"Pull request #{pr_number} merged successfully via GitHub API!")
+                print(f"Merge commit SHA: {result.sha}")
+                print(f"\nMerge commit message:\n{commit_message}")
+            else:
+                print(f"Error: Failed to merge PR #{pr_number}")
+                print(f"Message: {result.message}")
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error merging PR via API: {str(e)}")
             sys.exit(1)
 
-        # Checkout main branch
-        cmd = "git checkout main"
-        output, error, returncode = run_command(cmd)
-        if returncode != 0:
-            print(f"Error checking out main branch: {error}")
-            sys.exit(1)
+    else:
+        # Create a temporary file for the commit message
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
+            temp_file.write(commit_message)
+            temp_file_path = temp_file.name
 
-        # Merge using the commit SHA instead of branch name
-        cmd = f"git merge --no-ff {pr_info['head_sha']} -F {temp_file_path}"
-        output, error, returncode = run_command(cmd)
-        if returncode != 0:
-            print(f"Error merging PR: {error}")
-            sys.exit(1)
+        try:
+            # Instead of fetching to a branch, fetch the specific commit
+            cmd = f"git fetch origin pull/{pr_number}/head"
+            output, error, returncode = run_command(cmd)
+            if returncode != 0:
+                print(f"Error fetching PR: {error}")
+                sys.exit(1)
 
-        print("Pull request merged successfully!")
-        print(f"Merge commit message:\n{commit_message}")
+            # Checkout main branch
+            cmd = "git checkout main"
+            output, error, returncode = run_command(cmd)
+            if returncode != 0:
+                print(f"Error checking out main branch: {error}")
+                sys.exit(1)
 
-    finally:
-        # Clean up the temporary file
-        os.unlink(temp_file_path)
+            # Merge using the commit SHA instead of branch name
+            cmd = f"git merge --no-ff {pr_info['head_sha']} -F {temp_file_path}"
+            output, error, returncode = run_command(cmd)
+            if returncode != 0:
+                print(f"Error merging PR: {error}")
+                sys.exit(1)
+
+            print("Pull request merged successfully!")
+            print(f"Merge commit message:\n{commit_message}")
+            print("\nNote: You'll need to push this merge to mark the PR as merged on GitHub")
+
+        finally:
+            # Clean up the temporary file
+            os.unlink(temp_file_path)
 
 
 if __name__ == "__main__":
@@ -165,4 +192,8 @@ if __name__ == "__main__":
         print("Error: PR number must be a positive integer")
         sys.exit(1)
 
-    merge_pr(pr_number)
+    use_api = True
+    if len(sys.argv) == 3 and sys.argv[2] == "--local":
+        use_api = False
+
+    merge_pr(pr_number, use_api)
