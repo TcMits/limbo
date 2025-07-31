@@ -190,23 +190,23 @@ impl PragmaVirtualTable {
             }
         }
 
-        let mut argv_idx = 1;
+        let argv_arg0_idx = arg0_idx.map_or(0, |_| 1);
+        let argv_arg1_idx = arg1_idx.map_or(argv_arg0_idx, |_| argv_arg0_idx + 1);
+
         let constraint_usages = constraints
             .iter()
             .enumerate()
             .map(|(i, _)| {
-                if Some(i) == arg0_idx || Some(i) == arg1_idx {
-                    let usage = ConstraintUsage {
-                        argv_index: Some(argv_idx),
-                        omit: true,
-                    };
-                    argv_idx += 1;
-                    usage
+                let argv_index = if Some(i) == arg0_idx {
+                    Some(argv_arg0_idx)
+                } else if Some(i) == arg1_idx {
+                    Some(argv_arg1_idx)
                 } else {
-                    ConstraintUsage {
-                        argv_index: None,
-                        omit: false,
-                    }
+                    None
+                };
+                ConstraintUsage {
+                    argv_index,
+                    omit: argv_index.is_some(),
                 }
             })
             .collect();
@@ -307,5 +307,153 @@ impl PragmaVirtualTableCursor {
         self.stmt = Some(self.conn.prepare(sql)?);
 
         self.next()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_best_index_argv_order_both_hidden_constraints() {
+        // Test when both hidden constraints are present (arg and schema)
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 6,
+            max_arg_count: 2,
+            has_pragma_arg: true,
+        };
+
+        let constraints = vec![
+            usable_constraint(6), // arg (first hidden column)
+            usable_constraint(7), // schema (second hidden column)
+        ];
+
+        let index_info = pragma_vtab.best_index(&constraints);
+
+        // Verify arg gets argv_index 1, schema gets argv_index 2
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // arg
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(2)); // schema
+        assert!(index_info.constraint_usages[0].omit);
+        assert!(index_info.constraint_usages[1].omit);
+    }
+
+    #[test]
+    fn test_best_index_argv_order_only_arg() {
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 6,
+            max_arg_count: 2,
+            has_pragma_arg: true,
+        };
+
+        let constraints = vec![
+            usable_constraint(6), // arg (first hidden column)
+        ];
+
+        let index_info = pragma_vtab.best_index(&constraints);
+
+        // Verify arg gets argv_index 1
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // arg
+        assert!(index_info.constraint_usages[0].omit);
+    }
+
+    #[test]
+    fn test_best_index_argv_order_only_schema() {
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 1,
+            max_arg_count: 1,
+            has_pragma_arg: false,
+        };
+
+        let constraints = vec![
+            usable_constraint(1), // schema (first hidden column after visible columns)
+        ];
+
+        let index_info = pragma_vtab.best_index(&constraints);
+
+        // Verify schema gets argv_index 1
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // schema
+        assert!(index_info.constraint_usages[0].omit);
+    }
+
+    #[test]
+    fn test_best_index_argv_order_reverse_constraint_order() {
+        // Test when constraints are provided in reverse order (schema first, then arg)
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 6,
+            max_arg_count: 2,
+            has_pragma_arg: true,
+        };
+
+        let constraints = vec![
+            usable_constraint(7), // schema (second hidden column)
+            usable_constraint(6), // arg (first hidden column)
+        ];
+
+        let index_info = pragma_vtab.best_index(&constraints);
+
+        // Verify arg still gets argv_index 1, schema gets argv_index 2 regardless of constraint order
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(2)); // schema
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(1)); // arg
+        assert!(index_info.constraint_usages[0].omit);
+        assert!(index_info.constraint_usages[1].omit);
+    }
+
+    #[test]
+    fn test_best_index_visible_columns_ignored() {
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 6,
+            max_arg_count: 2,
+            has_pragma_arg: true,
+        };
+
+        let constraints = vec![
+            usable_constraint(0), // visible column (cid)
+            usable_constraint(6), // arg (hidden)
+        ];
+
+        let index_info = pragma_vtab.best_index(&constraints);
+
+        // Verify visible column constraint is ignored, arg gets argv_index 1
+        assert_eq!(index_info.constraint_usages[0].argv_index, None); // visible column
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(1)); // arg
+        assert!(!index_info.constraint_usages[0].omit); // visible column not omitted
+        assert!(index_info.constraint_usages[1].omit); // arg omitted
+    }
+
+    #[test]
+    fn test_best_index_no_usable_constraints() {
+        let pragma_vtab = PragmaVirtualTable {
+            pragma_name: "table_info".to_string(),
+            visible_column_count: 6,
+            max_arg_count: 2,
+            has_pragma_arg: true,
+        };
+
+        let constraints = vec![ConstraintInfo {
+            column_index: 6,
+            op: ConstraintOp::Eq,
+            usable: false,
+            plan_info: 0,
+        }];
+
+        let index_info = pragma_vtab.best_index(&constraints);
+
+        // Verify no argv_index is assigned
+        assert_eq!(index_info.constraint_usages[0].argv_index, None);
+        assert!(!index_info.constraint_usages[0].omit);
+    }
+
+    fn usable_constraint(column_index: u32) -> ConstraintInfo {
+        ConstraintInfo {
+            column_index,
+            op: ConstraintOp::Eq,
+            usable: true,
+            plan_info: 0,
+        }
     }
 }

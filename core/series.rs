@@ -58,53 +58,50 @@ impl VTable for GenerateSeriesTable {
     }
 
     fn best_index(constraints: &[ConstraintInfo], _order_by: &[OrderByInfo]) -> IndexInfo {
+        const START_COLUMN_INDEX: u32 = 1;
+        const STEP_COLUMN_INDEX: u32 = 3;
+
         // The bits of `idx_num` are used to indicate which arguments are available to the filter method:
         // - Bit 0 set -> 'start' is available
         // - Bit 1 set -> 'stop' is available
         // - Bit 2 set -> 'step' is available
         let mut idx_num = 0;
-        let mut start_idx = None;
-        let mut stop_idx = None;
-        let mut step_idx = None;
+        let mut positions = [None; 4]; // maps column index to constraint position
 
         for (i, c) in constraints.iter().enumerate() {
             if !c.usable || c.op != ConstraintOp::Eq {
                 continue;
             }
-            match c.column_index {
-                1 => {
-                    start_idx = Some(i);
-                    idx_num |= 1;
-                }
-                2 => {
-                    stop_idx = Some(i);
-                    idx_num |= 2;
-                }
-                3 => {
-                    step_idx = Some(i);
-                    idx_num |= 4;
-                }
-                _ => {}
+            if c.column_index >= START_COLUMN_INDEX && c.column_index <= STEP_COLUMN_INDEX {
+                let bit = 1 << (c.column_index - 1);
+                idx_num |= bit;
+                positions[c.column_index as usize] = Some(i);
             }
         }
 
+        // Assign argv indexes contiguously
         let mut argv_idx = 1;
+        let mut argv_indexes = [None; 4];
+
+        for (i, pos) in positions.iter().enumerate() {
+            if pos.is_some() {
+                argv_indexes[i] = Some(argv_idx);
+                argv_idx += 1;
+            }
+        }
+
         let constraint_usages = constraints
             .iter()
             .enumerate()
-            .map(|(i, _)| {
-                if Some(i) == start_idx || Some(i) == stop_idx || Some(i) == step_idx {
-                    let usage = ConstraintUsage {
-                        argv_index: Some(argv_idx),
-                        omit: true,
-                    };
-                    argv_idx += 1;
-                    usage
-                } else {
-                    ConstraintUsage {
-                        argv_index: None,
-                        omit: false,
-                    }
+            .map(|(idx, c)| {
+                let argv_index = positions.get(c.column_index as usize).and_then(|&pos| {
+                    pos.filter(|&i| i == idx)
+                        .and_then(|_| argv_indexes[c.column_index as usize])
+                });
+
+                ConstraintUsage {
+                    argv_index,
+                    omit: argv_index.is_some(),
                 }
             })
             .collect();
@@ -666,6 +663,111 @@ mod tests {
             }
         } else {
             ((stop.saturating_sub(start)).saturating_div(step)).saturating_add(1) as usize
+        }
+    }
+
+    #[test]
+    fn test_best_index_argv_order_all_constraints() {
+        // Test when start, stop, and step constraints are present
+        let constraints = vec![
+            usable_constraint(1), // start
+            usable_constraint(2), // stop
+            usable_constraint(3), // step
+        ];
+
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+
+        // Verify start gets argv_index 1, stop gets 2, step gets 3
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // start
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(2)); // stop
+        assert_eq!(index_info.constraint_usages[2].argv_index, Some(3)); // step
+        assert_eq!(index_info.idx_num, 7); // All bits set (1 | 2 | 4)
+    }
+
+    #[test]
+    fn test_best_index_argv_order_start_stop_only() {
+        let constraints = vec![
+            usable_constraint(1), // start
+            usable_constraint(2), // stop
+        ];
+
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+
+        // Verify start gets argv_index 1, stop gets 2
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // start
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(2)); // stop
+        assert_eq!(index_info.idx_num, 3); // Bits 0 and 1 set (1 | 2)
+    }
+
+    #[test]
+    fn test_best_index_argv_order_only_start() {
+        let constraints = vec![
+            usable_constraint(1), // start
+        ];
+
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+
+        // Verify start gets argv_index 1
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // start
+        assert_eq!(index_info.idx_num, 1); // Only bit 0 set
+    }
+
+    #[test]
+    fn test_best_index_argv_order_reverse_constraint_order() {
+        // Test when constraints are provided in reverse order (step, stop, start)
+        let constraints = vec![
+            usable_constraint(3), // step
+            usable_constraint(2), // stop
+            usable_constraint(1), // start
+        ];
+
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+
+        // Verify start still gets argv_index 1, stop gets 2, step gets 3 regardless of constraint order
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(3)); // step
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(2)); // stop
+        assert_eq!(index_info.constraint_usages[2].argv_index, Some(1)); // start
+        assert_eq!(index_info.idx_num, 7); // All bits set (1 | 2 | 4)
+    }
+
+    #[test]
+    fn test_best_index_argv_order_missing_start() {
+        // Test when start constraint is missing but stop and step are present
+        let constraints = vec![
+            usable_constraint(2), // stop
+            usable_constraint(3), // step
+        ];
+
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+
+        // Verify stop gets argv_index 1, step gets 2
+        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // stop
+        assert_eq!(index_info.constraint_usages[1].argv_index, Some(2)); // step
+        assert_eq!(index_info.idx_num, 6); // Bits 1 and 2 set (2 | 4)
+    }
+
+    #[test]
+    fn test_best_index_no_usable_constraints() {
+        let constraints = vec![ConstraintInfo {
+            column_index: 1,
+            op: ConstraintOp::Eq,
+            usable: false,
+            plan_info: 0,
+        }];
+
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+
+        // Verify no argv_index is assigned
+        assert_eq!(index_info.constraint_usages[0].argv_index, None);
+        assert_eq!(index_info.idx_num, 0); // No bits set
+    }
+
+    fn usable_constraint(column_index: u32) -> ConstraintInfo {
+        ConstraintInfo {
+            column_index,
+            op: ConstraintOp::Eq,
+            usable: true,
+            plan_info: 0,
         }
     }
 }
