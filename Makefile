@@ -156,3 +156,39 @@ docker-cli-build:
 
 docker-cli-run:
 	docker run -it -v ./:/app turso-cli
+
+merge-pr:
+ifndef PR
+	$(error PR is required. Usage: make merge-pr PR=123)
+endif
+	@echo "Setting up environment for PR merge..."
+	@if [ -z "$(GITHUB_REPOSITORY)" ]; then \
+		REPO=$$(git remote get-url origin | sed -E 's|.*github\.com[:/]([^/]+/[^/]+?)(\.git)?$$|\1|'); \
+		if [ -z "$$REPO" ]; then \
+			echo "Error: Could not detect repository from git remote"; \
+			exit 1; \
+		fi; \
+		export GITHUB_REPOSITORY="$$REPO"; \
+		echo "Detected repository: $$REPO"; \
+	else \
+		export GITHUB_REPOSITORY="$(GITHUB_REPOSITORY)"; \
+		echo "Using provided repository: $(GITHUB_REPOSITORY)"; \
+	fi; \
+	echo "Repository: $$REPO"; \
+	echo "Checking GitHub CLI authentication..."; \
+	if ! gh auth status >/dev/null 2>&1; then \
+		echo "GitHub CLI not authenticated. Starting login process..."; \
+		gh auth login; \
+	else \
+		echo "GitHub CLI is already authenticated"; \
+	fi; \
+	echo "Merging PR #$(PR)..."; \
+	if [ "$(LOCAL)" = "1" ]; then \
+	    echo "merging PR #$(PR) locally"; \
+		uv run scripts/merge-pr.py $(PR) --local; \
+	else \
+	    echo "merging PR #$(PR) on GitHub"; \
+		uv run scripts/merge-pr.py $(PR); \
+	fi
+
+.PHONY: merge-pr
