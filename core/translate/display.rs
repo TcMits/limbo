@@ -557,7 +557,7 @@ impl ToTokens for UpdatePlan {
                     .unwrap();
 
                 ast::Set {
-                    col_names: ast::DistinctNames::single(ast::Name::from_str(col_name)),
+                    col_names: ast::Names::single(ast::Name::from_str(col_name)),
                     expr: set_expr.clone(),
                 }
             }),
