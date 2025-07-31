@@ -54,7 +54,32 @@ impl Vector {
         unsafe { std::slice::from_raw_parts(ptr as *const f32, self.dims) }
     }
 
+    /// # Safety
+    ///
+    /// This method is used to reinterpret the underlying `Vec<u8>` data
+    /// as a `&[f64]` slice. This is only valid if:
+    /// - The buffer is correctly aligned for `f64`
+    /// - The length of the buffer is exactly `dims * size_of::<f64>()`
     pub fn as_f64_slice(&self) -> &[f64] {
+        if self.dims == 0 {
+            return &[];
+        }
+
+        assert_eq!(
+            self.data.len(),
+            self.dims * std::mem::size_of::<f64>(),
+            "data length must equal dims * size_of::<f64>()"
+        );
+
+        let ptr = self.data.as_ptr();
+        let align = std::mem::align_of::<f64>();
+        assert_eq!(
+            ptr.align_offset(align),
+            0,
+            "data pointer must be aligned to {} bytes for f64 access",
+            align
+        );
+
         unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const f64, self.dims) }
     }
 }
