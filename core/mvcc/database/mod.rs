@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub type Result<T> = std::result::Result<T, DatabaseError>;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RowID {
@@ -608,19 +608,29 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         // 2. Choose a txn to write depending on some heuristics like amount of frames will be written.
         // 3. ..
         //
-        if let crate::types::IOResult::Done(result) = pager
-            .begin_write_tx()
-            .map_err(|e| DatabaseError::Io(e.to_string()))
-            .unwrap()
-        {
-            if let crate::result::LimboResult::Busy = result {
-                return Err(DatabaseError::Io(
-                    "Pager write transaction busy".to_string(),
-                ));
+        loop {
+            match pager.begin_write_tx() {
+                Ok(crate::types::IOResult::Done(result)) => {
+                    if let crate::result::LimboResult::Busy = result {
+                        return Err(DatabaseError::Io(
+                            "Pager write transaction busy".to_string(),
+                        ));
+                    }
+                    break;
+                }
+                Ok(crate::types::IOResult::IO) => {
+                    // FIXME: this is a hack to make the pager run the IO loop
+                    pager.io.run_once().unwrap();
+                    continue;
+                }
+                Err(e) => {
+                    return Err(DatabaseError::Io(e.to_string()));
+                }
             }
         }
+
         // 1. Write rows to btree for persistence
-        for ref id in &write_set {
+        for id in &write_set {
             if let Some(row_versions) = self.rows.get(id) {
                 let row_versions = row_versions.value().read().unwrap();
                 // Find rows that were written by this transaction
@@ -880,7 +890,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
 
         let mut cursor = BTreeCursor::new_table(
             None, // Write directly to B-tree
-            pager,
+            pager.clone(),
             root_page,
             num_columns,
         );
@@ -898,13 +908,19 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         }
 
         // Insert the record into the B-tree
-        match cursor
-            .insert(&key, true)
-            .map_err(|e| DatabaseError::Io(e.to_string()))?
-        {
-            IOResult::Done(()) => {}
-            IOResult::IO => {
-                panic!("IOResult::IO not supported in write_row_to_pager insert");
+        loop {
+            match cursor
+                .insert(&key, true)
+                .map_err(|e| DatabaseError::Io(e.to_string()))
+            {
+                Ok(IOResult::Done(())) => break,
+                Ok(IOResult::IO) => {
+                    pager.io.run_once().unwrap();
+                    continue;
+                }
+                Err(e) => {
+                    return Err(DatabaseError::Io(e.to_string()));
+                }
             }
         }
 
@@ -946,27 +962,33 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         let root_page = table_id as usize;
         let mut cursor = BTreeCursor::new_table(
             None, // No MVCC cursor for scanning
-            pager, root_page, 1, // We'll adjust this as needed
+            pager.clone(),
+            root_page,
+            1, // We'll adjust this as needed
         );
         loop {
             match cursor
                 .rewind()
                 .map_err(|e| DatabaseError::Io(e.to_string()))?
             {
-                IOResult::Done(()) => {
-                    break;
+                IOResult::Done(()) => break,
+                IOResult::IO => {
+                    pager.io.run_once().unwrap();
+                    continue;
                 }
-                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
             }
         }
-        Ok(loop {
+        loop {
             let rowid_result = cursor
                 .rowid()
                 .map_err(|e| DatabaseError::Io(e.to_string()))?;
             let row_id = match rowid_result {
                 IOResult::Done(Some(row_id)) => row_id,
                 IOResult::Done(None) => break,
-                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
+                IOResult::IO => {
+                    pager.io.run_once().unwrap();
+                    continue;
+                }
             };
             match cursor
                 .record()
@@ -1001,7 +1023,8 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                 }
                 IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
             }
-        })
+        }
+        Ok(())
     }
 }
 

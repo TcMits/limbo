@@ -3,6 +3,7 @@ use crate::mvcc::database::{MvStore, Result, Row, RowID};
 use crate::Pager;
 use std::fmt::Debug;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone)]
 enum CursorPosition {
@@ -15,7 +16,7 @@ enum CursorPosition {
 }
 #[derive(Debug)]
 pub struct MvccLazyCursor<Clock: LogicalClock> {
-    pub db: Rc<MvStore<Clock>>,
+    pub db: Arc<MvStore<Clock>>,
     current_pos: CursorPosition,
     table_id: u64,
     tx_id: u64,
@@ -23,7 +24,7 @@ pub struct MvccLazyCursor<Clock: LogicalClock> {
 
 impl<Clock: LogicalClock> MvccLazyCursor<Clock> {
     pub fn new(
-        db: Rc<MvStore<Clock>>,
+        db: Arc<MvStore<Clock>>,
         tx_id: u64,
         table_id: u64,
         pager: Rc<Pager>,

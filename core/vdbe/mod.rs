@@ -390,7 +390,7 @@ impl Program {
     pub fn step(
         &self,
         state: &mut ProgramState,
-        mv_store: Option<Rc<MvStore>>,
+        mv_store: Option<Arc<MvStore>>,
         pager: Rc<Pager>,
     ) -> Result<StepResult> {
         loop {
@@ -432,7 +432,7 @@ impl Program {
         &self,
         pager: Rc<Pager>,
         program_state: &mut ProgramState,
-        mv_store: Option<&Rc<MvStore>>,
+        mv_store: Option<&Arc<MvStore>>,
         rollback: bool,
     ) -> Result<StepResult> {
         if let Some(mv_store) = mv_store {
