@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use turso_sqlite3_parser::ast::{self, SortOrder};
 
 use std::sync::Arc;
@@ -16,6 +17,8 @@ use crate::{
     },
     LimboError, Result,
 };
+
+use turso_ext::IndexInfo;
 
 use super::{
     aggregation::translate_aggregation_step,
@@ -492,11 +495,7 @@ pub fn open_loop(
                             }
 
                             // Determine the number of VFilter arguments (constraints with an argv_index).
-                            let args_needed = index_info
-                                .constraint_usages
-                                .iter()
-                                .filter(|u| u.argv_index.is_some())
-                                .count();
+                            let args_needed = count_and_validate_vtab_filter_args(&index_info)?;
                             let start_reg = program.alloc_registers(args_needed);
 
                             // For each constraint used by best_index, translate the opposite side.
@@ -510,12 +509,6 @@ pub fn open_loop(
                                             // translate the opposite side of the referenced vtab column
                                             let expr = if is_rhs { lhs } else { rhs };
                                             // argv_index is 1-based; adjust to get the proper register offset.
-                                            if argv_index < 1 {
-                                                return Err(LimboError::ExtensionError(format!(
-                                                    "argv_index must be >= 1, got {}",
-                                                    argv_index
-                                                )));
-                                            }
                                             let target_reg = start_reg + (argv_index - 1) as usize;
                                             translate_expr(
                                                 program,
@@ -753,6 +746,44 @@ pub fn open_loop(
     }
 
     Ok(())
+}
+
+fn count_and_validate_vtab_filter_args(index_info: &IndexInfo) -> Result<usize> {
+    let mut args_needed = 0;
+    let mut used_indices = HashSet::new();
+
+    for usage in &index_info.constraint_usages {
+        if let Some(argv_index) = usage.argv_index {
+            if argv_index < 1 {
+                return Err(LimboError::ExtensionError(format!(
+                    "argv_index must be >= 1, got {argv_index}"
+                )));
+            }
+            if argv_index > index_info.constraint_usages.len() as u32 {
+                return Err(LimboError::ExtensionError(format!(
+                    "argv_index {} exceeds constraint count {}",
+                    argv_index,
+                    index_info.constraint_usages.len()
+                )));
+            }
+            if !used_indices.insert(argv_index) {
+                return Err(LimboError::ExtensionError(format!(
+                    "duplicate argv_index {argv_index}"
+                )));
+            }
+            args_needed += 1;
+        }
+    }
+
+    // Verify that used indices form a contiguous sequence starting from 1
+    for i in 1..=args_needed as u32 {
+        if !used_indices.contains(&i) {
+            return Err(LimboError::ExtensionError(format!(
+                "argv_index values must form contiguous sequence starting from 1, missing index {i}"
+            )));
+        }
+    }
+    Ok(args_needed)
 }
 
 /// SQLite (and so Limbo) processes joins as a nested loop.

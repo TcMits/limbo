@@ -314,8 +314,18 @@ pub struct ExtIndexInfo {
 /// can use the constraints in the WHERE clause of a query.
 #[derive(Debug, Clone, Copy)]
 pub struct ConstraintUsage {
-    /// 1-based index of the argument passed.
-    /// An `argv_index` value less than 1 is invalid and will result in an error.
+    /// 1-based index indicating which argument from the `filter` `args` array
+    /// corresponds to this constraint. The VDBE passes constraint values
+    /// in the order defined by these indices when invoking `filter`.
+    ///
+    /// Rules:
+    /// - All assigned `argv_index` values must form a contiguous sequence of indices
+    ///   (e.g., 1, 2, 3, …, N). The values may be returned in any order, but no
+    ///   gaps are allowed.
+    /// - Each `argv_index` value must be unique.
+    /// - `argv_index` must not exceed the total number of constraints.
+    /// - An `argv_index` value less than 1 is invalid and will result in an error.
+    ///
     /// If `None`, this constraint will not be passed as an argument.
     pub argv_index: Option<u32>,
     /// If true, core can omit this constraint in the vdbe layer.
