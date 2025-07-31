@@ -895,7 +895,7 @@ pub fn write_pages_vectored(
     // batch item array is already sorted by id, so we just need to find contiguous ranges of page_id's
     // to submit as `writev`/write_pages calls.
 
-    let page_sz = pager.page_size.get().unwrap_or(DEFAULT_PAGE_SIZE) as usize;
+    let page_sz = pager.page_size.get().unwrap_or(PageSize::DEFAULT as u32) as usize;
 
     // Count expected number of runs to create the atomic counter we need to track each batch
     let mut run_count = 0;
