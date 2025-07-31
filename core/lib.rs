@@ -42,7 +42,6 @@ mod numeric;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use crate::storage::header_accessor::HeaderRef;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::pragma::TURSO_CDC_DEFAULT_TABLE_NAME;
 #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
@@ -311,9 +310,9 @@ impl Database {
             let pager = conn.pager.borrow().clone();
 
             db.with_schema_mut(|schema| {
-                let header_ref = pager.io.block(|| HeaderRef::from_pager(&pager))?;
-                let header = header_ref.borrow();
-                let header_schema_cookie = header.schema_cookie.get();
+                let header_schema_cookie = pager
+                    .io
+                    .block(|| pager.with_header(|header| header.schema_cookie.get()))?;
                 schema.schema_version = header_schema_cookie;
                 let result = schema
                     .make_from_btree(None, pager.clone(), &syms)

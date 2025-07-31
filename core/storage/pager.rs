@@ -28,14 +28,12 @@ use super::wal::CheckpointMode;
 #[cfg(not(feature = "omit_autovacuum"))]
 use {crate::io::Buffer as IoBuffer, ptrmap::*};
 
-struct HeaderRef(PageRef);
+pub struct HeaderRef(PageRef);
 
 impl HeaderRef {
     pub fn from_pager(pager: &Pager) -> Result<IOResult<Self>> {
         if !pager.db_state.is_initialized() {
-            return Err(LimboError::InternalError(
-                "Database is empty, header does not exist - page 1 should've been allocated before this".to_string()
-            ));
+            return Err(LimboError::Page1NotAlloc);
         }
 
         let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
@@ -65,9 +63,7 @@ pub struct HeaderRefMut(PageRef);
 impl HeaderRefMut {
     pub fn from_pager(pager: &Pager) -> Result<IOResult<Self>> {
         if !pager.db_state.is_initialized() {
-            return Err(LimboError::InternalError(
-                "Database is empty, header does not exist - page 1 should've been allocated before this".to_string(),
-            ));
+            return Err(LimboError::Page1NotAlloc);
         }
 
         let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
