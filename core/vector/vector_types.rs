@@ -47,8 +47,7 @@ impl Vector {
         assert_eq!(
             ptr.align_offset(align),
             0,
-            "data pointer must be aligned to {} bytes for f32 access",
-            align
+            "data pointer must be aligned to {align} bytes for f32 access"
         );
 
         unsafe { std::slice::from_raw_parts(ptr as *const f32, self.dims) }
@@ -76,8 +75,7 @@ impl Vector {
         assert_eq!(
             ptr.align_offset(align),
             0,
-            "data pointer must be aligned to {} bytes for f64 access",
-            align
+            "data pointer must be aligned to {align} bytes for f64 access"
         );
 
         unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const f64, self.dims) }
@@ -751,7 +749,7 @@ mod tests {
         let v2 = float32_vec_from(&[]);
         let result = vector_concat(&v1, &v2).unwrap();
         assert_eq!(result.dims, 0);
-        assert_eq!(f32_slice_from_vector(&result), vec![]);
+        assert_eq!(f32_slice_from_vector(&result), Vec::<f32>::new());
     }
 
     #[test]
