@@ -156,18 +156,36 @@ pub fn prepare_update_plan(
         .collect();
 
     let mut set_clauses = Vec::with_capacity(body.sets.len());
+
+    // Assign expressions to column names for each `SET` assigment,
+    // e.g the statement `SET x = 1, y = 2, z = 3` has 3 set assigments
     for set in &mut body.sets {
-        let ident = normalize_ident(set.col_names[0].as_str());
-        let Some(col_index) = column_lookup.get(&ident) else {
-            bail_parse_error!("no such column: {}", ident);
-        };
+        for (idx, col_name) in set.col_names.iter().enumerate() {
+            let ident = normalize_ident(col_name.as_str());
+            let Some(col_index) = column_lookup.get(&ident) else {
+                bail_parse_error!("no such column: {}", ident);
+            };
 
-        bind_column_references(&mut set.expr, &mut table_references, None, connection)?;
+            bind_column_references(&mut set.expr, &mut table_references, None, connection)?;
 
-        if let Some(idx) = set_clauses.iter().position(|(idx, _)| *idx == *col_index) {
-            set_clauses[idx].1 = set.expr.clone();
-        } else {
-            set_clauses.push((*col_index, set.expr.clone()));
+            let expr = if let Expr::Parenthesized(values) = &set.expr {
+                match values.get(idx).cloned() {
+                    Some(expr) => expr,
+                    None => bail_parse_error!(
+                        "{} columns assigned {} values",
+                        set.col_names.len(),
+                        values.len()
+                    ),
+                }
+            } else {
+                set.expr.clone()
+            };
+
+            if let Some(idx) = set_clauses.iter().position(|(idx, _)| *idx == *col_index) {
+                set_clauses[idx].1 = expr;
+            } else {
+                set_clauses.push((*col_index, expr));
+            }
         }
     }
 

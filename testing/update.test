@@ -200,7 +200,7 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
         SELECT y FROM t; -- uses ty index
         UPDATE t SET x=2, y=2;
         SELECT x FROM t; -- uses tx index
-        SELECT y FROM t; -- uses ty index    
+        SELECT y FROM t; -- uses ty index
     } {1
     1
     2
@@ -220,34 +220,34 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
 do_execsql_test_on_specific_db {:memory:} update_where_or_regression_test {
     CREATE TABLE t (a INTEGER);
     INSERT INTO t VALUES (1), ('hi');
-    UPDATE t SET a = X'6C6F76656C795F7265766F6C74' WHERE ~ 'gorgeous_thropy' OR NOT -3830873834.233324;  
+    UPDATE t SET a = X'6C6F76656C795F7265766F6C74' WHERE ~ 'gorgeous_thropy' OR NOT -3830873834.233324;
     SELECT * from t;
 } {lovely_revolt
 lovely_revolt}
 
 do_execsql_test_in_memory_any_error update_primary_key_constraint_error {
-    CREATE TABLE eye (study REAL, spring BLOB, save TEXT, thank REAL, election INTEGER, PRIMARY KEY (election));                  
+    CREATE TABLE eye (study REAL, spring BLOB, save TEXT, thank REAL, election INTEGER, PRIMARY KEY (election));
     INSERT INTO eye VALUES (183559032.521585, x'6625d092', 'Trial six should.', 2606132742.43174, 2817);
     INSERT INTO eye VALUES (78255586.9204539, x'651061e8', 'World perhaps.', -5815764.49018679, 1917);
     UPDATE eye SET election = 6150;
 }
 
 do_execsql_test_in_memory_any_error update_primary_key_constraint_error_2 {
-    CREATE TABLE eye (study REAL, spring BLOB, save TEXT, thank REAL, election INTEGER, PRIMARY KEY (election));                  
-    INSERT INTO eye VALUES (183559032.521585,  x'6625d092', 'Trial six should.', 2606132742.43174, 2817); 
-    INSERT INTO eye VALUES (78255586.9204539, x'651061e8', 'World perhaps.', -5815764.49018679, 1917); 
-    INSERT INTO eye VALUES (53.3274327094467, x'f574c507', 'Senior wish degree.', -423.432750526747, 2650); 
-    INSERT INTO eye VALUES (-908148213048.983, x'6d812051', 'Possible able.', 101.171781837336, 4100); 
+    CREATE TABLE eye (study REAL, spring BLOB, save TEXT, thank REAL, election INTEGER, PRIMARY KEY (election));
+    INSERT INTO eye VALUES (183559032.521585,  x'6625d092', 'Trial six should.', 2606132742.43174, 2817);
+    INSERT INTO eye VALUES (78255586.9204539, x'651061e8', 'World perhaps.', -5815764.49018679, 1917);
+    INSERT INTO eye VALUES (53.3274327094467, x'f574c507', 'Senior wish degree.', -423.432750526747, 2650);
+    INSERT INTO eye VALUES (-908148213048.983, x'6d812051', 'Possible able.', 101.171781837336, 4100);
     INSERT INTO eye VALUES (-572332773760.924, x'd7a4d9fb', 'Money catch expect.', -271065488.756746, 4667);
     UPDATE eye SET election = 6150 WHERE election != 1917;
 }
 
 do_execsql_test_in_memory_any_error update_primary_key_constraint_error_3 {
-    CREATE TABLE eye (study REAL, spring BLOB, save TEXT, thank REAL, election INTEGER, PRIMARY KEY (election));                  
-    INSERT INTO eye VALUES (183559032.521585,  x'6625d092', 'Trial six should.', 2606132742.43174, 2817); 
-    INSERT INTO eye VALUES (78255586.9204539, x'651061e8', 'World perhaps.', -5815764.49018679, 1917); 
-    INSERT INTO eye VALUES (53.3274327094467, x'f574c507', 'Senior wish degree.', -423.432750526747, 2650); 
-    INSERT INTO eye VALUES (-908148213048.983, x'6d812051', 'Possible able.', 101.171781837336, 4100); 
+    CREATE TABLE eye (study REAL, spring BLOB, save TEXT, thank REAL, election INTEGER, PRIMARY KEY (election));
+    INSERT INTO eye VALUES (183559032.521585,  x'6625d092', 'Trial six should.', 2606132742.43174, 2817);
+    INSERT INTO eye VALUES (78255586.9204539, x'651061e8', 'World perhaps.', -5815764.49018679, 1917);
+    INSERT INTO eye VALUES (53.3274327094467, x'f574c507', 'Senior wish degree.', -423.432750526747, 2650);
+    INSERT INTO eye VALUES (-908148213048.983, x'6d812051', 'Possible able.', 101.171781837336, 4100);
     INSERT INTO eye VALUES (-572332773760.924, x'd7a4d9fb', 'Money catch expect.', -271065488.756746, 4667);
     UPDATE eye SET election = 6150 WHERE election > 1000 AND study > 1;
 }
@@ -350,3 +350,21 @@ do_execsql_test_on_specific_db {:memory:} update-returning-null-values {
     INSERT INTO test (id, name, value) VALUES (1, 'test', 10);
     UPDATE test SET name = NULL, value = NULL WHERE id = 1 RETURNING id, name, value;
 } {1||}
+
+do_execsql_test_on_specific_db {:memory:} basic-row-values {
+    CREATE TABLE test (id INTEGER, name TEXT);
+    INSERT INTO test (id, name) VALUES (1, 'test');
+    UPDATE test SET (id, name) = (2, 'mordor') RETURNING id, name;
+} {2|mordor}
+
+do_execsql_test_in_memory_any_error parse-error-row-values {
+    CREATE TABLE test (id INTEGER, name TEXT);
+    INSERT INTO test (id, name) VALUES (1, 'test');
+    UPDATE test SET (id, name) = (2);
+}
+
+do_execsql_test_on_specific_db {:memory:} row-values-repeated-values-should-take-latter {
+    CREATE TABLE test (id INTEGER, name TEXT);
+    INSERT INTO test (id, name) VALUES (1, 'test');
+    UPDATE test SET (name, name) = ('mordor', 'shire') RETURNING id, name;
+} {1|shire}
