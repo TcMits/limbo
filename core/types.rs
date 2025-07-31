@@ -571,6 +571,141 @@ impl Value {
     }
 }
 
+/// Convert a `Value` into the implementors type.
+pub trait FromValue: Sealed {
+    fn from_sql(val: Value) -> Result<Self>
+    where
+        Self: Sized;
+}
+
+impl FromValue for Value {
+    fn from_sql(val: Value) -> Result<Self> {
+        Ok(val)
+    }
+}
+impl Sealed for crate::Value {}
+
+impl FromValue for i32 {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Integer(i) => Ok(i as i32),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for i32 {}
+
+impl FromValue for u32 {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Integer(i) => Ok(i as u32),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for u32 {}
+
+impl FromValue for i64 {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Integer(i) => Ok(i),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for i64 {}
+
+impl FromValue for u64 {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Integer(i) => Ok(i as u64),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for u64 {}
+
+impl FromValue for f64 {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Float(f) => Ok(f),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for f64 {}
+
+impl FromValue for Vec<u8> {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Blob(blob) => Ok(blob),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for Vec<u8> {}
+
+impl<const N: usize> FromValue for [u8; N] {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Blob(blob) => blob.try_into().map_err(|_| LimboError::InvalidBlobSize(N)),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl<const N: usize> Sealed for [u8; N] {}
+
+impl FromValue for String {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Text(s) => Ok(s.to_string()),
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for String {}
+
+impl FromValue for bool {
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Err(LimboError::NullValue),
+            Value::Integer(i) => match i {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => Err(LimboError::InvalidColumnType),
+            },
+            _ => unreachable!("invalid value type"),
+        }
+    }
+}
+impl Sealed for bool {}
+
+impl<T> FromValue for Option<T>
+where
+    T: FromValue,
+{
+    fn from_sql(val: Value) -> Result<Self> {
+        match val {
+            Value::Null => Ok(None),
+            _ => T::from_sql(val).map(Some),
+        }
+    }
+}
+impl<T> Sealed for Option<T> {}
+
+mod sealed {
+    pub trait Sealed {}
+}
+use sealed::Sealed;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SumAggState {
     pub r_err: f64,   // Error term for Kahan-Babushka-Neumaier summation

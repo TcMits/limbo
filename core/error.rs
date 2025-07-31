@@ -69,6 +69,12 @@ pub enum LimboError {
     WriteWriteConflict,
     #[error("No such transaction ID: {0}")]
     NoSuchTransactionID(String),
+    #[error("Null value")]
+    NullValue,
+    #[error("invalid column type")]
+    InvalidColumnType,
+    #[error("Invalid blob size, expected {0}")]
+    InvalidBlobSize(usize),
 }
 
 #[macro_export]
