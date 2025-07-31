@@ -6637,7 +6637,9 @@ fn defragment_page(page: &PageContent, usable_space: u16) {
 
         if pc > last_offset {
             // Enable a fast path preventing the sort operation
-            // for cells that are already in a sorted order
+            // for cells that are already in a sorted order, since
+            // cell grows from right to left we check if pc is
+            // greater than the last offset
             is_physically_sorted = false;
         }
 
