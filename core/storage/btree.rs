@@ -6669,10 +6669,11 @@ fn defragment_page(page: &PageContent, usable_space: u16) {
         let new_offset = cbrk;
         let old_offset = cell.old_offset;
 
-        // Basic corruption check.
-        if new_offset < first_cell_content_byte || old_offset + cell.size > usable_space {
-            todo!("corrupt page detected during defragmentation");
-        }
+        // Basic corruption check
+        turso_assert!(
+            new_offset < first_cell_content_byte || old_offset + cell.size > usable_space,
+            "corrupt page detected during defragmentation"
+        );
 
         // Move the cell data. `copy_within` is the idiomatic and safe
         // way to perform a `memmove` operation on a slice.
