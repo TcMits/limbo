@@ -157,34 +157,36 @@ pub fn prepare_update_plan(
 
     let mut set_clauses = Vec::with_capacity(body.sets.len());
 
-    // Assign expressions to column names for each `SET` assigment,
+    // Process each SET assignment and map column names to expressions
     // e.g the statement `SET x = 1, y = 2, z = 3` has 3 set assigments
     for set in &mut body.sets {
-        for (idx, col_name) in set.col_names.iter().enumerate() {
+        bind_column_references(&mut set.expr, &mut table_references, None, connection)?;
+
+        let values = match &set.expr {
+            Expr::Parenthesized(vals) => vals.clone(),
+            expr => vec![expr.clone()],
+        };
+
+        if set.col_names.len() != values.len() {
+            bail_parse_error!(
+                "{} columns assigned {} values",
+                set.col_names.len(),
+                values.len()
+            );
+        }
+
+        // Map each column to its corresponding expression
+        for (col_name, expr) in set.col_names.iter().zip(values.iter()) {
             let ident = normalize_ident(col_name.as_str());
-            let Some(col_index) = column_lookup.get(&ident) else {
-                bail_parse_error!("no such column: {}", ident);
+            let col_index = match column_lookup.get(&ident) {
+                Some(idx) => idx,
+                None => bail_parse_error!("no such column: {}", ident),
             };
 
-            bind_column_references(&mut set.expr, &mut table_references, None, connection)?;
-
-            let expr = if let Expr::Parenthesized(values) = &set.expr {
-                match values.get(idx).cloned() {
-                    Some(expr) => expr,
-                    None => bail_parse_error!(
-                        "{} columns assigned {} values",
-                        set.col_names.len(),
-                        values.len()
-                    ),
-                }
-            } else {
-                set.expr.clone()
-            };
-
-            if let Some(idx) = set_clauses.iter().position(|(idx, _)| *idx == *col_index) {
-                set_clauses[idx].1 = expr;
-            } else {
-                set_clauses.push((*col_index, expr));
+            // Update existing entry or add new one
+            match set_clauses.iter_mut().find(|(idx, _)| idx == col_index) {
+                Some((_, existing_expr)) => *existing_expr = expr.clone(),
+                None => set_clauses.push((*col_index, expr.clone())),
             }
         }
     }
