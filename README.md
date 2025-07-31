@@ -91,7 +91,8 @@ cargo run
 If you like docker, we got you covered. Simply run this in the root folder:
 
 ```bash
-docker build -f Dockerfile.cli -t turso-cli . && docker run -it turso-cli
+make docker-cli-build && \
+make docker-cli-run
 ```
 
 ### MCP Server Mode

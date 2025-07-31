@@ -150,3 +150,9 @@ bench-exclude-tpc-h:
 		cargo bench $$benchmarks; \
 	fi
 .PHONY: bench-exclude-tpc-h
+
+docker-cli-build:
+	docker build -f Dockerfile.cli -t turso-cli .
+
+docker-cli-run:
+	docker run -it -v ./:/app turso-cli
