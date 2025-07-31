@@ -1290,6 +1290,7 @@ impl WalFile {
 
         let header = unsafe { shared.get().as_mut().unwrap().wal_header.lock() };
         let last_checksum = unsafe { (*shared.get()).last_checksum };
+        let start_pages_in_frames = unsafe { (*shared.get()).pages_in_frames.lock().len() };
         Self {
             io,
             // default to max frame in WAL, so that when we read schema we can read from WAL too if it's there.
@@ -1313,7 +1314,7 @@ impl WalFile {
             last_checksum,
             prev_checkpoint: CheckpointResult::default(),
             checkpoint_guard: None,
-            start_pages_in_frames: 0,
+            start_pages_in_frames,
             header: *header,
         }
     }

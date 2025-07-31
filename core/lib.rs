@@ -1190,7 +1190,7 @@ impl Connection {
                 wal.end_read_tx();
             }
             // remove all non-commited changes in case if WAL session left some suffix without commit frame
-            pager.rollback(false, self)?;
+            pager.rollback(false, self, true)?;
         }
 
         // let's re-parse schema from scratch if schema cookie changed compared to the our in-memory view of schema

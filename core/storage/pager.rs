@@ -815,14 +815,15 @@ impl Pager {
     ) -> Result<IOResult<PagerCommitResult>> {
         tracing::trace!("end_tx(rollback={})", rollback);
         if rollback {
-            if matches!(
+            let is_write = matches!(
                 connection.transaction_state.get(),
                 TransactionState::Write { .. }
-            ) {
+            );
+            if is_write {
                 self.wal.borrow().end_write_tx();
             }
             self.wal.borrow().end_read_tx();
-            self.rollback(schema_did_change, connection)?;
+            self.rollback(schema_did_change, connection, is_write)?;
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
         }
         let commit_status = self.commit_dirty_pages(wal_checkpoint_disabled)?;
@@ -1799,9 +1800,17 @@ impl Pager {
         &self,
         schema_did_change: bool,
         connection: &Connection,
+        is_write: bool,
     ) -> Result<(), LimboError> {
         tracing::debug!(schema_did_change);
-        self.dirty_pages.borrow_mut().clear();
+        if is_write {
+            self.dirty_pages.borrow_mut().clear();
+        } else {
+            turso_assert!(
+                self.dirty_pages.borrow().is_empty(),
+                "dirty pages should be empty for read txn"
+            );
+        }
         let mut cache = self.page_cache.write();
 
         self.reset_internal_states();
@@ -1811,7 +1820,9 @@ impl Pager {
         if schema_did_change {
             connection.schema.replace(connection._db.clone_schema()?);
         }
-        self.wal.borrow_mut().rollback()?;
+        if is_write {
+            self.wal.borrow_mut().rollback()?;
+        }
 
         Ok(())
     }
