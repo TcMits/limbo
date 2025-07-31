@@ -6201,7 +6201,7 @@ pub fn op_add_imm(
     state: &mut ProgramState,
     insn: &Insn,
     pager: &Rc<Pager>,
-    mv_store: Option<&Rc<MvStore>>,
+    mv_store: Option<&Arc<MvStore>>,
 ) -> Result<InsnFunctionStepResult> {
     let Insn::AddImm { register, value } = insn else {
         unreachable!("unexpected Insn {:?}", insn)
@@ -6720,7 +6720,7 @@ pub fn op_cast(
     state: &mut ProgramState,
     insn: &Insn,
     _pager: &Rc<Pager>,
-    _mv_store: Option<&Rc<MvStore>>,
+    _mv_store: Option<&Arc<MvStore>>,
 ) -> Result<InsnFunctionStepResult> {
     let Insn::Cast { reg, affinity } = insn else {
         unreachable!("unexpected Insn {:?}", insn)

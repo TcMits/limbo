@@ -633,7 +633,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         // 1. Write rows to btree for persistence
         for id in &write_set {
             if let Some(row_versions) = self.rows.get(id) {
-                let row_versions = row_versions.value().read().unwrap();
+                let row_versions = row_versions.value().read();
                 // Find rows that were written by this transaction
                 for row_version in row_versions.iter() {
                     if let TxTimestampOrID::TxID(row_tx_id) = row_version.begin {
@@ -944,14 +944,14 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         tracing::trace!("scan_row_ids_for_table(table_id={})", table_id);
 
         // First, check if the table is already loaded.
-        if self.loaded_tables.read().unwrap().contains(&table_id) {
+        if self.loaded_tables.read().contains(&table_id) {
             return Ok(());
         }
 
         // Then, scan the disk B-tree to find existing rows
         self.scan_load_table(table_id, pager)?;
 
-        self.loaded_tables.write().unwrap().insert(table_id);
+        self.loaded_tables.write().insert(table_id);
 
         Ok(())
     }
