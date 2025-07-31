@@ -477,23 +477,26 @@ impl Rows {
                 .inner
                 .lock()
                 .map_err(|e| Error::MutexError(e.to_string()))?;
-            match stmt.step() {
-                Ok(turso_core::StepResult::Row) => {
+            match stmt.step()? {
+                turso_core::StepResult::Row => {
                     let row = stmt.row().unwrap();
                     return Ok(Some(Row {
                         values: row.get_values().map(|v| v.to_owned()).collect(),
                     }));
                 }
-                Ok(turso_core::StepResult::Done) => return Ok(None),
-                Ok(turso_core::StepResult::IO) => {
+                turso_core::StepResult::Done => return Ok(None),
+                turso_core::StepResult::IO => {
                     if let Err(e) = stmt.run_once() {
                         return Err(e.into());
                     }
                     continue;
                 }
-                Ok(turso_core::StepResult::Busy) => return Ok(None),
-                Ok(turso_core::StepResult::Interrupt) => return Ok(None),
-                _ => return Ok(None),
+                turso_core::StepResult::Busy => {
+                    return Err(Error::SqlExecutionFailure("database is locked".to_string()))
+                }
+                turso_core::StepResult::Interrupt => {
+                    return Err(Error::SqlExecutionFailure("interrupted".to_string()))
+                }
             }
         }
     }
