@@ -1,6 +1,7 @@
 "use strict";
 
 const { Database: NativeDB } = require("./index.js");
+const { bindParams } = require("./bind.js");
 
 const SqliteError = require("./sqlite-error.js");
 
@@ -138,12 +139,12 @@ class Database {
     if (typeof options !== "object")
       throw new TypeError("Expected second argument to be an options object");
 
-    const simple = options["simple"];
     const pragma = `PRAGMA ${source}`;
-
-    return simple
-      ? this.db.pragma(source, { simple: true })
-      : this.db.pragma(source);
+    
+    const stmt = this.prepare(pragma);
+    const results = stmt.all();
+    
+    return results;
   }
 
   backup(filename, options) {
@@ -181,7 +182,7 @@ class Database {
    */
   exec(sql) {
     try {
-      this.db.exec(sql);
+      this.db.batch(sql);
     } catch (err) {
       throw convertError(err);
     }
@@ -251,7 +252,25 @@ class Statement {
    * Executes the SQL statement and returns an info object.
    */
   run(...bindParameters) {
-    return this.stmt.run(bindParameters.flat());
+    const totalChangesBefore = this.db.db.totalChanges();
+    
+    this.stmt.reset();
+    bindParams(this.stmt, bindParameters);
+    for (;;) {
+      const result = this.stmt.step();
+      if (result.io) {
+        this.db.db.ioLoopSync();
+        continue;
+      }
+      if (result.done) {
+        break;
+      }
+    }
+    
+    const lastInsertRowid = this.db.db.lastInsertRowid();
+    const changes = this.db.db.totalChanges() === totalChangesBefore ? 0 : this.db.db.changes();
+    
+    return { changes, lastInsertRowid };
   }
 
   /**
@@ -260,7 +279,19 @@ class Statement {
    * @param bindParameters - The bind parameters for executing the statement.
    */
   get(...bindParameters) {
-    return this.stmt.get(bindParameters.flat());
+    this.stmt.reset();
+    bindParams(this.stmt, bindParameters);
+    for (;;) {
+      const result = this.stmt.step();
+      if (result.io) {
+        this.db.db.ioLoopSync();
+        continue;
+      }
+      if (result.done) {
+        return undefined;
+      }
+      return result.value;
+    }
   }
 
   /**
@@ -278,7 +309,21 @@ class Statement {
    * @param bindParameters - The bind parameters for executing the statement.
    */
   all(...bindParameters) {
-    return this.stmt.all(bindParameters.flat());
+    this.stmt.reset();
+    bindParams(this.stmt, bindParameters);
+    const rows = [];
+    for (;;) {
+      const result = this.stmt.step();
+      if (result.io) {
+        this.db.db.ioLoopSync();
+        continue;
+      }
+      if (result.done) {
+        break;
+      }
+      rows.push(result.value);
+    }
+    return rows;
   }
 
   /**
@@ -304,7 +349,8 @@ class Statement {
    */
   bind(...bindParameters) {
     try {
-      return new Statement(this.stmt.bind(bindParameters.flat()), this.db);
+      bindParams(this.stmt, bindParameters);
+      return this;
     } catch (err) {
       throw convertError(err);
     }

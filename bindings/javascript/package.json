@@ -12,6 +12,7 @@
     "./sync": "./sync.js"
   },
   "files": [
+    "bindjs",
     "browser.js",
     "index.js",
     "promise.js",
