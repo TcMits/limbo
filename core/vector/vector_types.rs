@@ -756,6 +756,7 @@ mod tests {
         let v2 = float32_vec_from(&[]);
         let result = vector_concat(&v1, &v2).unwrap();
         assert_eq!(result.dims, 0);
+        assert_eq!(f32_slice_from_vector(&result), vec![]);
     }
 
     #[test]
