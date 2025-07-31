@@ -25,8 +25,33 @@ pub struct Vector {
 }
 
 impl Vector {
+    /// # Safety
+    ///
+    /// This method is used to reinterpret the underlying `Vec<u8>` data
+    /// as a `&[f32]` slice. This is only valid if:
+    /// - The buffer is correctly aligned for `f32`
+    /// - The length of the buffer is exactly `dims * size_of::<f32>()`
     pub fn as_f32_slice(&self) -> &[f32] {
-        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const f32, self.dims) }
+        if self.dims == 0 {
+            return &[];
+        }
+
+        assert_eq!(
+            self.data.len(),
+            self.dims * std::mem::size_of::<f32>(),
+            "data length must equal dims * size_of::<f32>()"
+        );
+
+        let ptr = self.data.as_ptr();
+        let align = std::mem::align_of::<f32>();
+        assert_eq!(
+            ptr.align_offset(align),
+            0,
+            "data pointer must be aligned to {} bytes for f32 access",
+            align
+        );
+
+        unsafe { std::slice::from_raw_parts(ptr as *const f32, self.dims) }
     }
 
     pub fn as_f64_slice(&self) -> &[f64] {
