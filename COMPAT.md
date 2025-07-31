@@ -572,7 +572,6 @@ Modifiers:
 | VUpdate        | Yes    |         |
 | Vacuum         | No     |         |
 | Variable       | Yes    |         |
-| VerifyCookie   | No     |         |
 | Yield          | Yes    |         |
 | ZeroOrNull     | Yes    |         |
 
