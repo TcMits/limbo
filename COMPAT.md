@@ -416,7 +416,7 @@ Modifiers:
 |----------------|--------|---------|
 | Add            | Yes    |         |
 | AddImm         | Yes    |         |
-| Affinity       | No     |         |
+| Affinity       | Yes    |         |
 | AggFinal       | Yes    |         |
 | AggStep        | Yes    |         |
 | AggStep        | Yes    |         |
@@ -474,7 +474,6 @@ Modifiers:
 | Init           | Yes    |         |
 | InitCoroutine  | Yes    |         |
 | Insert         | Yes    |         |
-| InsertInt      | No     |         |
 | Int64          | Yes    |         |
 | Integer        | Yes    |         |
 | IntegrityCk    | Yes    |         |
@@ -551,7 +550,7 @@ Modifiers:
 | SorterNext     | Yes    |         |
 | SorterOpen     | Yes    |         |
 | SorterSort     | Yes    |         |
-| String         | No     |         |
+| String         | NotNeeded | SQLite uses String for sized strings and String8 for null-terminated. All our strings are sized |
 | String8        | Yes    |         |
 | Subtract       | Yes    |         |
 | TableLock      | No     |         |
