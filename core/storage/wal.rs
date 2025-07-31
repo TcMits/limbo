@@ -776,7 +776,11 @@ impl Wal for WalFile {
             let checkpoint_seq = shared.wal_header.lock().checkpoint_seq;
             (mx, nb, ck, checkpoint_seq)
         };
-        let db_changed = shared_max > self.max_frame;
+        // This needs to be an != comparison because either of the following can be true:
+        // - Another connection added more WAL frames -> shared max is bigger
+        // - Another connection checkpointed -> shared max is smaller
+        // TODO: are there cases where shared_max == self.max_frame but the DB has still changed in between??
+        let db_changed = shared_max != self.max_frame;
 
         // WAL is already fully back‑filled into the main DB image
         // (mxFrame == nBackfill). Readers can therefore ignore the
