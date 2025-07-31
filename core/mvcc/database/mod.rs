@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub type Result<T> = std::result::Result<T, DatabaseError>;
 
