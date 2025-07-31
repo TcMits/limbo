@@ -331,11 +331,6 @@ pub fn vector_f64_distance_cos(v1: &Vector, v2: &Vector) -> Result<f64> {
 }
 
 pub fn vector_type(blob: &[u8]) -> Result<VectorType> {
-    if blob.is_empty() {
-        return Err(LimboError::ConversionError(
-            "Invalid vector value".to_string(),
-        ));
-    }
     // Even-sized blobs are always float32.
     if blob.len() % 2 == 0 {
         return Ok(VectorType::Float32);
