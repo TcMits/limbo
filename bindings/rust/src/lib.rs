@@ -61,6 +61,10 @@ pub enum Error {
     SqlExecutionFailure(String),
     #[error("WAL operation error: `{0}`")]
     WalOperationError(String),
+    #[error("Query returned no rows")]
+    QueryReturnedNoRows,
+    #[error("Conversion failure: `{0}`")]
+    ConversionFailure(String),
 }
 
 impl From<turso_core::LimboError> for Error {
@@ -421,6 +425,17 @@ impl Statement {
     pub fn reset(&self) {
         let mut stmt = self.inner.lock().unwrap();
         stmt.reset();
+    }
+
+    /// Execute a query that returns the first [`Row`].
+    ///
+    /// # Errors
+    ///
+    /// - Returns `QueryReturnedNoRows` if no rows were returned.
+    pub async fn query_row(&mut self, params: impl IntoParams) -> Result<Row> {
+        let mut rows = self.query(params).await?;
+
+        rows.next().await?.ok_or(Error::QueryReturnedNoRows)
     }
 }
 

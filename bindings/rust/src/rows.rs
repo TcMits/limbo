@@ -79,6 +79,14 @@ impl Row {
         }
     }
 
+    pub fn get<T>(&self, idx: usize) -> Result<T>
+    where
+        T: FromValue,
+    {
+        let val = &self.values[idx];
+        T::from_sql(val.clone()).map_err(|err| Error::ConversionFailure(err.to_string()))
+    }
+
     pub fn column_count(&self) -> usize {
         self.values.len()
     }

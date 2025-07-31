@@ -344,17 +344,13 @@ mod test {
         }
         {
             let tx = conn.transaction().await?;
-            let mut result = tx.query("SELECT SUM(x) FROM foo", ()).await?;
-            assert_eq!(
-                2,
-                *result
-                    .next()
-                    .await?
-                    .unwrap()
-                    .get_value(0)?
-                    .as_integer()
-                    .unwrap()
-            );
+            let result = tx
+                .prepare("SELECT SUM(x) FROM foo")
+                .await?
+                .query_row(())
+                .await?;
+
+            assert_eq!(2, result.get::<i32>(0)?);
             tx.finish().await?;
         }
         Ok(())
@@ -390,17 +386,12 @@ mod test {
             tx.commit().await?;
         }
 
-        let mut result = conn.query("SELECT SUM(x) FROM foo", ()).await?;
-        assert_eq!(
-            2,
-            *result
-                .next()
-                .await?
-                .unwrap()
-                .get_value(0)?
-                .as_integer()
-                .unwrap()
-        );
+        let result = conn
+            .prepare("SELECT SUM(x) FROM foo")
+            .await?
+            .query_row(())
+            .await?;
+        assert_eq!(2, result.get::<i32>(0)?);
         Ok(())
     }
 
@@ -425,17 +416,12 @@ mod test {
             tx.commit().await?;
         }
         {
-            let mut result = conn.query("SELECT SUM(x) FROM foo", ()).await?;
-            assert_eq!(
-                6,
-                *result
-                    .next()
-                    .await?
-                    .unwrap()
-                    .get_value(0)?
-                    .as_integer()
-                    .unwrap()
-            );
+            let result = conn
+                .prepare("SELECT SUM(x) FROM foo")
+                .await?
+                .query_row(())
+                .await?;
+            assert_eq!(6, result.get::<i32>(0)?);
         }
         Ok(())
     }
