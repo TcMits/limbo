@@ -334,6 +334,13 @@ pub fn op_checkpoint(
     else {
         unreachable!("unexpected Insn {:?}", insn)
     };
+    if !program.connection.auto_commit.get() {
+        // TODO: sqlite returns "Runtime error: database table is locked (6)" when a table is in use
+        // when a checkpoint is attempted. We don't have table locks, so return TableLocked for any
+        // attempt to checkpoint in an interactive transaction. This does not end the transaction,
+        // however.
+        return Err(LimboError::TableLocked);
+    }
     let result = program.connection.checkpoint(*checkpoint_mode);
     match result {
         Ok(CheckpointResult {

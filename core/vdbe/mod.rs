@@ -757,7 +757,10 @@ pub fn handle_program_error(
     err: &LimboError,
 ) -> Result<()> {
     match err {
+        // Transaction errors, e.g. trying to start a nested transaction, do not cause a rollback.
         LimboError::TxError(_) => {}
+        // Table locked errors, e.g. trying to checkpoint in an interactive transaction, do not cause a rollback.
+        LimboError::TableLocked => {}
         _ => {
             let state = connection.transaction_state.get();
             if let TransactionState::Write { schema_did_change } = state {
