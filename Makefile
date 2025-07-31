@@ -169,20 +169,21 @@ endif
 			exit 1; \
 		fi; \
 		export GITHUB_REPOSITORY="$$REPO"; \
-		echo "Detected repository: $$REPO"; \
 	else \
 		export GITHUB_REPOSITORY="$(GITHUB_REPOSITORY)"; \
-		echo "Using provided repository: $(GITHUB_REPOSITORY)"; \
 	fi; \
 	echo "Repository: $$REPO"; \
-	echo "Checking GitHub CLI authentication..."; \
-	if ! gh auth status >/dev/null 2>&1; then \
+	AUTH=$$(gh auth status); \
+	if [ -z "$$AUTH" ]; then \
+		echo "auth: $$AUTH"; \
 		echo "GitHub CLI not authenticated. Starting login process..."; \
-		gh auth login; \
+		gh auth login --scopes repo,workflow; \
 	else \
-		echo "GitHub CLI is already authenticated"; \
+		if ! echo "$$AUTH" | grep -q "workflow"; then \
+			echo "Warning: 'workflow' scope not detected. You may need to re-authenticate if merging PRs with workflow changes."; \
+			echo "Run: gh auth refresh -s repo,workflow"; \
+		fi; \
 	fi; \
-	echo "Merging PR #$(PR)..."; \
 	if [ "$(LOCAL)" = "1" ]; then \
 	    echo "merging PR #$(PR) locally"; \
 		uv run scripts/merge-pr.py $(PR) --local; \

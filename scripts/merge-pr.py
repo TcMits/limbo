@@ -121,10 +121,6 @@ def merge_remote(pr_number: int, commit_message: str, commit_title: str):
             print(f"\nMerge commit message:\n{commit_message}")
         else:
             print(f"Error merging PR: {error}")
-            status_output, _, _ = run_command("gh pr status --json number,mergeable,mergeStateStatus")
-            if status_output:
-                print("\nPR status information:")
-                print(status_output)
             sys.exit(1)
     finally:
         # Clean up the temporary file
@@ -157,7 +153,7 @@ def merge_local(pr_number: int, commit_message: str):
         # Merge the PR branch with the custom message
         # Using -F with the full message (title + body)
         cmd = f"git merge --no-ff {pr_branch} -F {temp_file_path}"
-        output, error, returncode = run_command(cmd)
+        _, error, returncode = run_command(cmd)
         if returncode != 0:
             print(f"Error merging PR: {error}")
             # Try to go back to original branch
