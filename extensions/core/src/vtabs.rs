@@ -156,7 +156,7 @@ pub trait VTable {
             constraint_usages: _constraints
                 .iter()
                 .map(|_| ConstraintUsage {
-                    argv_index: Some(0),
+                    argv_index: None,
                     omit: false,
                 })
                 .collect(),
@@ -314,7 +314,9 @@ pub struct ExtIndexInfo {
 /// can use the constraints in the WHERE clause of a query.
 #[derive(Debug, Clone, Copy)]
 pub struct ConstraintUsage {
-    /// 1 based index of the argument passed
+    /// 1-based index of the argument passed.
+    /// An `argv_index` value less than 1 is invalid and will result in an error.
+    /// If `None`, this constraint will not be passed as an argument.
     pub argv_index: Option<u32>,
     /// If true, core can omit this constraint in the vdbe layer.
     pub omit: bool,

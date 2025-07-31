@@ -131,7 +131,7 @@ impl VTable for CompletionTable {
                     usage
                 } else {
                     ConstraintUsage {
-                        argv_index: Some(0),
+                        argv_index: None,
                         omit: false,
                     }
                 }
