@@ -30,7 +30,7 @@ pub fn emit_select_result(
     limit_ctx: Option<LimitCtx>,
 ) -> Result<()> {
     if let (Some(jump_to), Some(_)) = (offset_jump_to, label_on_limit_reached) {
-        emit_offset(program, plan, jump_to, reg_offset)?;
+        emit_offset(program, plan, jump_to, reg_offset);
     }
 
     let start_reg = reg_result_cols_start;
@@ -163,7 +163,7 @@ pub fn emit_offset(
     plan: &SelectPlan,
     jump_to: BranchOffset,
     reg_offset: Option<usize>,
-) -> Result<()> {
+) {
     match plan.offset {
         Some(offset) if offset > 0 => {
             program.add_comment(program.offset(), "OFFSET");
@@ -175,5 +175,4 @@ pub fn emit_offset(
         }
         _ => {}
     }
-    Ok(())
 }

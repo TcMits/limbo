@@ -207,7 +207,7 @@ pub fn insn_to_str(
                 "IfPos",
                 *reg as i32,
                 target_pc.as_debug_int(),
-                0,
+                *decrement_by as i32,
                 Value::build_text(""),
                 0,
                 format!(

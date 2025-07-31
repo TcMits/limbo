@@ -1,6 +1,7 @@
-use crate::translate::emitter::{LimitCtx, Resolver};
+use crate::translate::emitter::{Resolver, TranslateCtx};
 use crate::translate::expr::{translate_expr_no_constant_opt, NoConstantOptReason};
 use crate::translate::plan::{QueryDestination, SelectPlan};
+use crate::translate::result_row::emit_offset;
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::insn::{IdxInsertFlags, Insn};
 use crate::vdbe::BranchOffset;
@@ -9,22 +10,19 @@ use crate::Result;
 pub fn emit_values(
     program: &mut ProgramBuilder,
     plan: &SelectPlan,
-    resolver: &Resolver,
-    limit_ctx: Option<LimitCtx>,
+    t_ctx: &TranslateCtx,
 ) -> Result<usize> {
     if plan.values.len() == 1 {
-        let start_reg = emit_values_when_single_row(program, plan, resolver, limit_ctx)?;
+        let start_reg = emit_values_when_single_row(program, plan, t_ctx)?;
         return Ok(start_reg);
     }
 
     let reg_result_cols_start = match plan.query_destination {
-        QueryDestination::ResultRows => emit_toplevel_values(program, plan, resolver, limit_ctx)?,
+        QueryDestination::ResultRows => emit_toplevel_values(program, plan, t_ctx)?,
         QueryDestination::CoroutineYield { yield_reg, .. } => {
-            emit_values_in_subquery(program, plan, resolver, yield_reg)?
+            emit_values_in_subquery(program, plan, &t_ctx.resolver, yield_reg)?
         }
-        QueryDestination::EphemeralIndex { .. } => {
-            emit_toplevel_values(program, plan, resolver, limit_ctx)?
-        }
+        QueryDestination::EphemeralIndex { .. } => emit_toplevel_values(program, plan, t_ctx)?,
         QueryDestination::EphemeralTable { .. } => unreachable!(),
     };
     Ok(reg_result_cols_start)
@@ -33,9 +31,10 @@ pub fn emit_values(
 fn emit_values_when_single_row(
     program: &mut ProgramBuilder,
     plan: &SelectPlan,
-    resolver: &Resolver,
-    limit_ctx: Option<LimitCtx>,
+    t_ctx: &TranslateCtx,
 ) -> Result<usize> {
+    let end_label = program.allocate_label();
+    emit_offset(program, plan, end_label, t_ctx.reg_offset);
     let first_row = &plan.values[0];
     let row_len = first_row.len();
     let start_reg = program.alloc_registers(row_len);
@@ -45,12 +44,11 @@ fn emit_values_when_single_row(
             None,
             v,
             start_reg + i,
-            resolver,
+            &t_ctx.resolver,
             NoConstantOptReason::RegisterReuse,
         )?;
     }
-    let end_label = program.allocate_label();
-    emit_values_to_destination(program, plan, start_reg, row_len, limit_ctx, end_label);
+    emit_values_to_destination(program, plan, t_ctx, start_reg, row_len, end_label);
     program.preassign_label_to_next_insn(end_label);
     Ok(start_reg)
 }
@@ -58,8 +56,7 @@ fn emit_values_when_single_row(
 fn emit_toplevel_values(
     program: &mut ProgramBuilder,
     plan: &SelectPlan,
-    resolver: &Resolver,
-    limit_ctx: Option<LimitCtx>,
+    t_ctx: &TranslateCtx,
 ) -> Result<usize> {
     let yield_reg = program.alloc_register();
     let definition_label = program.allocate_label();
@@ -71,7 +68,7 @@ fn emit_toplevel_values(
     });
     program.preassign_label_to_next_insn(start_offset_label);
 
-    let start_reg = emit_values_in_subquery(program, plan, resolver, yield_reg)?;
+    let start_reg = emit_values_in_subquery(program, plan, &t_ctx.resolver, yield_reg)?;
 
     program.emit_insn(Insn::EndCoroutine { yield_reg });
     program.preassign_label_to_next_insn(definition_label);
@@ -82,12 +79,15 @@ fn emit_toplevel_values(
         start_offset: start_offset_label,
     });
     let end_label = program.allocate_label();
-    let goto_label = program.allocate_label();
-    program.preassign_label_to_next_insn(goto_label);
+    let yield_label = program.allocate_label();
+    program.preassign_label_to_next_insn(yield_label);
     program.emit_insn(Insn::Yield {
         yield_reg,
         end_offset: end_label,
     });
+
+    let goto_label = program.allocate_label();
+    emit_offset(program, plan, goto_label, t_ctx.reg_offset);
     let row_len = plan.values[0].len();
     let copy_start_reg = program.alloc_registers(row_len);
     for i in 0..row_len {
@@ -98,10 +98,11 @@ fn emit_toplevel_values(
         });
     }
 
-    emit_values_to_destination(program, plan, copy_start_reg, row_len, limit_ctx, end_label);
+    emit_values_to_destination(program, plan, t_ctx, copy_start_reg, row_len, end_label);
 
+    program.preassign_label_to_next_insn(goto_label);
     program.emit_insn(Insn::Goto {
-        target_pc: goto_label,
+        target_pc: yield_label,
     });
     program.preassign_label_to_next_insn(end_label);
 
@@ -139,9 +140,9 @@ fn emit_values_in_subquery(
 fn emit_values_to_destination(
     program: &mut ProgramBuilder,
     plan: &SelectPlan,
+    t_ctx: &TranslateCtx,
     start_reg: usize,
     row_len: usize,
-    limit_ctx: Option<LimitCtx>,
     end_label: BranchOffset,
 ) {
     match &plan.query_destination {
@@ -150,7 +151,7 @@ fn emit_values_to_destination(
                 start_reg,
                 count: row_len,
             });
-            if let Some(limit_ctx) = limit_ctx {
+            if let Some(limit_ctx) = t_ctx.limit_ctx {
                 program.emit_insn(Insn::DecrJumpZero {
                     reg: limit_ctx.reg_limit,
                     target_pc: end_label,

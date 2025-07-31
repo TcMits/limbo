@@ -644,13 +644,31 @@ if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-s
     x
     y}
 
-    do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit-2 {
+    do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit-1 {
     CREATE TABLE t (x TEXT);
     INSERT INTO t VALUES('x'), ('y'), ('z');
 
     values('a'), ('b') UNION ALL select * from t limit 3;
     } {a
     b
+    x}
+
+    do_execsql_test_on_specific_db {:memory:} select-values-union-all-offset {
+    CREATE TABLE t (x TEXT);
+    INSERT INTO t VALUES('x'), ('y'), ('z');
+
+    values('a'), ('b') UNION ALL select * from t limit 3 offset 1;
+    } {b
+    x
+    y}
+
+    do_execsql_test_on_specific_db {:memory:} select-values-union-all-offset-1 {
+    CREATE TABLE t (x TEXT);
+    INSERT INTO t VALUES('i'), ('j'), ('x'), ('y'), ('z');
+
+    values('a') UNION ALL select * from t limit 3 offset 1;
+    } {i
+    j
     x}
 }
 

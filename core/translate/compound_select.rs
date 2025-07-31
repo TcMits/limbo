@@ -397,15 +397,12 @@ fn read_deduplicated_union_or_except_rows(
         pc_if_empty: label_dedupe_next,
     });
     program.preassign_label_to_next_insn(label_dedupe_loop_start);
-    match offset_reg {
-        Some(reg) if reg > 0 => {
-            program.emit_insn(Insn::IfPos {
-                reg,
-                target_pc: label_dedupe_next,
-                decrement_by: 1,
-            });
-        }
-        _ => {}
+    if let Some(reg) = offset_reg {
+        program.emit_insn(Insn::IfPos {
+            reg,
+            target_pc: label_dedupe_next,
+            decrement_by: 1,
+        });
     }
     for col_idx in 0..dedupe_index.columns.len() {
         let start_reg = if let Some(yield_reg) = yield_reg {
@@ -482,15 +479,12 @@ fn read_intersect_rows(
         record_reg: row_content_reg,
         num_regs: 0,
     });
-    match offset_reg {
-        Some(reg) if reg > 0 => {
-            program.emit_insn(Insn::IfPos {
-                reg,
-                target_pc: label_next,
-                decrement_by: 1,
-            });
-        }
-        _ => {}
+    if let Some(reg) = offset_reg {
+        program.emit_insn(Insn::IfPos {
+            reg,
+            target_pc: label_next,
+            decrement_by: 1,
+        });
     }
     let column_count = index.columns.len();
     let cols_start_reg = if let Some(yield_reg) = yield_reg {
