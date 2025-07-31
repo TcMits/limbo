@@ -37,14 +37,16 @@ fn bench_open(criterion: &mut Criterion) {
             let io = Arc::new(PlatformIO::new().unwrap());
             let db =
                 Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
-            black_box(db.connect().unwrap());
+            let conn = db.connect().unwrap();
+            conn.execute("SELECT * FROM table_0").unwrap();
         });
     });
 
     if enable_rusqlite {
         group.bench_function(BenchmarkId::new("sqlite_schema", ""), |b| {
             b.iter(|| {
-                black_box(rusqlite::Connection::open("../testing/schema_5k.db").unwrap());
+                let conn = rusqlite::Connection::open("../testing/schema_5k.db").unwrap();
+                conn.execute("SELECT * FROM table_0", ()).unwrap();
             });
         });
     }
