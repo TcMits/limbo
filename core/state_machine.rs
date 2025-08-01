@@ -1,22 +1,23 @@
 use crate::Result;
 
-pub enum TransitionResult {
+pub enum TransitionResult<Result> {
     Io,
     Continue,
-    Done,
+    Done(Result),
 }
 
 /// A generic trait for state machines.
 pub trait StateTransition {
     type State;
     type Context;
+    type SMResult;
 
     /// Transition the state machine to the next state.
     ///
     /// Returns `TransitionResult::Io` if the state machine needs to perform an IO operation.
     /// Returns `TransitionResult::Continue` if the state machine needs to continue.
     /// Returns `TransitionResult::Done` if the state machine is done.
-    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult>;
+    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult<Self::SMResult>>;
 
     /// Finalize the state machine.
     ///
@@ -45,8 +46,9 @@ impl<State: StateTransition> StateMachine<State> {
 impl<State: StateTransition> StateTransition for StateMachine<State> {
     type State = State;
     type Context = State::Context;
+    type SMResult = State::SMResult;
 
-    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult> {
+    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         loop {
             if self.is_finalized {
                 unreachable!("StateMachine::transition: state machine is finalized");
@@ -58,10 +60,10 @@ impl<State: StateTransition> StateTransition for StateMachine<State> {
                 TransitionResult::Continue => {
                     continue;
                 }
-                TransitionResult::Done => {
+                TransitionResult::Done(result) => {
                     assert!(self.state.is_finalized());
                     self.is_finalized = true;
-                    return Ok(TransitionResult::Done);
+                    return Ok(TransitionResult::Done(result));
                 }
             }
         }

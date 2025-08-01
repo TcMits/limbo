@@ -307,9 +307,10 @@ impl WriteRowStateMachine {
 impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
     type State = CommitStateMachine<Clock>;
     type Context = MvStore<Clock>;
+    type SMResult = ();
 
     #[tracing::instrument(fields(state = ?self.state), skip(self, mvcc_store))]
-    fn step<'a>(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult> {
+    fn step<'a>(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         match self.state {
             CommitState::Initial => {
                 let end_ts = mvcc_store.get_timestamp();
@@ -495,7 +496,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
                     TransitionResult::Continue => {
                         return Ok(TransitionResult::Continue);
                     }
-                    TransitionResult::Done => {
+                    TransitionResult::Done(_) => {
                         self.state = CommitState::WriteRow {
                             end_ts,
                             write_set_index: write_set_index + 1,
@@ -573,7 +574,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
                 }
                 tracing::trace!("logged(tx_id={})", self.tx_id);
                 self.finalize(mvcc_store)?;
-                Ok(TransitionResult::Done)
+                Ok(TransitionResult::Done(()))
             }
         }
     }
@@ -591,9 +592,10 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
 impl StateTransition for WriteRowStateMachine {
     type State = WriteRowStateMachine;
     type Context = ();
+    type SMResult = ();
 
     #[tracing::instrument(fields(state = ?self.state), skip(self, _context))]
-    fn step<'a>(&mut self, _context: &Self::Context) -> Result<TransitionResult> {
+    fn step<'a>(&mut self, _context: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         use crate::storage::btree::BTreeCursor;
         use crate::types::{IOResult, SeekKey, SeekOp};
 
@@ -654,7 +656,7 @@ impl StateTransition for WriteRowStateMachine {
                             self.row.id.row_id
                         );
                         self.finalize(&())?;
-                        Ok(TransitionResult::Done)
+                        Ok(TransitionResult::Done(()))
                     }
                     IOResult::IO => {
                         return Ok(TransitionResult::Io);
