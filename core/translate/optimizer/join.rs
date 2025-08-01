@@ -173,7 +173,6 @@ pub fn compute_best_join_order<'a>(
     // Keep track of the current best cost so we can short-circuit planning for subplans
     // that already exceed the cost of the current best plan.
     let cost_upper_bound = best_plan.cost;
-    let cost_upper_bound_ordered = best_plan.cost;
 
     // Keep track of the best plan for a given subset of tables.
     // Consider this example: we have tables a,b,c,d to join.
@@ -202,7 +201,7 @@ pub fn compute_best_join_order<'a>(
             &join_order,
             maybe_order_target,
             access_methods_arena,
-            cost_upper_bound_ordered,
+            cost_upper_bound,
         )?;
         if let Some(rel) = rel {
             best_plan_memo.insert(mask, rel);
@@ -317,7 +316,7 @@ pub fn compute_best_join_order<'a>(
                     &join_order,
                     maybe_order_target,
                     access_methods_arena,
-                    cost_upper_bound_ordered,
+                    cost_upper_bound,
                 )?;
                 join_order.clear();
 
@@ -358,7 +357,7 @@ pub fn compute_best_join_order<'a>(
             if let Some(rel) = best_ordered_for_mask.take() {
                 let cost = rel.cost;
                 let has_all_tables = mask.table_count() == num_tables;
-                if has_all_tables && cost_upper_bound_ordered > cost {
+                if has_all_tables && cost_upper_bound > cost {
                     best_ordered_plan = Some(rel);
                 }
             }
