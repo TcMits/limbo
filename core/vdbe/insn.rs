@@ -781,7 +781,6 @@ pub enum Insn {
     ///
     /// This opcode is similar to [NotFound](https://sqlite.org/opcode.html#NotFound) with the exceptions that the
     /// branch is always taken if any part of the search key input is NULL.
-    //TODO this one
     NoConflict {
         cursor_id: CursorID,     // P1 index cursor
         target_pc: BranchOffset, // P2 jump target

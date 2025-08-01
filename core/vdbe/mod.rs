@@ -31,7 +31,9 @@ use crate::{
     storage::sqlite3_ondisk::SmallVec,
     translate::plan::TableReferences,
     types::{IOResult, RawSlice, TextRef},
-    vdbe::execute::{OpIdxInsertState, OpInsertState, OpNewRowidState, OpSeekState},
+    vdbe::execute::{
+        OpIdxInsertState, OpInsertState, OpNewRowidState, OpNoConflictState, OpSeekState,
+    },
     RefValue,
 };
 
@@ -256,6 +258,7 @@ pub struct ProgramState {
     op_new_rowid_state: OpNewRowidState,
     op_idx_insert_state: OpIdxInsertState,
     op_insert_state: OpInsertState,
+    op_no_conflict_state: OpNoConflictState,
     seek_state: OpSeekState,
 }
 
@@ -286,6 +289,7 @@ impl ProgramState {
             op_new_rowid_state: OpNewRowidState::Start,
             op_idx_insert_state: OpIdxInsertState::SeekIfUnique,
             op_insert_state: OpInsertState::Insert,
+            op_no_conflict_state: OpNoConflictState::Start,
             seek_state: OpSeekState::Start,
         }
     }

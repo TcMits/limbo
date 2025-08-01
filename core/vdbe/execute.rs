@@ -2567,6 +2567,7 @@ pub enum SeekInternalResult {
     NotFound,
     IO,
 }
+#[derive(Clone)]
 pub enum RecordSource {
     Unpacked { start_reg: usize, num_regs: usize },
     Packed { record_reg: usize },
@@ -5628,10 +5629,13 @@ pub fn op_soft_null(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub enum OpNoConflictState {
+    Start,
+    Seeking(RecordSource),
+}
+
 /// If a matching record is not found in the btree ("no conflict"), jump to the target PC.
 /// Otherwise, continue execution.
-/// FIXME: create a state machine for op_no_conflict so that it doesn't do the nulls checking
-/// multiple times in the case of yielding on IO.
 pub fn op_no_conflict(
     program: &Program,
     state: &mut ProgramState,
@@ -5648,69 +5652,83 @@ pub fn op_no_conflict(
     else {
         unreachable!("unexpected Insn {:?}", insn)
     };
-    let mut cursor_ref = state.get_cursor(*cursor_id);
-    let cursor = cursor_ref.as_btree_mut();
 
-    let record_source = if *num_regs == 0 {
-        RecordSource::Packed {
-            record_reg: *record_reg,
-        }
-    } else {
-        RecordSource::Unpacked {
-            start_reg: *record_reg,
-            num_regs: *num_regs,
-        }
-    };
+    loop {
+        match &state.op_no_conflict_state {
+            OpNoConflictState::Start => {
+                let mut cursor_ref = state.get_cursor(*cursor_id);
+                let cursor = cursor_ref.as_btree_mut();
 
-    // If there is at least one NULL in the index record, there cannot be a conflict so we can immediately jump.
-    let contains_nulls = match &record_source {
-        RecordSource::Packed { record_reg } => {
-            let Register::Record(record) = &state.registers[*record_reg] else {
-                return Err(LimboError::InternalError(
-                    "NoConflict: expected a record in the register".into(),
-                ));
-            };
-            record
-                .get_values()
-                .iter()
-                .any(|val| matches!(val, RefValue::Null))
-        }
-        RecordSource::Unpacked {
-            start_reg,
-            num_regs,
-        } => (0..*num_regs).any(|i| {
-            matches!(
-                &state.registers[start_reg + i],
-                Register::Value(Value::Null)
-            )
-        }),
-    };
+                let record_source = if *num_regs == 0 {
+                    RecordSource::Packed {
+                        record_reg: *record_reg,
+                    }
+                } else {
+                    RecordSource::Unpacked {
+                        start_reg: *record_reg,
+                        num_regs: *num_regs,
+                    }
+                };
 
-    if contains_nulls {
-        drop(cursor_ref);
-        state.pc = target_pc.as_offset_int();
-        return Ok(InsnFunctionStepResult::Step);
-    }
-    drop(cursor_ref);
-    match seek_internal(
-        program,
-        state,
-        pager,
-        mv_store,
-        record_source,
-        *cursor_id,
-        true,
-        SeekOp::GE { eq_only: true },
-    )? {
-        SeekInternalResult::Found => {
-            state.pc += 1;
-            Ok(InsnFunctionStepResult::Step)
+                // If there is at least one NULL in the index record, there cannot be a conflict so we can immediately jump.
+                let contains_nulls = match &record_source {
+                    RecordSource::Packed { record_reg } => {
+                        let Register::Record(record) = &state.registers[*record_reg] else {
+                            return Err(LimboError::InternalError(
+                                "NoConflict: expected a record in the register".into(),
+                            ));
+                        };
+                        record
+                            .get_values()
+                            .iter()
+                            .any(|val| matches!(val, RefValue::Null))
+                    }
+                    RecordSource::Unpacked {
+                        start_reg,
+                        num_regs,
+                    } => (0..*num_regs).any(|i| {
+                        matches!(
+                            &state.registers[start_reg + i],
+                            Register::Value(Value::Null)
+                        )
+                    }),
+                };
+
+                drop(cursor_ref);
+
+                if contains_nulls {
+                    state.pc = target_pc.as_offset_int();
+                    state.op_no_conflict_state = OpNoConflictState::Start;
+                    return Ok(InsnFunctionStepResult::Step);
+                } else {
+                    state.op_no_conflict_state = OpNoConflictState::Seeking(record_source);
+                }
+            }
+            OpNoConflictState::Seeking(record_source) => {
+                return match seek_internal(
+                    program,
+                    state,
+                    pager,
+                    mv_store,
+                    record_source.clone(),
+                    *cursor_id,
+                    true,
+                    SeekOp::GE { eq_only: true },
+                )? {
+                    SeekInternalResult::Found => {
+                        state.pc += 1;
+                        state.op_no_conflict_state = OpNoConflictState::Start;
+                        Ok(InsnFunctionStepResult::Step)
+                    }
+                    SeekInternalResult::NotFound => {
+                        state.pc = target_pc.as_offset_int();
+                        state.op_no_conflict_state = OpNoConflictState::Start;
+                        Ok(InsnFunctionStepResult::Step)
+                    }
+                    SeekInternalResult::IO => Ok(InsnFunctionStepResult::IO),
+                };
+            }
         }
-        SeekInternalResult::NotFound => {
-            state.pc = target_pc.as_offset_int();
-            Ok(InsnFunctionStepResult::Step)
-        }
-        SeekInternalResult::IO => Ok(InsnFunctionStepResult::IO),
     }
 }
 
