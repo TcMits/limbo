@@ -41,7 +41,9 @@ pub use database::MvStore;
 
 #[cfg(test)]
 mod tests {
-    use crate::mvcc::database::tests::{generate_simple_string_row, MvccTestDbNoConn};
+    use crate::mvcc::database::tests::{
+        commit_tx_no_conn, generate_simple_string_row, MvccTestDbNoConn,
+    };
     use crate::mvcc::database::RowID;
     use std::sync::atomic::AtomicI64;
     use std::sync::atomic::Ordering;
@@ -71,14 +73,10 @@ mod tests {
                     };
                     let row = generate_simple_string_row(1, id.row_id, "Hello");
                     mvcc_store.insert(tx, row.clone()).unwrap();
-                    mvcc_store
-                        .commit_tx(tx, conn.pager.borrow().clone(), &conn)
-                        .unwrap();
+                    commit_tx_no_conn(&db, tx, &conn).unwrap();
                     let tx = mvcc_store.begin_tx(conn.pager.borrow().clone());
                     let committed_row = mvcc_store.read(tx, id).unwrap();
-                    mvcc_store
-                        .commit_tx(tx, conn.pager.borrow().clone(), &conn)
-                        .unwrap();
+                    commit_tx_no_conn(&db, tx, &conn).unwrap();
                     assert_eq!(committed_row, Some(row));
                 }
             })
@@ -96,14 +94,10 @@ mod tests {
                     };
                     let row = generate_simple_string_row(1, id.row_id, "World");
                     mvcc_store.insert(tx, row.clone()).unwrap();
-                    mvcc_store
-                        .commit_tx(tx, conn.pager.borrow().clone(), &conn)
-                        .unwrap();
+                    commit_tx_no_conn(&db, tx, &conn).unwrap();
                     let tx = mvcc_store.begin_tx(conn.pager.borrow().clone());
                     let committed_row = mvcc_store.read(tx, id).unwrap();
-                    mvcc_store
-                        .commit_tx(tx, conn.pager.borrow().clone(), &conn)
-                        .unwrap();
+                    commit_tx_no_conn(&db, tx, &conn).unwrap();
                     assert_eq!(committed_row, Some(row));
                 }
             })
@@ -147,9 +141,7 @@ mod tests {
                         continue;
                     }
                     let committed_row = mvcc_store.read(tx, id).unwrap();
-                    mvcc_store
-                        .commit_tx(tx, conn.pager.borrow().clone(), &conn)
-                        .unwrap();
+                    commit_tx_no_conn(&db, tx, &conn).unwrap();
                     assert_eq!(committed_row, Some(row));
                 }
                 tracing::info!(

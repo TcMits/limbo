@@ -310,7 +310,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
     type SMResult = ();
 
     #[tracing::instrument(fields(state = ?self.state), skip(self, mvcc_store))]
-    fn step<'a>(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
+    fn step(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         match self.state {
             CommitState::Initial => {
                 let end_ts = mvcc_store.get_timestamp();
@@ -529,7 +529,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
             }
             CommitState::Commit { end_ts } => {
                 let mut log_record = LogRecord::new(end_ts);
-                for ref id in &self.write_set {
+                for id in &self.write_set {
                     if let Some(row_versions) = mvcc_store.rows.get(id) {
                         let mut row_versions = row_versions.value().write();
                         for row_version in row_versions.iter_mut() {
@@ -579,7 +579,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
         }
     }
 
-    fn finalize<'a>(&mut self, _context: &Self::Context) -> Result<()> {
+    fn finalize(&mut self, _context: &Self::Context) -> Result<()> {
         self.is_finalized = true;
         Ok(())
     }
@@ -595,7 +595,7 @@ impl StateTransition for WriteRowStateMachine {
     type SMResult = ();
 
     #[tracing::instrument(fields(state = ?self.state), skip(self, _context))]
-    fn step<'a>(&mut self, _context: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
+    fn step(&mut self, _context: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         use crate::storage::btree::BTreeCursor;
         use crate::types::{IOResult, SeekKey, SeekOp};
 
@@ -666,7 +666,7 @@ impl StateTransition for WriteRowStateMachine {
         }
     }
 
-    fn finalize<'a>(&mut self, _context: &Self::Context) -> Result<()> {
+    fn finalize(&mut self, _context: &Self::Context) -> Result<()> {
         self.is_finalized = true;
         Ok(())
     }
