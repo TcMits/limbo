@@ -105,6 +105,10 @@ impl UringIO {
         };
         // we only ever have 2 files open at a time for the moment
         ring.submitter().register_files_sparse(FILES)?;
+        // RL_MEMLOCK cap is typically 8MB, the current design is to have one large arena
+        // registered at startup and therefore we can simply use the zero index, falling back
+        // to similar logic as the existing buffer pool for cases where it is over capacity.
+        ring.submitter().register_buffers_sparse(1)?;
         let inner = InnerUringIO {
             ring: WrappedIOUring {
                 ring,
@@ -469,9 +473,6 @@ impl IO for UringIO {
         let inner = self.inner.borrow_mut();
         let default_id = 0;
         unsafe {
-            // RL_MEMLOCK cap is typically 8MB, the current design is to have one large arena
-            // registered at startup and therefore we can simply use the zero index, falling back
-            // to similar logic as the existing buffer pool for cases where it is over capacity.
             inner.ring.ring.submitter().register_buffers_update(
                 default_id,
                 &[libc::iovec {
