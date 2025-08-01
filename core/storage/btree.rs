@@ -4435,7 +4435,7 @@ impl BTreeCursor {
                     let record_buf = key.get_record().unwrap().get_payload().to_vec();
                     let num_columns = match key {
                         BTreeKey::IndexKey(record) => record.column_count(),
-                        BTreeKey::TableRowId((rowid, record)) => {
+                        BTreeKey::TableRowId((_, record)) => {
                             record.as_ref().unwrap().column_count()
                         }
                     };

@@ -123,6 +123,7 @@ fn test_delete() {
                 table_id: 1,
                 row_id: 1,
             },
+            db.conn.pager.borrow().clone(),
         )
         .unwrap();
     let row = db
@@ -165,7 +166,8 @@ fn test_delete_nonexistent() {
             RowID {
                 table_id: 1,
                 row_id: 1
-            }
+            },
+            db.conn.pager.borrow().clone(),
         )
         .unwrap());
 }
@@ -189,7 +191,9 @@ fn test_commit() {
         .unwrap();
     assert_eq!(tx1_row, row);
     let tx1_updated_row = generate_simple_string_row(1, 1, "World");
-    db.mvcc_store.update(tx1, tx1_updated_row.clone()).unwrap();
+    db.mvcc_store
+        .update(tx1, tx1_updated_row.clone(), db.conn.pager.borrow().clone())
+        .unwrap();
     let row = db
         .mvcc_store
         .read(
@@ -244,7 +248,9 @@ fn test_rollback() {
         .unwrap();
     assert_eq!(row1, row2);
     let row3 = generate_simple_string_row(1, 1, "World");
-    db.mvcc_store.update(tx1, row3.clone()).unwrap();
+    db.mvcc_store
+        .update(tx1, row3.clone(), db.conn.pager.borrow().clone())
+        .unwrap();
     let row4 = db
         .mvcc_store
         .read(
@@ -257,7 +263,8 @@ fn test_rollback() {
         .unwrap()
         .unwrap();
     assert_eq!(row3, row4);
-    db.mvcc_store.rollback_tx(tx1);
+    db.mvcc_store
+        .rollback_tx(tx1, db.conn.pager.borrow().clone());
     let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
     let row5 = db
         .mvcc_store
@@ -293,10 +300,14 @@ fn test_dirty_write() {
         .unwrap();
     assert_eq!(tx1_row, row);
 
+    let conn2 = db._db.connect().unwrap();
     // T2 attempts to delete row with ID 1, but fails because T1 has not committed.
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     let tx2_row = generate_simple_string_row(1, 1, "World");
-    assert!(!db.mvcc_store.update(tx2, tx2_row).unwrap());
+    assert!(!db
+        .mvcc_store
+        .update(tx2, tx2_row, conn2.pager.borrow().clone())
+        .unwrap());
 
     let row = db
         .mvcc_store
@@ -322,7 +333,8 @@ fn test_dirty_read() {
     db.mvcc_store.insert(tx1, row1).unwrap();
 
     // T2 attempts to read row with ID 1, but doesn't see one because T1 has not committed.
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn2 = db._db.connect().unwrap();
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     let row2 = db
         .mvcc_store
         .read(
@@ -349,7 +361,8 @@ fn test_dirty_read_deleted() {
         .unwrap();
 
     // T2 deletes row with ID 1, but does not commit.
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn2 = db._db.connect().unwrap();
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     assert!(db
         .mvcc_store
         .delete(
@@ -357,12 +370,14 @@ fn test_dirty_read_deleted() {
             RowID {
                 table_id: 1,
                 row_id: 1
-            }
+            },
+            conn2.pager.borrow().clone(),
         )
         .unwrap());
 
     // T3 reads row with ID 1, but doesn't see the delete because T2 hasn't committed.
-    let tx3 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn3 = db._db.connect().unwrap();
+    let tx3 = db.mvcc_store.begin_tx(conn3.pager.borrow().clone());
     let row = db
         .mvcc_store
         .read(
@@ -402,7 +417,8 @@ fn test_fuzzy_read() {
         .unwrap();
 
     // T2 reads the row with ID 1 within an active transaction.
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn2 = db._db.connect().unwrap();
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     let row = db
         .mvcc_store
         .read(
@@ -417,11 +433,14 @@ fn test_fuzzy_read() {
     assert_eq!(tx1_row, row);
 
     // T3 updates the row and commits.
-    let tx3 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn3 = db._db.connect().unwrap();
+    let tx3 = db.mvcc_store.begin_tx(conn3.pager.borrow().clone());
     let tx3_row = generate_simple_string_row(1, 1, "Second");
-    db.mvcc_store.update(tx3, tx3_row).unwrap();
     db.mvcc_store
-        .commit_tx(tx3, db.conn.pager.borrow().clone(), &db.conn)
+        .update(tx3, tx3_row, conn3.pager.borrow().clone())
+        .unwrap();
+    db.mvcc_store
+        .commit_tx(tx3, conn3.pager.borrow().clone(), &db.conn)
         .unwrap();
 
     // T2 still reads the same version of the row as before.
@@ -441,7 +460,9 @@ fn test_fuzzy_read() {
     // T2 tries to update the row, but fails because T3 has already committed an update to the row,
     // so T2 trying to write would violate snapshot isolation if it succeeded.
     let tx2_newrow = generate_simple_string_row(1, 1, "Third");
-    let update_result = db.mvcc_store.update(tx2, tx2_newrow);
+    let update_result = db
+        .mvcc_store
+        .update(tx2, tx2_newrow, conn2.pager.borrow().clone());
     assert_eq!(Err(DatabaseError::WriteWriteConflict), update_result);
 }
 
@@ -470,28 +491,35 @@ fn test_lost_update() {
         .unwrap();
 
     // T2 attempts to update row ID 1 within an active transaction.
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn2 = db._db.connect().unwrap();
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     let tx2_row = generate_simple_string_row(1, 1, "World");
-    assert!(db.mvcc_store.update(tx2, tx2_row.clone()).unwrap());
+    assert!(db
+        .mvcc_store
+        .update(tx2, tx2_row.clone(), conn2.pager.borrow().clone())
+        .unwrap());
 
     // T3 also attempts to update row ID 1 within an active transaction.
-    let tx3 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn3 = db._db.connect().unwrap();
+    let tx3 = db.mvcc_store.begin_tx(conn3.pager.borrow().clone());
     let tx3_row = generate_simple_string_row(1, 1, "Hello, world!");
     assert_eq!(
         Err(DatabaseError::WriteWriteConflict),
-        db.mvcc_store.update(tx3, tx3_row)
+        db.mvcc_store
+            .update(tx3, tx3_row, conn3.pager.borrow().clone())
     );
 
     db.mvcc_store
-        .commit_tx(tx2, db.conn.pager.borrow().clone(), &db.conn)
+        .commit_tx(tx2, conn2.pager.borrow().clone(), &db.conn)
         .unwrap();
     assert_eq!(
         Err(DatabaseError::TxTerminated),
         db.mvcc_store
-            .commit_tx(tx3, db.conn.pager.borrow().clone(), &db.conn)
+            .commit_tx(tx3, conn3.pager.borrow().clone(), &db.conn)
     );
 
-    let tx4 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn4 = db._db.connect().unwrap();
+    let tx4 = db.mvcc_store.begin_tx(conn4.pager.borrow().clone());
     let row = db
         .mvcc_store
         .read(
@@ -521,9 +549,13 @@ fn test_committed_visibility() {
         .unwrap();
 
     // but I like more money, so let me try adding $10 more
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn2 = db._db.connect().unwrap();
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     let tx2_row = generate_simple_string_row(1, 1, "20");
-    assert!(db.mvcc_store.update(tx2, tx2_row.clone()).unwrap());
+    assert!(db
+        .mvcc_store
+        .update(tx2, tx2_row.clone(), conn2.pager.borrow().clone())
+        .unwrap());
     let row = db
         .mvcc_store
         .read(
@@ -538,7 +570,8 @@ fn test_committed_visibility() {
     assert_eq!(row, tx2_row);
 
     // can I check how much money I have?
-    let tx3 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn3 = db._db.connect().unwrap();
+    let tx3 = db.mvcc_store.begin_tx(conn3.pager.borrow().clone());
     let row = db
         .mvcc_store
         .read(
@@ -560,7 +593,8 @@ fn test_future_row() {
 
     let tx1 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
 
-    let tx2 = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
+    let conn2 = db._db.connect().unwrap();
+    let tx2 = db.mvcc_store.begin_tx(conn2.pager.borrow().clone());
     let tx2_row = generate_simple_string_row(1, 1, "Hello");
     db.mvcc_store.insert(tx2, tx2_row).unwrap();
 
@@ -579,7 +613,7 @@ fn test_future_row() {
 
     // lets commit the transaction and check if tx1 can see it
     db.mvcc_store
-        .commit_tx(tx2, db.conn.pager.borrow().clone(), &db.conn)
+        .commit_tx(tx2, conn2.pager.borrow().clone(), &db.conn)
         .unwrap();
     let row = db
         .mvcc_store

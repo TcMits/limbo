@@ -528,6 +528,10 @@ impl Database {
         }
         Ok(())
     }
+
+    pub fn get_mv_store(&self) -> Option<&Arc<MvStore>> {
+        self.mv_store.as_ref()
+    }
 }
 
 fn get_schema_version(conn: &Arc<Connection>) -> Result<u32> {
@@ -1699,6 +1703,10 @@ impl Connection {
         // Sort by sequence number to ensure consistent ordering
         databases.sort_by_key(|&(seq, _, _)| seq);
         databases
+    }
+
+    pub fn get_pager(&self) -> Rc<Pager> {
+        self.pager.borrow().clone()
     }
 }
 

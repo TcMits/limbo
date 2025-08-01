@@ -2455,10 +2455,14 @@ pub mod test {
     fn check_read_lock_slot(conn: &Arc<Connection>, expected_slot: usize) -> bool {
         let pager = conn.pager.borrow();
         let wal = pager.wal.as_ref().unwrap().borrow();
-        let wal_any = wal.as_any();
-        if let Some(wal_file) = wal_any.downcast_ref::<WalFile>() {
-            return wal_file.max_frame_read_lock_index.get() == expected_slot;
+        #[cfg(debug_assertions)]
+        {
+            let wal_any = wal.as_any();
+            if let Some(wal_file) = wal_any.downcast_ref::<WalFile>() {
+                return wal_file.max_frame_read_lock_index.get() == expected_slot;
+            }
         }
+
         false
     }
 

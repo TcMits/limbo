@@ -313,9 +313,9 @@ impl<Clock: LogicalClock> MvStore<Clock> {
     /// # Returns
     ///
     /// Returns `true` if the row was successfully updated, and `false` otherwise.
-    pub fn update(&self, tx_id: TxID, row: Row) -> Result<bool> {
+    pub fn update(&self, tx_id: TxID, row: Row, pager: Rc<Pager>) -> Result<bool> {
         tracing::trace!("update(tx_id={}, row.id={:?})", tx_id, row.id);
-        if !self.delete(tx_id, row.id)? {
+        if !self.delete(tx_id, row.id, pager)? {
             return Ok(false);
         }
         self.insert(tx_id, row)?;
@@ -324,9 +324,9 @@ impl<Clock: LogicalClock> MvStore<Clock> {
 
     /// Inserts a row in the database with new values, previously deleting
     /// any old data if it existed. Bails on a delete error, e.g. write-write conflict.
-    pub fn upsert(&self, tx_id: TxID, row: Row) -> Result<()> {
+    pub fn upsert(&self, tx_id: TxID, row: Row, pager: Rc<Pager>) -> Result<()> {
         tracing::trace!("upsert(tx_id={}, row.id={:?})", tx_id, row.id);
-        self.delete(tx_id, row.id)?;
+        self.delete(tx_id, row.id, pager)?;
         self.insert(tx_id, row)
     }
 
@@ -344,7 +344,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
     ///
     /// Returns `true` if the row was successfully deleted, and `false` otherwise.
     ///
-    pub fn delete(&self, tx_id: TxID, id: RowID) -> Result<bool> {
+    pub fn delete(&self, tx_id: TxID, id: RowID, pager: Rc<Pager>) -> Result<bool> {
         tracing::trace!("delete(tx_id={}, id={:?})", tx_id, id);
         let row_versions_opt = self.rows.get(&id);
         if let Some(ref row_versions) = row_versions_opt {
@@ -365,7 +365,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                     drop(row_versions);
                     drop(row_versions_opt);
                     drop(tx);
-                    self.rollback_tx(tx_id);
+                    self.rollback_tx(tx_id, pager);
                     return Err(DatabaseError::WriteWriteConflict);
                 }
 
@@ -725,7 +725,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
     /// # Arguments
     ///
     /// * `tx_id` - The ID of the transaction to abort.
-    pub fn rollback_tx(&self, tx_id: TxID) {
+    pub fn rollback_tx(&self, tx_id: TxID, pager: Rc<Pager>) {
         let tx_unlocked = self.txs.get(&tx_id).unwrap();
         let tx = tx_unlocked.value().write();
         assert_eq!(tx.state, TransactionState::Active);
@@ -747,6 +747,7 @@ impl<Clock: LogicalClock> MvStore<Clock> {
         let tx = tx_unlocked.value().read();
         tx.state.store(TransactionState::Terminated);
         tracing::trace!("terminate(tx_id={})", tx_id);
+        pager.end_read_tx().unwrap();
         // FIXME: verify that we can already remove the transaction here!
         // Maybe it's fine for snapshot isolation, but too early for serializable?
         self.txs.remove(&tx_id);
