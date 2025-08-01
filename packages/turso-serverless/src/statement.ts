@@ -17,10 +17,29 @@ import { DatabaseError } from './error.js';
 export class Statement {
   private session: Session;
   private sql: string;
+  private presentationMode: 'expanded' | 'raw' | 'pluck' = 'expanded';
 
   constructor(sessionConfig: SessionConfig, sql: string) {
     this.session = new Session(sessionConfig);
     this.sql = sql;
+  }
+
+  /**
+   * Toggle raw mode.
+   * 
+   * @param raw Enable or disable raw mode. If you don't pass the parameter, raw mode is enabled.
+   * @returns This statement instance for chaining
+   * 
+   * @example
+   * ```typescript
+   * const stmt = client.prepare("SELECT * FROM users WHERE id = ?");
+   * const row = await stmt.raw().get([1]);
+   * console.log(row); // [1, "Alice", "alice@example.org"]
+   * ```
+   */
+  raw(raw?: boolean): Statement {
+    this.presentationMode = raw === false ? 'expanded' : 'raw';
+    return this;
   }
 
   /**
@@ -58,7 +77,18 @@ export class Statement {
    */
   async get(args: any[] | Record<string, any> = []): Promise<any> {
     const result = await this.session.execute(this.sql, args);
-    return result.rows[0] || undefined;
+    const row = result.rows[0];
+    if (!row) {
+      return undefined;
+    }
+    
+    if (this.presentationMode === 'raw') {
+      // In raw mode, return the row as a plain array (it already is one)
+      // The row object is already an array with column properties added
+      return [...row];
+    }
+    
+    return row;
   }
 
   /**
@@ -76,6 +106,13 @@ export class Statement {
    */
   async all(args: any[] | Record<string, any> = []): Promise<any[]> {
     const result = await this.session.execute(this.sql, args);
+    
+    if (this.presentationMode === 'raw') {
+      // In raw mode, return arrays of values
+      // Each row is already an array with column properties added
+      return result.rows.map((row: any) => [...row]);
+    }
+    
     return result.rows;
   }
 
@@ -112,8 +149,13 @@ export class Statement {
         case 'row':
           if (entry.row) {
             const decodedRow = entry.row.map(decodeValue);
-            const rowObject = this.session.createRowObject(decodedRow, columns);
-            yield rowObject;
+            if (this.presentationMode === 'raw') {
+              // In raw mode, yield arrays of values
+              yield decodedRow;
+            } else {
+              const rowObject = this.session.createRowObject(decodedRow, columns);
+              yield rowObject;
+            }
           }
           break;
         case 'step_error':
