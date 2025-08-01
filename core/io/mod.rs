@@ -2,6 +2,7 @@ use crate::Result;
 use bitflags::bitflags;
 use cfg_block::cfg_block;
 use std::fmt;
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::{
     cell::{Cell, Ref, RefCell, RefMut},
@@ -89,6 +90,12 @@ pub trait IO: Clock + Send + Sync {
     fn generate_random_number(&self) -> i64;
 
     fn get_memory_io(&self) -> Arc<MemoryIO>;
+
+    fn register_fixed_buffer(&self, _ptr: NonNull<u8>, _len: usize) -> Result<()> {
+        Err(crate::LimboError::InternalError(
+            "unsupported operation".to_string(),
+        ))
+    }
 }
 
 pub type Complete = dyn Fn(Arc<RefCell<Buffer>>, i32);
