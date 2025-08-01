@@ -930,6 +930,15 @@ do_execsql_test cast-in-where {
   select age from users where age = cast('45' as integer) limit 1;
 } {45}
 
+#Parsing test for large numeric strings in logical operations with numeric operands
+do_execsql_test parse-large-integral-numeric-string-as-number {
+  SELECT (104614899632619 || 45597) > CAST(0 AS NUMERIC);
+} {1}
+
+do_execsql_test parse-large-integral-numeric-string-as-number {
+  SELECT (-104614899632619 || 45597) > CAST(0 AS NUMERIC);
+} {0}
+
 # TODO: sqlite seems not enable soundex() by default unless build it with SQLITE_SOUNDEX enabled.
 # do_execsql_test soundex-text {
 #  select soundex('Pfister'), soundex('husobee'), soundex('Tymczak'), soundex('Ashcraft'), soundex('Robert'), soundex('Rupert'), soundex('Rubin'), soundex('Kant'), soundex('Knuth'), soundex('x'), soundex('');
