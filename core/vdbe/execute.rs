@@ -7921,11 +7921,9 @@ fn create_result_from_significand(
     }
 
     // For pure integers without exponent, try to return as integer
-    if !has_decimal && !has_exponent && exponent == 0 {
+    if !has_decimal && !has_exponent && exponent == 0 && significand <= i64::MAX as u64 {
         let signed_val = (significand as i64).wrapping_mul(sign);
-        if (significand as i64) * sign == signed_val {
-            return (parse_result, ParsedNumber::Integer(signed_val));
-        }
+        return (parse_result, ParsedNumber::Integer(signed_val));
     }
 
     // Convert to float
