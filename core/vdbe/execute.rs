@@ -8026,7 +8026,7 @@ pub fn apply_numeric_affinity(register: &mut Register, try_for_int: bool) -> boo
                     apply_integer_affinity(register);
                 }
                 true
-            }else{
+            } else {
                 false
             }
         }
