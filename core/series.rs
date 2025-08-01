@@ -70,8 +70,12 @@ impl VTable for GenerateSeriesTable {
         // - Bit 2 set -> 'step' is available
         let mut idx_num = 0;
         let mut positions = [None; 4]; // maps column index to constraint position
+        let mut start_exists = false;
 
         for (i, c) in constraints.iter().enumerate() {
+            if c.column_index == START_COLUMN_INDEX && c.op == ConstraintOp::Eq {
+                start_exists = true;
+            }
             if !c.usable || c.op != ConstraintOp::Eq {
                 continue;
             }
@@ -80,6 +84,10 @@ impl VTable for GenerateSeriesTable {
                 idx_num |= bit;
                 positions[c.column_index as usize] = Some(i);
             }
+        }
+
+        if !start_exists {
+            return Err(ResultCode::InvalidArgs);
         }
 
         // Assign argv indexes contiguously
@@ -741,12 +749,9 @@ mod tests {
             usable_constraint(3), // step
         ];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
+        let result = GenerateSeriesTable::best_index(&constraints, &[]);
 
-        // Verify stop gets argv_index 1, step gets 2
-        assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // stop
-        assert_eq!(index_info.constraint_usages[1].argv_index, Some(2)); // step
-        assert_eq!(index_info.idx_num, 6); // Bits 1 and 2 set (2 | 4)
+        assert!(matches!(result, Err(ResultCode::InvalidArgs)));
     }
 
     #[test]
