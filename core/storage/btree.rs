@@ -4289,11 +4289,11 @@ impl BTreeCursor {
         if self.has_record.get() {
             let page = self.stack.top();
             return_if_locked_maybe_load!(self.pager, page);
-            let page_type = page.get().get_contents().page_type();
             let page = page.get();
             let contents = page.get_contents();
-            let cell_idx = self.stack.current_cell_index();
+            let page_type = contents.page_type();
             if page_type.is_table() {
+                let cell_idx = self.stack.current_cell_index();
                 let rowid = contents.cell_table_leaf_read_rowid(cell_idx as usize)?;
                 Ok(IOResult::Done(Some(rowid)))
             } else {
