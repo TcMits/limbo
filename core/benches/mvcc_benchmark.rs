@@ -9,7 +9,7 @@ use turso_core::types::{ImmutableRecord, Text};
 use turso_core::{Connection, Database, MemoryIO, Value};
 
 struct BenchDb {
-    db: Arc<Database>,
+    _db: Arc<Database>,
     conn: Arc<Connection>,
     mvcc_store: Arc<MvStore<LocalClock>>,
 }
@@ -20,7 +20,7 @@ fn bench_db() -> BenchDb {
     let conn = db.connect().unwrap();
     let mvcc_store = db.get_mv_store().unwrap().clone();
     BenchDb {
-        db,
+        _db: db,
         conn,
         mvcc_store,
     }
@@ -36,7 +36,7 @@ fn bench(c: &mut Criterion) {
         b.to_async(FuturesExecutor).iter(|| async {
             let conn = db.conn.clone();
             let tx_id = db.mvcc_store.begin_tx(conn.get_pager().clone());
-            db.mvcc_store.rollback_tx(tx_id)
+            db.mvcc_store.rollback_tx(tx_id, conn.get_pager().clone())
         })
     });
 
@@ -46,7 +46,7 @@ fn bench(c: &mut Criterion) {
             let conn = &db.conn;
             let tx_id = db.mvcc_store.begin_tx(conn.get_pager().clone());
             db.mvcc_store
-                .commit_tx(tx_id, conn.get_pager().clone(), &conn)
+                .commit_tx(tx_id, conn.get_pager().clone(), conn)
         })
     });
 
@@ -65,7 +65,7 @@ fn bench(c: &mut Criterion) {
                 )
                 .unwrap();
             db.mvcc_store
-                .commit_tx(tx_id, conn.get_pager().clone(), &conn)
+                .commit_tx(tx_id, conn.get_pager().clone(), conn)
         })
     });
 
@@ -87,10 +87,11 @@ fn bench(c: &mut Criterion) {
                         data: record_data.clone(),
                         column_count: 1,
                     },
+                    conn.get_pager().clone(),
                 )
                 .unwrap();
             db.mvcc_store
-                .commit_tx(tx_id, conn.get_pager().clone(), &conn)
+                .commit_tx(tx_id, conn.get_pager().clone(), conn)
                 .unwrap();
         })
     });
@@ -153,6 +154,7 @@ fn bench(c: &mut Criterion) {
                         data: record_data.clone(),
                         column_count: 1,
                     },
+                    conn.get_pager().clone(),
                 )
                 .unwrap();
         })

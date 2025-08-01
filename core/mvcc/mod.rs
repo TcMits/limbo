@@ -76,7 +76,7 @@ mod tests {
                         .commit_tx(tx, conn.pager.borrow().clone(), &conn)
                         .unwrap();
                     let tx = mvcc_store.begin_tx(conn.pager.borrow().clone());
-                    let committed_row = mvcc_store.read(tx, id.clone()).unwrap();
+                    let committed_row = mvcc_store.read(tx, id).unwrap();
                     mvcc_store
                         .commit_tx(tx, conn.pager.borrow().clone(), &conn)
                         .unwrap();
