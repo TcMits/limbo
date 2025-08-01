@@ -771,11 +771,17 @@ pub enum Insn {
         reg: usize,
     },
 
-    /// If P4==0 then register P3 holds a blob constructed by [MakeRecord](https://sqlite.org/opcode.html#MakeRecord). If P4>0 then register P3 is the first of P4 registers that form an unpacked record.\
+    /// If P4==0 then register P3 holds a blob constructed by [MakeRecord](https://sqlite.org/opcode.html#MakeRecord).
+    /// If P4>0 then register P3 is the first of P4 registers that form an unpacked record.
     ///
-    /// Cursor P1 is on an index btree. If the record identified by P3 and P4 contains any NULL value, jump immediately to P2. If all terms of the record are not-NULL then a check is done to determine if any row in the P1 index btree has a matching key prefix. If there are no matches, jump immediately to P2. If there is a match, fall through and leave the P1 cursor pointing to the matching row.\
+    /// Cursor P1 is on an index btree. If the record identified by P3 and P4 contains any NULL value, jump immediately
+    /// to P2. If all terms of the record are not-NULL then a check is done to determine if any row in the P1 index
+    /// btree has a matching key prefix. If there are no matches, jump immediately to P2. If there is a match, fall
+    /// through and leave the P1 cursor pointing to the matching row.\
     ///
-    /// This opcode is similar to [NotFound](https://sqlite.org/opcode.html#NotFound) with the exceptions that the branch is always taken if any part of the search key input is NULL.
+    /// This opcode is similar to [NotFound](https://sqlite.org/opcode.html#NotFound) with the exceptions that the
+    /// branch is always taken if any part of the search key input is NULL.
+    //TODO this one
     NoConflict {
         cursor_id: CursorID,     // P1 index cursor
         target_pc: BranchOffset, // P2 jump target
