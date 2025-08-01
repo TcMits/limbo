@@ -75,11 +75,36 @@ export class Session {
     if (Array.isArray(args)) {
       positionalArgs = args.map(encodeValue);
     } else {
-      // Convert object with named parameters to NamedArg array
-      namedArgs = Object.entries(args).map(([name, value]) => ({
-        name,
-        value: encodeValue(value)
-      }));
+      // Check if this is an object with numeric keys (for ?1, ?2 style parameters)
+      const keys = Object.keys(args);
+      const isNumericKeys = keys.length > 0 && keys.every(key => /^\d+$/.test(key));
+      
+      if (isNumericKeys) {
+        // Convert numeric-keyed object to positional args
+        // Sort keys numerically to ensure correct order
+        const sortedKeys = keys.sort((a, b) => parseInt(a) - parseInt(b));
+        const maxIndex = parseInt(sortedKeys[sortedKeys.length - 1]);
+        
+        // Create array with undefined for missing indices
+        positionalArgs = new Array(maxIndex);
+        for (const key of sortedKeys) {
+          const index = parseInt(key) - 1; // Convert to 0-based index
+          positionalArgs[index] = encodeValue(args[key]);
+        }
+        
+        // Fill any undefined values with null
+        for (let i = 0; i < positionalArgs.length; i++) {
+          if (positionalArgs[i] === undefined) {
+            positionalArgs[i] = { type: 'null' };
+          }
+        }
+      } else {
+        // Convert object with named parameters to NamedArg array
+        namedArgs = Object.entries(args).map(([name, value]) => ({
+          name,
+          value: encodeValue(value)
+        }));
+      }
     }
 
     const request: CursorRequest = {

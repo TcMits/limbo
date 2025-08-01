@@ -24,8 +24,9 @@ export class Statement {
     this.sql = sql;
   }
 
+
   /**
-   * Toggle raw mode.
+   * Enable raw mode to return arrays instead of objects.
    * 
    * @param raw Enable or disable raw mode. If you don't pass the parameter, raw mode is enabled.
    * @returns This statement instance for chaining
@@ -55,8 +56,9 @@ export class Statement {
    * console.log(`Inserted user with ID ${result.lastInsertRowid}`);
    * ```
    */
-  async run(args: any[] | Record<string, any> = []): Promise<any> {
-    const result = await this.session.execute(this.sql, args);
+  async run(args?: any): Promise<any> {
+    const normalizedArgs = this.normalizeArgs(args);
+    const result = await this.session.execute(this.sql, normalizedArgs);
     return { changes: result.rowsAffected, lastInsertRowid: result.lastInsertRowid };
   }
 
@@ -75,8 +77,9 @@ export class Statement {
    * }
    * ```
    */
-  async get(args: any[] | Record<string, any> = []): Promise<any> {
-    const result = await this.session.execute(this.sql, args);
+  async get(args?: any): Promise<any> {
+    const normalizedArgs = this.normalizeArgs(args);
+    const result = await this.session.execute(this.sql, normalizedArgs);
     const row = result.rows[0];
     if (!row) {
       return undefined;
@@ -104,8 +107,9 @@ export class Statement {
    * console.log(`Found ${activeUsers.length} active users`);
    * ```
    */
-  async all(args: any[] | Record<string, any> = []): Promise<any[]> {
-    const result = await this.session.execute(this.sql, args);
+  async all(args?: any): Promise<any[]> {
+    const normalizedArgs = this.normalizeArgs(args);
+    const result = await this.session.execute(this.sql, normalizedArgs);
     
     if (this.presentationMode === 'raw') {
       // In raw mode, return arrays of values
@@ -134,8 +138,9 @@ export class Statement {
    * }
    * ```
    */
-  async *iterate(args: any[] | Record<string, any> = []): AsyncGenerator<any> {
-    const { response, entries } = await this.session.executeRaw(this.sql, args);
+  async *iterate(args?: any): AsyncGenerator<any> {
+    const normalizedArgs = this.normalizeArgs(args);
+    const { response, entries } = await this.session.executeRaw(this.sql, normalizedArgs);
     
     let columns: string[] = [];
     
@@ -165,4 +170,27 @@ export class Statement {
     }
   }
 
+  /**
+   * Normalize arguments to handle both single values and arrays.
+   * Matches the behavior of the native bindings.
+   */
+  private normalizeArgs(args: any): any[] | Record<string, any> {
+    // No arguments provided
+    if (args === undefined) {
+      return [];
+    }
+    
+    // If it's an array, return as-is
+    if (Array.isArray(args)) {
+      return args;
+    }
+    
+    // Check if it's a plain object (for named parameters)
+    if (args !== null && typeof args === 'object' && args.constructor === Object) {
+      return args;
+    }
+    
+    // Single value - wrap in array
+    return [args];
+  }
 }
