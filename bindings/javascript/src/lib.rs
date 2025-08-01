@@ -307,21 +307,17 @@ impl Statement {
             Ok(turso_core::StepResult::Row) => Ok(STEP_ROW),
             Ok(turso_core::StepResult::Done) => Ok(STEP_DONE),
             Ok(turso_core::StepResult::IO) => Ok(STEP_IO),
-            Ok(turso_core::StepResult::Interrupt) => {
-                Err(Error::new(
-                    Status::GenericFailure,
-                    "Statement was interrupted",
-                ))
-            }
+            Ok(turso_core::StepResult::Interrupt) => Err(Error::new(
+                Status::GenericFailure,
+                "Statement was interrupted",
+            )),
             Ok(turso_core::StepResult::Busy) => {
                 Err(Error::new(Status::GenericFailure, "Database is busy"))
             }
-            Err(e) => {
-                Err(Error::new(
-                    Status::GenericFailure,
-                    format!("Step failed: {e}"),
-                ))
-            }
+            Err(e) => Err(Error::new(
+                Status::GenericFailure,
+                format!("Step failed: {e}"),
+            )),
         }
     }
 
@@ -348,12 +344,15 @@ impl Statement {
                 raw_array.coerce_to_object()?.to_unknown()
             }
             PresentationMode::Pluck => {
-                let (_, value) = row_data.get_values().enumerate().next().ok_or(
-                    napi::Error::new(
-                        napi::Status::GenericFailure,
-                        "Pluck mode requires at least one column in the result",
-                    ),
-                )?;
+                let (_, value) =
+                    row_data
+                        .get_values()
+                        .enumerate()
+                        .next()
+                        .ok_or(napi::Error::new(
+                            napi::Status::GenericFailure,
+                            "Pluck mode requires at least one column in the result",
+                        ))?;
                 to_js_value(env, value)?
             }
             PresentationMode::Expanded => {
