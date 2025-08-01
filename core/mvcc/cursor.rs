@@ -1,6 +1,7 @@
 use crate::mvcc::clock::LogicalClock;
-use crate::mvcc::database::{MvStore, Result, Row, RowID};
+use crate::mvcc::database::{MvStore, Row, RowID};
 use crate::Pager;
+use crate::Result;
 use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::Arc;

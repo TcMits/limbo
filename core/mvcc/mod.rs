@@ -34,7 +34,6 @@
 pub mod clock;
 pub mod cursor;
 pub mod database;
-pub mod errors;
 pub mod persistent_storage;
 
 pub use clock::LocalClock;

@@ -27,7 +27,7 @@ pub mod sorter;
 use crate::{
     error::LimboError,
     function::{AggFunc, FuncCtx},
-    mvcc::database::StateTransition,
+    state_machine::StateTransition,
     storage::sqlite3_ondisk::SmallVec,
     translate::plan::TableReferences,
     types::{IOResult, RawSlice, TextRef},

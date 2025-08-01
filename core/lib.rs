@@ -18,6 +18,7 @@ pub mod result;
 mod schema;
 #[cfg(feature = "series")]
 mod series;
+mod state_machine;
 mod storage;
 #[allow(dead_code)]
 #[cfg(feature = "time")]
