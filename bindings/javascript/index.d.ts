@@ -94,8 +94,17 @@ export declare class Statement {
    * * `value` - The value to bind.
    */
   bindAt(index: number, value: unknown): void
-  step(): unknown
+  /**
+   * Step the statement and return result code:
+   * 1 = Row available, 2 = Done, 3 = I/O needed
+   */
+  step(): number
+  /** Get the current row data according to the presentation mode */
+  row(): unknown
+  /** Sets the presentation mode to raw. */
   raw(raw?: boolean | undefined | null): void
+  /** Sets the presentation mode to pluck. */
   pluck(pluck?: boolean | undefined | null): void
+  /** Finalizes the statement. */
   finalize(): void
 }

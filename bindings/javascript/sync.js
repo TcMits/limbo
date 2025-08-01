@@ -5,6 +5,11 @@ const { bindParams } = require("./bind.js");
 
 const SqliteError = require("./sqlite-error.js");
 
+// Step result constants
+const STEP_ROW = 1;
+const STEP_DONE = 2;
+const STEP_IO = 3;
+
 const convertibleErrorTypes = { TypeError };
 const CONVERTIBLE_ERROR_PREFIX = "[TURSO_CONVERT_TYPE]";
 
@@ -257,13 +262,17 @@ class Statement {
     this.stmt.reset();
     bindParams(this.stmt, bindParameters);
     for (;;) {
-      const result = this.stmt.step();
-      if (result.io) {
+      const stepResult = this.stmt.step();
+      if (stepResult === STEP_IO) {
         this.db.db.ioLoopSync();
         continue;
       }
-      if (result.done) {
+      if (stepResult === STEP_DONE) {
         break;
+      }
+      if (stepResult === STEP_ROW) {
+        // For run(), we don't need the row data, just continue
+        continue;
       }
     }
     
@@ -282,15 +291,17 @@ class Statement {
     this.stmt.reset();
     bindParams(this.stmt, bindParameters);
     for (;;) {
-      const result = this.stmt.step();
-      if (result.io) {
+      const stepResult = this.stmt.step();
+      if (stepResult === STEP_IO) {
         this.db.db.ioLoopSync();
         continue;
       }
-      if (result.done) {
+      if (stepResult === STEP_DONE) {
         return undefined;
       }
-      return result.value;
+      if (stepResult === STEP_ROW) {
+        return this.stmt.row();
+      }
     }
   }
 
@@ -313,15 +324,17 @@ class Statement {
     bindParams(this.stmt, bindParameters);
     const rows = [];
     for (;;) {
-      const result = this.stmt.step();
-      if (result.io) {
+      const stepResult = this.stmt.step();
+      if (stepResult === STEP_IO) {
         this.db.db.ioLoopSync();
         continue;
       }
-      if (result.done) {
+      if (stepResult === STEP_DONE) {
         break;
       }
-      rows.push(result.value);
+      if (stepResult === STEP_ROW) {
+        rows.push(this.stmt.row());
+      }
     }
     return rows;
   }

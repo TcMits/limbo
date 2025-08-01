@@ -15,6 +15,11 @@ use napi::{Env, Task};
 use napi_derive::napi;
 use std::{cell::RefCell, num::NonZeroUsize, sync::Arc};
 
+/// Step result constants
+const STEP_ROW: u32 = 1;
+const STEP_DONE: u32 = 2;
+const STEP_IO: u32 = 3;
+
 /// The presentation mode for rows.
 #[derive(Debug, Clone)]
 enum PresentationMode {
@@ -289,92 +294,90 @@ impl Statement {
         Ok(())
     }
 
+    /// Step the statement and return result code:
+    /// 1 = Row available, 2 = Done, 3 = I/O needed
     #[napi]
-    pub fn step<'env>(&self, env: &'env Env) -> Result<Unknown<'env>> {
+    pub fn step(&self) -> Result<u32> {
         let mut stmt_ref = self.stmt.borrow_mut();
         let stmt = stmt_ref
             .as_mut()
             .ok_or_else(|| Error::new(Status::GenericFailure, "Statement has been finalized"))?;
 
-        let mut result = Object::new(env)?;
-
         match stmt.step() {
-            Ok(turso_core::StepResult::Row) => {
-                result.set_named_property("done", false)?;
-
-                let row_data = stmt
-                    .row()
-                    .ok_or_else(|| Error::new(Status::GenericFailure, "No row data available"))?;
-
-                let mode = self.mode.borrow();
-                let row_value =
-                    match *mode {
-                        PresentationMode::Raw => {
-                            let mut raw_array = env.create_array(row_data.len() as u32)?;
-                            for (idx, value) in row_data.get_values().enumerate() {
-                                let js_value = to_js_value(env, value)?;
-                                raw_array.set(idx as u32, js_value)?;
-                            }
-                            raw_array.coerce_to_object()?.to_unknown()
-                        }
-                        PresentationMode::Pluck => {
-                            let (_, value) = row_data.get_values().enumerate().next().ok_or(
-                                napi::Error::new(
-                                    napi::Status::GenericFailure,
-                                    "Pluck mode requires at least one column in the result",
-                                ),
-                            )?;
-                            to_js_value(env, value)?
-                        }
-                        PresentationMode::Expanded => {
-                            let row = Object::new(env)?;
-                            let raw_row = row.raw();
-                            let raw_env = env.raw();
-                            for idx in 0..row_data.len() {
-                                let value = row_data.get_value(idx);
-                                let column_name = &self.column_names[idx];
-                                let js_value = to_js_value(env, value)?;
-                                unsafe {
-                                    napi::sys::napi_set_named_property(
-                                        raw_env,
-                                        raw_row,
-                                        column_name.as_ptr(),
-                                        js_value.raw(),
-                                    );
-                                }
-                            }
-                            row.to_unknown()
-                        }
-                    };
-
-                result.set_named_property("value", row_value)?;
-            }
-            Ok(turso_core::StepResult::Done) => {
-                result.set_named_property("done", true)?;
-                result.set_named_property("value", Null)?;
-            }
-            Ok(turso_core::StepResult::IO) => {
-                result.set_named_property("io", true)?;
-                result.set_named_property("value", Null)?;
-            }
+            Ok(turso_core::StepResult::Row) => Ok(STEP_ROW),
+            Ok(turso_core::StepResult::Done) => Ok(STEP_DONE),
+            Ok(turso_core::StepResult::IO) => Ok(STEP_IO),
             Ok(turso_core::StepResult::Interrupt) => {
-                return Err(Error::new(
+                Err(Error::new(
                     Status::GenericFailure,
                     "Statement was interrupted",
-                ));
+                ))
             }
             Ok(turso_core::StepResult::Busy) => {
-                return Err(Error::new(Status::GenericFailure, "Database is busy"));
+                Err(Error::new(Status::GenericFailure, "Database is busy"))
             }
             Err(e) => {
-                return Err(Error::new(
+                Err(Error::new(
                     Status::GenericFailure,
                     format!("Step failed: {e}"),
                 ))
             }
         }
+    }
 
-        Ok(result.to_unknown())
+    /// Get the current row data according to the presentation mode
+    #[napi]
+    pub fn row<'env>(&self, env: &'env Env) -> Result<Unknown<'env>> {
+        let stmt_ref = self.stmt.borrow();
+        let stmt = stmt_ref
+            .as_ref()
+            .ok_or_else(|| Error::new(Status::GenericFailure, "Statement has been finalized"))?;
+
+        let row_data = stmt
+            .row()
+            .ok_or_else(|| Error::new(Status::GenericFailure, "No row data available"))?;
+
+        let mode = self.mode.borrow();
+        let row_value = match *mode {
+            PresentationMode::Raw => {
+                let mut raw_array = env.create_array(row_data.len() as u32)?;
+                for (idx, value) in row_data.get_values().enumerate() {
+                    let js_value = to_js_value(env, value)?;
+                    raw_array.set(idx as u32, js_value)?;
+                }
+                raw_array.coerce_to_object()?.to_unknown()
+            }
+            PresentationMode::Pluck => {
+                let (_, value) = row_data.get_values().enumerate().next().ok_or(
+                    napi::Error::new(
+                        napi::Status::GenericFailure,
+                        "Pluck mode requires at least one column in the result",
+                    ),
+                )?;
+                to_js_value(env, value)?
+            }
+            PresentationMode::Expanded => {
+                let row = Object::new(env)?;
+                let raw_row = row.raw();
+                let raw_env = env.raw();
+                for idx in 0..row_data.len() {
+                    let value = row_data.get_value(idx);
+                    let column_name = &self.column_names[idx];
+                    let js_value = to_js_value(env, value)?;
+                    unsafe {
+                        napi::sys::napi_set_named_property(
+                            raw_env,
+                            raw_row,
+                            column_name.as_ptr(),
+                            js_value.raw(),
+                        );
+                    }
+                }
+                row.to_unknown()
+            }
+        };
+
+        Ok(row_value)
     }
 
     /// Sets the presentation mode to raw.
