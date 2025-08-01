@@ -8,7 +8,6 @@ pub enum TransitionResult<Result> {
 
 /// A generic trait for state machines.
 pub trait StateTransition {
-    type State;
     type Context;
     type SMResult;
 
@@ -44,11 +43,10 @@ impl<State: StateTransition> StateMachine<State> {
 }
 
 impl<State: StateTransition> StateTransition for StateMachine<State> {
-    type State = State;
     type Context = State::Context;
     type SMResult = State::SMResult;
 
-    fn step(&mut self, context: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
+    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult<Self::SMResult>> {
         loop {
             if self.is_finalized {
                 unreachable!("StateMachine::transition: state machine is finalized");

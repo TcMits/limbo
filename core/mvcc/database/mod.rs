@@ -305,7 +305,6 @@ impl WriteRowStateMachine {
 }
 
 impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
-    type State = CommitStateMachine<Clock>;
     type Context = MvStore<Clock>;
     type SMResult = ();
 
@@ -590,7 +589,6 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
 }
 
 impl StateTransition for WriteRowStateMachine {
-    type State = WriteRowStateMachine;
     type Context = ();
     type SMResult = ();
 
