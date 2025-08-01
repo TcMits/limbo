@@ -37,7 +37,7 @@ grep -v '^--' "$CLICKBENCH_DIR/queries.sql" | while read -r query; do
     for _ in $(seq 1 $TRIES); do
         clear_caches
         echo "----tursodb----"
-        ((time "$RELEASE_BUILD_DIR/tursodb" --quiet --experimental-indexes -m list "$CLICKBENCH_DIR/mydb" <<< "${query}") 2>&1) | tee -a clickbench-tursodb.txt
+        ((time "$RELEASE_BUILD_DIR/tursodb" --quiet -m list "$CLICKBENCH_DIR/mydb" <<< "${query}") 2>&1) | tee -a clickbench-tursodb.txt
         clear_caches
         echo
         echo "----sqlite----"

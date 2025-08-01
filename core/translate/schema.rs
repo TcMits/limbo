@@ -626,7 +626,7 @@ pub fn translate_drop_table(
 ) -> Result<ProgramBuilder> {
     if !schema.indexes_enabled() && schema.table_has_indexes(&tbl_name.name.to_string()) {
         bail_parse_error!(
-            "DROP TABLE with indexes on the table is disabled by default. Run with `--experimental-indexes` to enable this feature."
+            "DROP TABLE with indexes on the table is disabled by default. Omit the `--experimental-indexes=false` flag to enable this feature."
         );
     }
     let opts = ProgramBuilderOpts {

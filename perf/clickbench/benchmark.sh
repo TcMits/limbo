@@ -23,7 +23,7 @@ rm "$CLICKBENCH_DIR/mydb"* || true
 
 # Create DB using tursodb
 echo "Creating DB..."
-"$RELEASE_BUILD_DIR/tursodb" --quiet --experimental-indexes "$CLICKBENCH_DIR/mydb" < "$CLICKBENCH_DIR/create.sql"
+"$RELEASE_BUILD_DIR/tursodb" --quiet "$CLICKBENCH_DIR/mydb" < "$CLICKBENCH_DIR/create.sql"
 
 # Download a subset of the clickbench dataset if it doesn't exist
 NUM_ROWS=1000000

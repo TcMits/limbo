@@ -188,23 +188,21 @@ do_execsql_test_on_specific_db {:memory:} multi-rows {
 } {1|1
 2|1}
 
-if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-sqlite3-index-experimental" || $::env(SQLITE_EXEC) eq "sqlite3")} {
-    do_execsql_test_on_specific_db {:memory:} unique_insert_no_pkey {
-        CREATE TABLE t2 (x INTEGER, y INTEGER UNIQUE);
-        INSERT INTO t2 (y) VALUES (1);
-        INSERT INTO t2 (y) VALUES (6);
-        SELECT * FROM t2;
-    } {|1
-    |6}
+do_execsql_test_on_specific_db {:memory:} unique_insert_no_pkey {
+    CREATE TABLE t2 (x INTEGER, y INTEGER UNIQUE);
+    INSERT INTO t2 (y) VALUES (1);
+    INSERT INTO t2 (y) VALUES (6);
+    SELECT * FROM t2;
+} {|1
+|6}
 
-    do_execsql_test_on_specific_db {:memory:} unique_insert_with_pkey {
-        CREATE TABLE t2 (x INTEGER PRIMARY KEY, y INTEGER UNIQUE);
-        INSERT INTO t2 (y) VALUES (1);
-        INSERT INTO t2 (y) VALUES (6);
-        SELECT * FROM t2;
-    } {1|1
-    2|6}
-}
+do_execsql_test_on_specific_db {:memory:} unique_insert_with_pkey {
+    CREATE TABLE t2 (x INTEGER PRIMARY KEY, y INTEGER UNIQUE);
+    INSERT INTO t2 (y) VALUES (1);
+    INSERT INTO t2 (y) VALUES (6);
+    SELECT * FROM t2;
+} {1|1
+2|6}
 
 do_execsql_test_on_specific_db {:memory:} not_null_insert {
     CREATE TABLE t2 (y INTEGER NOT NULL);
@@ -333,61 +331,59 @@ do_execsql_test_on_specific_db {:memory:} insert_from_select_same_table_2 {
 5|2|200
 6|3|300}
 
-if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-sqlite3-index-experimental" || $::env(SQLITE_EXEC) eq "sqlite3")} {
-    do_execsql_test_on_specific_db {:memory:} insert_from_select_union {
-        CREATE TABLE t (a, b); 
-        CREATE TABLE t2 (b, c);
+do_execsql_test_on_specific_db {:memory:} insert_from_select_union {
+    CREATE TABLE t (a, b); 
+    CREATE TABLE t2 (b, c);
 
-        INSERT INTO t2 VALUES (1, 100), (2, 200);
-        INSERT INTO t SELECT * FROM t UNION SELECT * FROM t2;
-        SELECT * FROM t;
-    } {1|100
-    2|200}
+    INSERT INTO t2 VALUES (1, 100), (2, 200);
+    INSERT INTO t SELECT * FROM t UNION SELECT * FROM t2;
+    SELECT * FROM t;
+} {1|100
+2|200}
 
-    do_execsql_test_on_specific_db {:memory:} insert_from_select_union-2 {
-        CREATE TABLE t (a, b);
-        CREATE TABLE t2 (b, c);
+do_execsql_test_on_specific_db {:memory:} insert_from_select_union-2 {
+    CREATE TABLE t (a, b);
+    CREATE TABLE t2 (b, c);
 
-        INSERT INTO t SELECT * FROM t UNION values(1, 100), (2, 200);
-        SELECT * FROM t;
-    } {1|100
-    2|200}
+    INSERT INTO t SELECT * FROM t UNION values(1, 100), (2, 200);
+    SELECT * FROM t;
+} {1|100
+2|200}
 
-    do_execsql_test_on_specific_db {:memory:} insert_from_select_intersect {
-        CREATE TABLE t (a, b);
-        CREATE TABLE t1 (a, b);
-        CREATE TABLE t2 (a, b);
+do_execsql_test_on_specific_db {:memory:} insert_from_select_intersect {
+    CREATE TABLE t (a, b);
+    CREATE TABLE t1 (a, b);
+    CREATE TABLE t2 (a, b);
 
-        INSERT INTO t1 VALUES (1, 100), (2, 200);
-        INSERT INTO t2 VALUES (2, 200), (3, 300);
-        INSERT INTO t SELECT * FROM t1 INTERSECT SELECT * FROM t2;
-        SELECT * FROM t;
-    } {2|200}
+    INSERT INTO t1 VALUES (1, 100), (2, 200);
+    INSERT INTO t2 VALUES (2, 200), (3, 300);
+    INSERT INTO t SELECT * FROM t1 INTERSECT SELECT * FROM t2;
+    SELECT * FROM t;
+} {2|200}
 
-    do_execsql_test_on_specific_db {:memory:} insert_from_select_intersect-2 {
-        CREATE TABLE t (a, b);
-        CREATE TABLE t1 (a, b);
-        CREATE TABLE t2 (a, b);
-        CREATE TABLE t3 (a, b);
+do_execsql_test_on_specific_db {:memory:} insert_from_select_intersect-2 {
+    CREATE TABLE t (a, b);
+    CREATE TABLE t1 (a, b);
+    CREATE TABLE t2 (a, b);
+    CREATE TABLE t3 (a, b);
 
-        INSERT INTO t1 VALUES (1, 100), (2, 200);
-        INSERT INTO t2 VALUES (2, 200), (3, 300);
-        INSERT INTO t3 VALUES (2, 200), (4, 400);
-        INSERT INTO t SELECT * FROM t1 INTERSECT SELECT * FROM t2 INTERSECT SELECT * FROM t3;
-        SELECT * FROM t;
-    } {2|200}
+    INSERT INTO t1 VALUES (1, 100), (2, 200);
+    INSERT INTO t2 VALUES (2, 200), (3, 300);
+    INSERT INTO t3 VALUES (2, 200), (4, 400);
+    INSERT INTO t SELECT * FROM t1 INTERSECT SELECT * FROM t2 INTERSECT SELECT * FROM t3;
+    SELECT * FROM t;
+} {2|200}
 
-    do_execsql_test_on_specific_db {:memory:} insert_from_select_except {
-        CREATE TABLE t (a, b);
-        CREATE TABLE t1 (a, b);
-        CREATE TABLE t2 (a, b);
+do_execsql_test_on_specific_db {:memory:} insert_from_select_except {
+    CREATE TABLE t (a, b);
+    CREATE TABLE t1 (a, b);
+    CREATE TABLE t2 (a, b);
 
-        INSERT INTO t1 VALUES (1, 100), (2, 200);
-        INSERT INTO t2 VALUES (2, 200), (3, 300);
-        INSERT INTO t SELECT * FROM t1 EXCEPT SELECT * FROM t2;
-        SELECT * FROM t;
-    } {1|100}
-}
+    INSERT INTO t1 VALUES (1, 100), (2, 200);
+    INSERT INTO t2 VALUES (2, 200), (3, 300);
+    INSERT INTO t SELECT * FROM t1 EXCEPT SELECT * FROM t2;
+    SELECT * FROM t;
+} {1|100}
 
 do_execsql_test_on_specific_db {:memory:} negative-primary-integer-key {
     CREATE TABLE t (a INTEGER PRIMARY KEY);
@@ -411,21 +407,19 @@ do_execsql_test_on_specific_db {:memory:} rowid-overflow-random-generation {
 } {3}
 
 # regression test for incorrect processing of record header in the case of large text columns
-if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-sqlite3-index-experimental" || $::env(SQLITE_EXEC) eq "sqlite3")} {
-    do_execsql_test_on_specific_db {:memory:} large-text-index-seek {
-        CREATE TABLE t (x TEXT, y);
-        CREATE INDEX t_idx ON t(x);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'a', 1);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'b', 2);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'c', 3);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'd', 4);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'e', 5);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'f', 6);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'g', 7);
-        INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'h', 8);
-        SELECT COUNT(*) FROM t WHERE x >= replace(hex(zeroblob(100)), '00', 'a');
-    } {8}
-}
+do_execsql_test_on_specific_db {:memory:} large-text-index-seek {
+    CREATE TABLE t (x TEXT, y);
+    CREATE INDEX t_idx ON t(x);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'a', 1);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'b', 2);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'c', 3);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'd', 4);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'e', 5);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'f', 6);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'g', 7);
+    INSERT INTO t VALUES (replace(hex(zeroblob(1000)), '00', 'a') || 'h', 8);
+    SELECT COUNT(*) FROM t WHERE x >= replace(hex(zeroblob(100)), '00', 'a');
+} {8}
 
 do_execsql_test_skip_lines_on_specific_db 1 {:memory:} double-quote-string-literals {
     .dbconfig dqs_dml on

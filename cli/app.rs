@@ -61,7 +61,7 @@ pub struct Opts {
     #[clap(long, help = "Enable experimental MVCC feature")]
     pub experimental_mvcc: bool,
     #[clap(long, help = "Enable experimental indexing feature")]
-    pub experimental_indexes: bool,
+    pub experimental_indexes: Option<bool>,
     #[clap(short = 't', long, help = "specify output file for log traces")]
     pub tracing_output: Option<String>,
     #[clap(long, help = "Start MCP server instead of interactive shell")]
@@ -119,8 +119,9 @@ impl Limbo {
             .database
             .as_ref()
             .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string());
+        let indexes_enabled = opts.experimental_indexes.unwrap_or(true);
         let (io, conn) = if db_file.contains([':', '?', '&', '#']) {
-            Connection::from_uri(&db_file, opts.experimental_indexes, opts.experimental_mvcc)?
+            Connection::from_uri(&db_file, indexes_enabled, opts.experimental_mvcc)?
         } else {
             let flags = if opts.readonly {
                 OpenFlags::ReadOnly
@@ -131,7 +132,7 @@ impl Limbo {
                 &db_file,
                 opts.vfs.as_ref(),
                 flags,
-                opts.experimental_indexes,
+                indexes_enabled,
                 opts.experimental_mvcc,
             )?;
             let conn = db.connect()?;

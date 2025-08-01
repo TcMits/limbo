@@ -309,368 +309,366 @@ do_execsql_test_error select-star-subquery {
   SELECT 1 FROM (SELECT *);
 } {no tables specified}
 
-if {[info exists ::env(SQLITE_EXEC)] && ($::env(SQLITE_EXEC) eq "scripts/limbo-sqlite3-index-experimental" || $::env(SQLITE_EXEC) eq "sqlite3")} {
-    do_execsql_test_on_specific_db {:memory:} select-union-1 {
+  do_execsql_test_on_specific_db {:memory:} select-union-1 {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y');
+
+  select * from t UNION select * from u;
+  } {x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-all-union {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  CREATE TABLE v (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y');
+  INSERT INTO v VALUES('x','x'),('y','y');
+
+  select * from t UNION select * from u UNION ALL select * from v;
+  } {x|x
+  y|y
+  x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-all-union-2 {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  CREATE TABLE v (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y');
+  INSERT INTO v VALUES('x','x'),('y','y');
+
+  select * from t UNION ALL select * from u UNION select * from v;
+  } {x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-3 {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  CREATE TABLE v (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y');
+  INSERT INTO v VALUES('x','x'),('y','y');
+
+  select * from t UNION select * from u UNION select * from v;
+  } {x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-4 {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  CREATE TABLE v (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y');
+  INSERT INTO v VALUES('x','x'),('y','y');
+
+  select * from t UNION select * from u UNION select * from v UNION select * from t;
+  } {x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-all-union-3 {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  CREATE TABLE v (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y');
+  INSERT INTO v VALUES('x','x'),('y','y');
+
+  select * from t UNION select * from u UNION select * from v UNION ALL select * from t;
+  } {x|x
+  y|y
+  x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-all-with-offset {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y'),('z', 'z');
+
+  select * from t UNION ALL select * from u limit 1 offset 1;
+  } {y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-union-with-offset {
+  CREATE TABLE t (x TEXT, y TEXT);
+  CREATE TABLE u (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
+  INSERT INTO u VALUES('x','x'),('y','y'),('z', 'z');
+
+  select * from t UNION select * from u limit 1 offset 1;
+  } {y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-intersect-1 {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
-    INSERT INTO u VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
 
-    select * from t UNION select * from u;
-    } {x|x
-    y|y}
+    select * from t INTERSECT select * from u;
+  } {x|x}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-all-union {
+  do_execsql_test_on_specific_db {:memory:} select-intersect-2 {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
     CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
     INSERT INTO u VALUES('x','x'),('y','y');
-    INSERT INTO v VALUES('x','x'),('y','y');
+    INSERT INTO v VALUES('a','x'),('y','y');
 
-    select * from t UNION select * from u UNION ALL select * from v;
-    } {x|x
-    y|y
-    x|x
-    y|y}
+    select * from t INTERSECT select * from u INTERSECT select * from v INTERSECT select * from t;
+  } {y|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-all-union-2 {
+  do_execsql_test_on_specific_db {:memory:} select-intersect-union {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
     CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
-    INSERT INTO u VALUES('x','x'),('y','y');
-    INSERT INTO v VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
 
-    select * from t UNION ALL select * from u UNION select * from v;
-    } {x|x
-    y|y}
+    select * from t INTERSECT select * from u UNION select * from v;
+  } {x|x
+  z|z}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-3 {
+  do_execsql_test_on_specific_db {:memory:} select-union-intersect {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
     CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
-    INSERT INTO u VALUES('x','x'),('y','y');
-    INSERT INTO v VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
 
-    select * from t UNION select * from u UNION select * from v;
-    } {x|x
-    y|y}
+    select * from t UNION select * from u INTERSECT select * from v;
+  } {x|x}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-4 {
+  do_execsql_test_on_specific_db {:memory:} select-union-all-intersect {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
     CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
-    INSERT INTO u VALUES('x','x'),('y','y');
-    INSERT INTO v VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
 
-    select * from t UNION select * from u UNION select * from v UNION select * from t;
-    } {x|x
-    y|y}
+    select * from t UNION ALL select * from u INTERSECT select * from v;
+  } {x|x}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-all-union-3 {
+  do_execsql_test_on_specific_db {:memory:} select-intersect-union-all {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
     CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
+
+    select * from t INTERSECT select * from u UNION ALL select * from v;
+  } {x|x
+  x|x
+  z|z}
+
+  do_execsql_test_on_specific_db {:memory:} select-intersect-with-limit {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
+    INSERT INTO u VALUES('x','x'),('y','y'), ('z','z');
+
+    select * from t INTERSECT select * from u limit 2;
+  } {x|x
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-intersect-with-offset {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
+    INSERT INTO u VALUES('x','x'),('y','y'), ('z','z');
+
+    select * from t INTERSECT select * from u limit 2 offset 1;
+  } {y|y
+  z|z}
+
+  do_execsql_test_on_specific_db {:memory:} select-intersect-union-with-limit {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
+    INSERT INTO u VALUES('d','d'),('e','e'), ('z','z');
+    INSERT INTO v VALUES('a','a'),('b','b');
+
+    select * from t INTERSECT select * from u UNION select * from v limit 3;
+  } {a|a
+  b|b
+  z|z}
+
+  do_execsql_test_on_specific_db {:memory:} select-except-1 {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+
+    select * from t EXCEPT select * from u;
+  } {y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-except-2 {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
     INSERT INTO u VALUES('x','x'),('y','y');
+
+    select * from t EXCEPT select * from u;
+  } {}
+
+  do_execsql_test_on_specific_db {:memory:} select-except-3 {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('a','y');
+    INSERT INTO v VALUES('a','x'),('b','y');
+
+    select * from t EXCEPT select * from u EXCEPT select * from v;
+  } {y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-except-limit {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    INSERT INTO t VALUES('a', 'a'),('x','x'),('y','y'),('z','z');
+    INSERT INTO u VALUES('x','x'),('z','y');
+
+    select * from t EXCEPT select * from u limit 2;
+  } {a|a
+  y|y}
+
+  do_execsql_test_on_specific_db {:memory:} select-except-union-all {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
     INSERT INTO v VALUES('x','x'),('y','y');
 
-    select * from t UNION select * from u UNION select * from v UNION ALL select * from t;
-    } {x|x
-    y|y
-    x|x
-    y|y}
+    select * from t EXCEPT select * from u UNION ALL select * from v;
+  } {y|y
+  x|x
+  y|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-all-with-offset {
+  do_execsql_test_on_specific_db {:memory:} select-union-all-except {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
-    INSERT INTO u VALUES('x','x'),('y','y'),('z', 'z');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('y','y');
 
-    select * from t UNION ALL select * from u limit 1 offset 1;
-    } {y|y}
+    select * from t UNION ALL select * from u EXCEPT select * from v;
+  } {z|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-with-offset {
+  do_execsql_test_on_specific_db {:memory:} select-except-union {
     CREATE TABLE t (x TEXT, y TEXT);
     CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
-    INSERT INTO u VALUES('x','x'),('y','y'),('z', 'z');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
 
-    select * from t UNION select * from u limit 1 offset 1;
-    } {y|y}
+    select * from t EXCEPT select * from u UNION select * from v;
+  } {x|x
+  y|y
+  z|z}
 
-    do_execsql_test_on_specific_db {:memory:} select-intersect-1 {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
+  do_execsql_test_on_specific_db {:memory:} select-union-except {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
 
-      select * from t INTERSECT select * from u;
-    } {x|x}
+    select * from t UNION select * from u EXCEPT select * from v;
+  } {y|y
+  z|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-intersect-2 {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('y','y');
-      INSERT INTO v VALUES('a','x'),('y','y');
+  do_execsql_test_on_specific_db {:memory:} select-except-intersect {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('y','y'),('z','z');
 
-      select * from t INTERSECT select * from u INTERSECT select * from v INTERSECT select * from t;
-    } {y|y}
+    select * from t EXCEPT select * from u INTERSECT select * from v;
+  } {y|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-intersect-union {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
+  do_execsql_test_on_specific_db {:memory:} select-intersect-except {
+    CREATE TABLE t (x TEXT, y TEXT);
+    CREATE TABLE u (x TEXT, y TEXT);
+    CREATE TABLE v (x TEXT, y TEXT);
+    INSERT INTO t VALUES('x','x'),('y','y');
+    INSERT INTO u VALUES('x','x'),('z','y');
+    INSERT INTO v VALUES('x','x'),('z','z');
 
-      select * from t INTERSECT select * from u UNION select * from v;
-    } {x|x
-    z|z}
+    select * from t INTERSECT select * from u EXCEPT select * from v;
+  } {}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-intersect {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
+  do_execsql_test_on_specific_db {:memory:} select-values-union {
+  CREATE TABLE t (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
 
-      select * from t UNION select * from u INTERSECT select * from v;
-    } {x|x}
+  values('x', 'x') UNION select * from t;
+  } {x|x
+  y|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-union-all-intersect {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
+  do_execsql_test_on_specific_db {:memory:} select-values-union-2 {
+  CREATE TABLE t (x TEXT, y TEXT);
+  INSERT INTO t VALUES('x','x'),('y','y');
 
-      select * from t UNION ALL select * from u INTERSECT select * from v;
-    } {x|x}
+  values('x', 'x'), ('y', 'y') UNION select * from t;
+  } {x|x
+  y|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-intersect-union-all {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
-
-      select * from t INTERSECT select * from u UNION ALL select * from v;
-    } {x|x
-    x|x
-    z|z}
-
-    do_execsql_test_on_specific_db {:memory:} select-intersect-with-limit {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
-      INSERT INTO u VALUES('x','x'),('y','y'), ('z','z');
-
-      select * from t INTERSECT select * from u limit 2;
-    } {x|x
-    y|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-intersect-with-offset {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
-      INSERT INTO u VALUES('x','x'),('y','y'), ('z','z');
-
-      select * from t INTERSECT select * from u limit 2 offset 1;
-    } {y|y
-    z|z}
-
-    do_execsql_test_on_specific_db {:memory:} select-intersect-union-with-limit {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y'), ('z','z');
-      INSERT INTO u VALUES('d','d'),('e','e'), ('z','z');
-      INSERT INTO v VALUES('a','a'),('b','b');
-
-      select * from t INTERSECT select * from u UNION select * from v limit 3;
-    } {a|a
-    b|b
-    z|z}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-1 {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-
-      select * from t EXCEPT select * from u;
-    } {y|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-2 {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('y','y');
-
-      select * from t EXCEPT select * from u;
-    } {}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-3 {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('a','y');
-      INSERT INTO v VALUES('a','x'),('b','y');
-
-      select * from t EXCEPT select * from u EXCEPT select * from v;
-    } {y|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-limit {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      INSERT INTO t VALUES('a', 'a'),('x','x'),('y','y'),('z','z');
-      INSERT INTO u VALUES('x','x'),('z','y');
-
-      select * from t EXCEPT select * from u limit 2;
-    } {a|a
-    y|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-union-all {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('y','y');
-
-      select * from t EXCEPT select * from u UNION ALL select * from v;
-    } {y|y
-    x|x
-    y|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-union-all-except {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('y','y');
-
-      select * from t UNION ALL select * from u EXCEPT select * from v;
-    } {z|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-union {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
-
-      select * from t EXCEPT select * from u UNION select * from v;
-    } {x|x
-    y|y
-    z|z}
-
-    do_execsql_test_on_specific_db {:memory:} select-union-except {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
-
-      select * from t UNION select * from u EXCEPT select * from v;
-    } {y|y
-    z|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-except-intersect {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('y','y'),('z','z');
-
-      select * from t EXCEPT select * from u INTERSECT select * from v;
-    } {y|y}
-
-    do_execsql_test_on_specific_db {:memory:} select-intersect-except {
-      CREATE TABLE t (x TEXT, y TEXT);
-      CREATE TABLE u (x TEXT, y TEXT);
-      CREATE TABLE v (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
-      INSERT INTO u VALUES('x','x'),('z','y');
-      INSERT INTO v VALUES('x','x'),('z','z');
-
-      select * from t INTERSECT select * from u EXCEPT select * from v;
-    } {}
-
-    do_execsql_test_on_specific_db {:memory:} select-values-union {
+  do_execsql_test_on_specific_db {:memory:} select-values-except {
     CREATE TABLE t (x TEXT, y TEXT);
     INSERT INTO t VALUES('x','x'),('y','y');
 
-    values('x', 'x') UNION select * from t;
-    } {x|x
-    y|y}
+    select * from t EXCEPT values('x','x'),('z','y');
+  } {y|y}
 
-    do_execsql_test_on_specific_db {:memory:} select-values-union-2 {
-    CREATE TABLE t (x TEXT, y TEXT);
-    INSERT INTO t VALUES('x','x'),('y','y');
+  do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit {
+  CREATE TABLE t (x TEXT);
+  INSERT INTO t VALUES('x'), ('y'), ('z');
 
-    values('x', 'x'), ('y', 'y') UNION select * from t;
-    } {x|x
-    y|y}
+  values('x') UNION ALL select * from t limit 3;
+  } {x
+  x
+  y}
 
-    do_execsql_test_on_specific_db {:memory:} select-values-except {
-      CREATE TABLE t (x TEXT, y TEXT);
-      INSERT INTO t VALUES('x','x'),('y','y');
+  do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit-1 {
+  CREATE TABLE t (x TEXT);
+  INSERT INTO t VALUES('x'), ('y'), ('z');
 
-      select * from t EXCEPT values('x','x'),('z','y');
-    } {y|y}
+  values('a'), ('b') UNION ALL select * from t limit 3;
+  } {a
+  b
+  x}
 
-    do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit {
-    CREATE TABLE t (x TEXT);
-    INSERT INTO t VALUES('x'), ('y'), ('z');
+  do_execsql_test_on_specific_db {:memory:} select-values-union-all-offset {
+  CREATE TABLE t (x TEXT);
+  INSERT INTO t VALUES('x'), ('y'), ('z');
 
-    values('x') UNION ALL select * from t limit 3;
-    } {x
-    x
-    y}
+  values('a'), ('b') UNION ALL select * from t limit 3 offset 1;
+  } {b
+  x
+  y}
 
-    do_execsql_test_on_specific_db {:memory:} select-values-union-all-limit-1 {
-    CREATE TABLE t (x TEXT);
-    INSERT INTO t VALUES('x'), ('y'), ('z');
+  do_execsql_test_on_specific_db {:memory:} select-values-union-all-offset-1 {
+  CREATE TABLE t (x TEXT);
+  INSERT INTO t VALUES('i'), ('j'), ('x'), ('y'), ('z');
 
-    values('a'), ('b') UNION ALL select * from t limit 3;
-    } {a
-    b
-    x}
-
-    do_execsql_test_on_specific_db {:memory:} select-values-union-all-offset {
-    CREATE TABLE t (x TEXT);
-    INSERT INTO t VALUES('x'), ('y'), ('z');
-
-    values('a'), ('b') UNION ALL select * from t limit 3 offset 1;
-    } {b
-    x
-    y}
-
-    do_execsql_test_on_specific_db {:memory:} select-values-union-all-offset-1 {
-    CREATE TABLE t (x TEXT);
-    INSERT INTO t VALUES('i'), ('j'), ('x'), ('y'), ('z');
-
-    values('a') UNION ALL select * from t limit 3 offset 1;
-    } {i
-    j
-    x}
-}
+  values('a') UNION ALL select * from t limit 3 offset 1;
+  } {i
+  j
+  x}
 
 do_execsql_test_on_specific_db {:memory:} select-no-match-in-leaf-page {
     CREATE TABLE t (a INTEGER PRIMARY KEY, b);

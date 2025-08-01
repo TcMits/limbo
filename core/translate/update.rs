@@ -110,7 +110,7 @@ pub fn prepare_update_plan(
         // Let's disable altering a table with indices altogether instead of checking column by
         // column to be extra safe.
         bail_parse_error!(
-            "UPDATE table disabled for table with indexes is disabled by default. Run with `--experimental-indexes` to enable this feature."
+            "UPDATE table disabled for table with indexes is disabled. Omit the `--experimental-indexes=false` flag to enable this feature."
         );
     }
     let table = match schema.get_table(table_name.as_str()) {

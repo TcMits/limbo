@@ -10,7 +10,7 @@ repository.workspace = true
 description = "Turso Rust API"
 
 [features]
-default = []
+default = ["experimental_indexes"]
 experimental_indexes = []
 antithesis = ["turso_core/antithesis"]
 

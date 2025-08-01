@@ -81,10 +81,6 @@ jobs:
       - name: Test
         run: make test
         timeout-minutes: 20
-  #      - uses: "./.github/shared/install_sqlite"
-  #      - name: Test with index enabled
-  #        run: SQLITE_EXEC="scripts/limbo-sqlite3-index-experimental" make test
-  #        timeout-minutes: 20
   test-sqlite:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:

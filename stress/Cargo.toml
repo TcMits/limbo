@@ -17,7 +17,7 @@ path = "main.rs"
 [features]
 default = ["experimental_indexes"]
 antithesis = ["turso/antithesis"]
-experimental_indexes = ["turso/experimental_indexes"]
+experimental_indexes = []
 
 [dependencies]
 anarchist-readable-name-generator-lib = "0.1.0"

@@ -67,7 +67,7 @@ pub fn translate_insert(
         // Let's disable altering a table with indices altogether instead of checking column by
         // column to be extra safe.
         crate::bail_parse_error!(
-            "INSERT to table with indexes is disabled by default. Run with `--experimental-indexes` to enable this feature."
+            "INSERT to table with indexes is disabled. Omit the `--experimental-indexes=false` flag to enable this feature."
         );
     }
     let table_name = &tbl_name.name;
