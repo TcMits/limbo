@@ -27,6 +27,7 @@ pub mod sorter;
 use crate::{
     error::LimboError,
     function::{AggFunc, FuncCtx},
+    mvcc::database::StateTransition,
     storage::sqlite3_ondisk::SmallVec,
     translate::plan::TableReferences,
     types::{IOResult, RawSlice, TextRef},
@@ -442,7 +443,12 @@ impl Program {
                 // FIXME: we don't want to commit stuff from other programs.
                 let mut mv_transactions = conn.mv_transactions.borrow_mut();
                 for tx_id in mv_transactions.iter() {
-                    mv_store.commit_tx(*tx_id, pager.clone(), &conn).unwrap();
+                    let mut state_machine =
+                        mv_store.commit_tx(*tx_id, pager.clone(), &conn).unwrap();
+                    state_machine
+                        .transition(&mv_store)
+                        .map_err(|e| LimboError::InternalError(e.to_string()))?;
+                    assert!(state_machine.is_finalized());
                 }
                 mv_transactions.clear();
             }
