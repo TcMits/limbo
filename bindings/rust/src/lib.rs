@@ -345,7 +345,6 @@ impl Statement {
                 }
             }
         }
-        #[allow(clippy::arc_with_non_send_sync)]
         let rows = Rows::new(&self.inner);
         Ok(rows)
     }

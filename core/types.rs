@@ -585,49 +585,26 @@ impl FromValue for Value {
 }
 impl Sealed for crate::Value {}
 
-impl FromValue for i32 {
-    fn from_sql(val: Value) -> Result<Self> {
-        match val {
-            Value::Null => Err(LimboError::NullValue),
-            Value::Integer(i) => Ok(i as i32),
-            _ => unreachable!("invalid value type"),
+macro_rules! impl_int_from_value {
+    ($ty:ty, $cast:expr) => {
+        impl FromValue for $ty {
+            fn from_sql(val: Value) -> Result<Self> {
+                match val {
+                    Value::Null => Err(LimboError::NullValue),
+                    Value::Integer(i) => Ok($cast(i)),
+                    _ => unreachable!("invalid value type"),
+                }
+            }
         }
-    }
-}
-impl Sealed for i32 {}
 
-impl FromValue for u32 {
-    fn from_sql(val: Value) -> Result<Self> {
-        match val {
-            Value::Null => Err(LimboError::NullValue),
-            Value::Integer(i) => Ok(i as u32),
-            _ => unreachable!("invalid value type"),
-        }
-    }
+        impl Sealed for $ty {}
+    };
 }
-impl Sealed for u32 {}
 
-impl FromValue for i64 {
-    fn from_sql(val: Value) -> Result<Self> {
-        match val {
-            Value::Null => Err(LimboError::NullValue),
-            Value::Integer(i) => Ok(i),
-            _ => unreachable!("invalid value type"),
-        }
-    }
-}
-impl Sealed for i64 {}
-
-impl FromValue for u64 {
-    fn from_sql(val: Value) -> Result<Self> {
-        match val {
-            Value::Null => Err(LimboError::NullValue),
-            Value::Integer(i) => Ok(i as u64),
-            _ => unreachable!("invalid value type"),
-        }
-    }
-}
-impl Sealed for u64 {}
+impl_int_from_value!(i32, |i| i as i32);
+impl_int_from_value!(u32, |i| i as u32);
+impl_int_from_value!(i64, |i| i);
+impl_int_from_value!(u64, |i| i as u64);
 
 impl FromValue for f64 {
     fn from_sql(val: Value) -> Result<Self> {
