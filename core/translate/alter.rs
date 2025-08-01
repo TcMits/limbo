@@ -80,7 +80,7 @@ pub fn translate_alter_table(
 
             btree.columns.remove(dropped_index);
 
-            let sql = btree.to_sql();
+            let sql = btree.to_sql().replace('\'', "''");
 
             let stmt = format!(
                 r#"
