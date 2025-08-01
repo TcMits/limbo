@@ -146,8 +146,11 @@ pub trait VTable {
     fn destroy(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
-    fn best_index(_constraints: &[ConstraintInfo], _order_by: &[OrderByInfo]) -> IndexInfo {
-        IndexInfo {
+    fn best_index(
+        _constraints: &[ConstraintInfo],
+        _order_by: &[OrderByInfo],
+    ) -> Result<IndexInfo, ResultCode> {
+        Ok(IndexInfo {
             idx_num: -1,
             idx_str: None,
             order_by_consumed: false,
@@ -160,7 +163,7 @@ pub trait VTable {
                     omit: false,
                 })
                 .collect(),
-        }
+        })
     }
 }
 
@@ -253,6 +256,7 @@ impl IndexInfo {
             .map(|s| std::ffi::CString::new(s).unwrap().into_raw())
             .unwrap_or(std::ptr::null_mut());
         ExtIndexInfo {
+            code: ResultCode::OK,
             idx_num: self.idx_num,
             estimated_cost: self.estimated_cost,
             estimated_rows: self.estimated_rows,
@@ -268,7 +272,10 @@ impl IndexInfo {
     /// # Safety
     /// This method is unsafe because it can cause memory leaks if not used correctly.
     /// to_ffi and from_ffi are meant to send index info across ffi bounds then immediately reclaim it.
-    pub unsafe fn from_ffi(ffi: ExtIndexInfo) -> Self {
+    pub unsafe fn from_ffi(ffi: ExtIndexInfo) -> Result<Self, ResultCode> {
+        if ffi.code != ResultCode::OK {
+            return Err(ffi.code);
+        }
         let constraint_usages = unsafe {
             Box::from_raw(std::slice::from_raw_parts_mut(
                 ffi.constraint_usages_ptr,
@@ -285,14 +292,14 @@ impl IndexInfo {
                     .into_owned()
             })
         };
-        Self {
+        Ok(Self {
             idx_num: ffi.idx_num,
             idx_str,
             order_by_consumed: ffi.order_by_consumed,
             estimated_cost: ffi.estimated_cost,
             estimated_rows: ffi.estimated_rows,
             constraint_usages,
-        }
+        })
     }
 }
 
@@ -300,6 +307,7 @@ impl IndexInfo {
 #[derive(Clone, Debug)]
 /// FFI representation of IndexInfo.
 pub struct ExtIndexInfo {
+    pub code: ResultCode,
     pub idx_num: i32,
     pub idx_str: *const u8,
     pub idx_str_len: usize,
@@ -308,6 +316,22 @@ pub struct ExtIndexInfo {
     pub estimated_rows: u32,
     pub constraint_usages_ptr: *mut ConstraintUsage,
     pub constraint_usage_len: usize,
+}
+
+impl ExtIndexInfo {
+    pub fn error(code: ResultCode) -> ExtIndexInfo {
+        ExtIndexInfo {
+            code,
+            idx_num: -1,
+            estimated_cost: 0.0,
+            estimated_rows: 0,
+            order_by_consumed: false,
+            constraint_usages_ptr: std::ptr::null_mut(),
+            constraint_usage_len: 0,
+            idx_str: std::ptr::null_mut(),
+            idx_str_len: 0,
+        }
+    }
 }
 
 /// Returned from xBestIndex to describe how the virtual table

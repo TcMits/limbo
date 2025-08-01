@@ -167,7 +167,10 @@ impl VTable for KVStoreTable {
         })
     }
 
-    fn best_index(constraints: &[ConstraintInfo], _order_by: &[OrderByInfo]) -> IndexInfo {
+    fn best_index(
+        constraints: &[ConstraintInfo],
+        _order_by: &[OrderByInfo],
+    ) -> Result<IndexInfo, ResultCode> {
         let mut constraint_usages = Vec::with_capacity(constraints.len());
         let mut idx_num = -1;
         let mut idx_str = None;
@@ -210,14 +213,14 @@ impl VTable for KVStoreTable {
             log::debug!("No usable constraints found, using full scan");
         }
 
-        IndexInfo {
+        Ok(IndexInfo {
             idx_num,
             idx_str,
             order_by_consumed,
             estimated_cost,
             estimated_rows,
             constraint_usages,
-        }
+        })
     }
 
     fn insert(&mut self, values: &[Value]) -> Result<i64, Self::Error> {

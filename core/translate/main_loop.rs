@@ -484,7 +484,7 @@ pub fn open_loop(
                                 .collect::<Vec<_>>();
                             // TODO: get proper order_by information to pass to the vtab.
                             // maybe encode more info on t_ctx? we need: [col_idx, is_descending]
-                            let index_info = vtab.best_index(&converted_constraints, &[]);
+                            let index_info = vtab.best_index(&converted_constraints, &[])?;
 
                             if index_info.constraint_usages.len() != converted_constraints.len() {
                                 return Err(LimboError::ExtensionError(format!(

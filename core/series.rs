@@ -57,7 +57,10 @@ impl VTable for GenerateSeriesTable {
         })
     }
 
-    fn best_index(constraints: &[ConstraintInfo], _order_by: &[OrderByInfo]) -> IndexInfo {
+    fn best_index(
+        constraints: &[ConstraintInfo],
+        _order_by: &[OrderByInfo],
+    ) -> Result<IndexInfo, ResultCode> {
         const START_COLUMN_INDEX: u32 = 1;
         const STEP_COLUMN_INDEX: u32 = 3;
 
@@ -106,12 +109,12 @@ impl VTable for GenerateSeriesTable {
             })
             .collect();
 
-        IndexInfo {
+        Ok(IndexInfo {
             idx_num,
             idx_str: Some(idx_num.to_string()),
             constraint_usages,
             ..Default::default()
-        }
+        })
     }
 }
 
@@ -675,7 +678,7 @@ mod tests {
             usable_constraint(3), // step
         ];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
 
         // Verify start gets argv_index 1, stop gets 2, step gets 3
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // start
@@ -691,7 +694,7 @@ mod tests {
             usable_constraint(2), // stop
         ];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
 
         // Verify start gets argv_index 1, stop gets 2
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // start
@@ -705,7 +708,7 @@ mod tests {
             usable_constraint(1), // start
         ];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
 
         // Verify start gets argv_index 1
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // start
@@ -721,7 +724,7 @@ mod tests {
             usable_constraint(1), // start
         ];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
 
         // Verify start still gets argv_index 1, stop gets 2, step gets 3 regardless of constraint order
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(3)); // step
@@ -738,7 +741,7 @@ mod tests {
             usable_constraint(3), // step
         ];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
 
         // Verify stop gets argv_index 1, step gets 2
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // stop
@@ -755,7 +758,7 @@ mod tests {
             plan_info: 0,
         }];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]);
+        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
 
         // Verify no argv_index is assigned
         assert_eq!(index_info.constraint_usages[0].argv_index, None);

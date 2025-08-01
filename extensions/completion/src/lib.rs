@@ -92,7 +92,10 @@ impl VTable for CompletionTable {
         Ok(CompletionCursor::default())
     }
 
-    fn best_index(constraints: &[ConstraintInfo], _order_by: &[OrderByInfo]) -> IndexInfo {
+    fn best_index(
+        constraints: &[ConstraintInfo],
+        _order_by: &[OrderByInfo],
+    ) -> Result<IndexInfo, ResultCode> {
         // The bits of `idx_num` are used to indicate which arguments are available to the filter method:
         // - Bit 0 set -> 'prefix' is available
         // - Bit 1 set -> 'wholeline' is available
@@ -138,12 +141,12 @@ impl VTable for CompletionTable {
             })
             .collect();
 
-        IndexInfo {
+        Ok(IndexInfo {
             idx_num,
             idx_str: Some(idx_num.to_string()),
             constraint_usages,
             ..Default::default()
-        }
+        })
     }
 }
 
@@ -282,7 +285,7 @@ mod tests {
             usable_constraint(2), // wholeline
         ];
 
-        let index_info = CompletionTable::best_index(&constraints, &[]);
+        let index_info = CompletionTable::best_index(&constraints, &[]).unwrap();
 
         // Verify prefix gets argv_index 1 and wholeline gets argv_index 2
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // prefix
@@ -296,7 +299,7 @@ mod tests {
             usable_constraint(2), // wholeline
         ];
 
-        let index_info = CompletionTable::best_index(&constraints, &[]);
+        let index_info = CompletionTable::best_index(&constraints, &[]).unwrap();
 
         // Verify wholeline gets argv_index 1 when prefix is missing
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // wholeline
@@ -309,7 +312,7 @@ mod tests {
             usable_constraint(1), // prefix
         ];
 
-        let index_info = CompletionTable::best_index(&constraints, &[]);
+        let index_info = CompletionTable::best_index(&constraints, &[]).unwrap();
 
         // Verify prefix gets argv_index 1
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // prefix
@@ -324,7 +327,7 @@ mod tests {
             usable_constraint(1), // prefix
         ];
 
-        let index_info = CompletionTable::best_index(&constraints, &[]);
+        let index_info = CompletionTable::best_index(&constraints, &[]).unwrap();
 
         // Verify prefix still gets argv_index 1 and wholeline gets argv_index 2 regardless of constraint order
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(2)); // wholeline
@@ -341,7 +344,7 @@ mod tests {
             plan_info: 0,
         }];
 
-        let index_info = CompletionTable::best_index(&constraints, &[]);
+        let index_info = CompletionTable::best_index(&constraints, &[]).unwrap();
 
         // Verify no argv_index is assigned
         assert_eq!(index_info.constraint_usages[0].argv_index, None);

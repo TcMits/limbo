@@ -128,7 +128,7 @@ impl VirtualTable {
         &self,
         constraints: &[ConstraintInfo],
         order_by: &[OrderByInfo],
-    ) -> IndexInfo {
+    ) -> Result<IndexInfo, ResultCode> {
         match &self.vtab_type {
             VirtualTableType::Pragma(table) => table.best_index(constraints),
             VirtualTableType::External(table) => table.best_index(constraints, order_by),
@@ -205,7 +205,11 @@ impl ExtVirtualTable {
     pub(crate) fn readonly(&self) -> bool {
         self.implementation.readonly
     }
-    fn best_index(&self, constraints: &[ConstraintInfo], order_by: &[OrderByInfo]) -> IndexInfo {
+    fn best_index(
+        &self,
+        constraints: &[ConstraintInfo],
+        order_by: &[OrderByInfo],
+    ) -> Result<IndexInfo, ResultCode> {
         unsafe {
             IndexInfo::from_ffi((self.implementation.best_idx)(
                 constraints.as_ptr(),

@@ -2,7 +2,7 @@ use crate::{Connection, LimboError, Statement, StepResult, Value};
 use bitflags::bitflags;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use turso_ext::{ConstraintInfo, ConstraintOp, ConstraintUsage, IndexInfo};
+use turso_ext::{ConstraintInfo, ConstraintOp, ConstraintUsage, IndexInfo, ResultCode};
 use turso_sqlite3_parser::ast::PragmaName;
 
 bitflags! {
@@ -170,7 +170,10 @@ impl PragmaVirtualTable {
         })
     }
 
-    pub(crate) fn best_index(&self, constraints: &[ConstraintInfo]) -> IndexInfo {
+    pub(crate) fn best_index(
+        &self,
+        constraints: &[ConstraintInfo],
+    ) -> Result<IndexInfo, ResultCode> {
         let mut arg0_idx = None;
         let mut arg1_idx = None;
 
@@ -211,10 +214,10 @@ impl PragmaVirtualTable {
             })
             .collect();
 
-        IndexInfo {
+        Ok(IndexInfo {
             constraint_usages,
             ..Default::default()
-        }
+        })
     }
 }
 
@@ -329,7 +332,7 @@ mod tests {
             usable_constraint(7), // schema (second hidden column)
         ];
 
-        let index_info = pragma_vtab.best_index(&constraints);
+        let index_info = pragma_vtab.best_index(&constraints).unwrap();
 
         // Verify arg gets argv_index 1, schema gets argv_index 2
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // arg
@@ -351,7 +354,7 @@ mod tests {
             usable_constraint(6), // arg (first hidden column)
         ];
 
-        let index_info = pragma_vtab.best_index(&constraints);
+        let index_info = pragma_vtab.best_index(&constraints).unwrap();
 
         // Verify arg gets argv_index 1
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // arg
@@ -371,7 +374,7 @@ mod tests {
             usable_constraint(1), // schema (first hidden column after visible columns)
         ];
 
-        let index_info = pragma_vtab.best_index(&constraints);
+        let index_info = pragma_vtab.best_index(&constraints).unwrap();
 
         // Verify schema gets argv_index 1
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(1)); // schema
@@ -393,7 +396,7 @@ mod tests {
             usable_constraint(6), // arg (first hidden column)
         ];
 
-        let index_info = pragma_vtab.best_index(&constraints);
+        let index_info = pragma_vtab.best_index(&constraints).unwrap();
 
         // Verify arg still gets argv_index 1, schema gets argv_index 2 regardless of constraint order
         assert_eq!(index_info.constraint_usages[0].argv_index, Some(2)); // schema
@@ -416,7 +419,7 @@ mod tests {
             usable_constraint(6), // arg (hidden)
         ];
 
-        let index_info = pragma_vtab.best_index(&constraints);
+        let index_info = pragma_vtab.best_index(&constraints).unwrap();
 
         // Verify visible column constraint is ignored, arg gets argv_index 1
         assert_eq!(index_info.constraint_usages[0].argv_index, None); // visible column
@@ -441,7 +444,7 @@ mod tests {
             plan_info: 0,
         }];
 
-        let index_info = pragma_vtab.best_index(&constraints);
+        let index_info = pragma_vtab.best_index(&constraints).unwrap();
 
         // Verify no argv_index is assigned
         assert_eq!(index_info.constraint_usages[0].argv_index, None);
