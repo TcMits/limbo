@@ -62,8 +62,8 @@ mod tests {
         let th1 = {
             let db = db.clone();
             std::thread::spawn(move || {
-                let conn = db.db.connect().unwrap();
-                let mvcc_store = db.db.mv_store.as_ref().unwrap().clone();
+                let conn = db.get_db().connect().unwrap();
+                let mvcc_store = db.get_db().mv_store.as_ref().unwrap().clone();
                 for _ in 0..iterations {
                     let tx = mvcc_store.begin_tx(conn.pager.borrow().clone());
                     let id = IDS.fetch_add(1, Ordering::SeqCst);
@@ -83,8 +83,8 @@ mod tests {
         };
         let th2 = {
             std::thread::spawn(move || {
-                let conn = db.db.connect().unwrap();
-                let mvcc_store = db.db.mv_store.as_ref().unwrap().clone();
+                let conn = db.get_db().connect().unwrap();
+                let mvcc_store = db.get_db().mv_store.as_ref().unwrap().clone();
                 for _ in 0..iterations {
                     let tx = mvcc_store.begin_tx(conn.pager.borrow().clone());
                     let id = IDS.fetch_add(1, Ordering::SeqCst);
@@ -116,8 +116,8 @@ mod tests {
         let work = |prefix: &'static str| {
             let db = db.clone();
             std::thread::spawn(move || {
-                let conn = db.db.connect().unwrap();
-                let mvcc_store = db.db.mv_store.as_ref().unwrap().clone();
+                let conn = db.get_db().connect().unwrap();
+                let mvcc_store = db.get_db().mv_store.as_ref().unwrap().clone();
                 let mut failed_upserts = 0;
                 for i in 0..iterations {
                     if i % 1000 == 0 {
