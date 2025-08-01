@@ -16,7 +16,7 @@ pub trait StateTransition {
     /// Returns `TransitionResult::Io` if the state machine needs to perform an IO operation.
     /// Returns `TransitionResult::Continue` if the state machine needs to continue.
     /// Returns `TransitionResult::Done` if the state machine is done.
-    fn transition<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult>;
+    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult>;
 
     /// Finalize the state machine.
     ///
@@ -46,12 +46,12 @@ impl<State: StateTransition> StateTransition for StateMachine<State> {
     type State = State;
     type Context = State::Context;
 
-    fn transition<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult> {
+    fn step<'a>(&mut self, context: &Self::Context) -> Result<TransitionResult> {
         loop {
             if self.is_finalized {
                 unreachable!("StateMachine::transition: state machine is finalized");
             }
-            match self.state.transition(context)? {
+            match self.state.step(context)? {
                 TransitionResult::Io => {
                     return Ok(TransitionResult::Io);
                 }

@@ -446,7 +446,7 @@ impl Program {
                     let mut state_machine =
                         mv_store.commit_tx(*tx_id, pager.clone(), &conn).unwrap();
                     state_machine
-                        .transition(&mv_store)
+                        .step(&mv_store)
                         .map_err(|e| LimboError::InternalError(e.to_string()))?;
                     assert!(state_machine.is_finalized());
                 }

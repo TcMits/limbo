@@ -309,7 +309,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
     type Context = MvStore<Clock>;
 
     #[tracing::instrument(fields(state = ?self.state), skip(self, mvcc_store))]
-    fn transition<'a>(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult> {
+    fn step<'a>(&mut self, mvcc_store: &Self::Context) -> Result<TransitionResult> {
         match self.state {
             CommitState::Initial => {
                 let end_ts = mvcc_store.get_timestamp();
@@ -490,7 +490,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
                 write_set_index,
             } => {
                 let write_row_state_machine = self.write_row_state_machine.as_mut().unwrap();
-                match write_row_state_machine.transition(&())? {
+                match write_row_state_machine.step(&())? {
                     TransitionResult::Io => return Ok(TransitionResult::Io),
                     TransitionResult::Continue => {
                         return Ok(TransitionResult::Continue);
@@ -593,7 +593,7 @@ impl StateTransition for WriteRowStateMachine {
     type Context = ();
 
     #[tracing::instrument(fields(state = ?self.state), skip(self, _context))]
-    fn transition<'a>(&mut self, _context: &Self::Context) -> Result<TransitionResult> {
+    fn step<'a>(&mut self, _context: &Self::Context) -> Result<TransitionResult> {
         use crate::storage::btree::BTreeCursor;
         use crate::types::{IOResult, SeekKey, SeekOp};
 
