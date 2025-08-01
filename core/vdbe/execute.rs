@@ -758,8 +758,8 @@ pub fn op_comparison(
         return Ok(InsnFunctionStepResult::Step);
     }
 
-    let mut lhs_temp_reg = state.registers[lhs].clone();
-    let mut rhs_temp_reg = state.registers[rhs].clone();
+    let mut lhs_temp_reg = None;
+    let mut rhs_temp_reg = None;
 
     let mut lhs_converted = false;
     let mut rhs_converted = false;
@@ -767,50 +767,62 @@ pub fn op_comparison(
     // Apply affinity conversions
     match affinity {
         Affinity::Numeric | Affinity::Integer => {
-            let lhs_is_text = matches!(lhs_temp_reg.get_owned_value(), Value::Text(_));
-            let rhs_is_text = matches!(rhs_temp_reg.get_owned_value(), Value::Text(_));
+            let lhs_is_text = matches!(state.registers[lhs].get_owned_value(), Value::Text(_));
+            let rhs_is_text = matches!(state.registers[rhs].get_owned_value(), Value::Text(_));
 
             if lhs_is_text || rhs_is_text {
                 if lhs_is_text {
-                    lhs_converted = apply_numeric_affinity(&mut lhs_temp_reg, false);
+                    lhs_temp_reg = Some(state.registers[lhs].clone());
+                    lhs_converted = apply_numeric_affinity(lhs_temp_reg.as_mut().unwrap(), false);
                 }
                 if rhs_is_text {
-                    rhs_converted = apply_numeric_affinity(&mut rhs_temp_reg, false);
+                    rhs_temp_reg = Some(state.registers[rhs].clone());
+                    rhs_converted = apply_numeric_affinity(rhs_temp_reg.as_mut().unwrap(), false);
                 }
             }
         }
 
         Affinity::Text => {
-            let lhs_is_text = matches!(lhs_temp_reg.get_owned_value(), Value::Text(_));
-            let rhs_is_text = matches!(rhs_temp_reg.get_owned_value(), Value::Text(_));
+            let lhs_is_text = matches!(state.registers[lhs].get_owned_value(), Value::Text(_));
+            let rhs_is_text = matches!(state.registers[rhs].get_owned_value(), Value::Text(_));
 
             if lhs_is_text || rhs_is_text {
-                if is_numeric_value(&lhs_temp_reg) {
-                    lhs_converted = stringify_register(&mut lhs_temp_reg);
+                if is_numeric_value(&state.registers[lhs]) {
+                    lhs_temp_reg = Some(state.registers[lhs].clone());
+                    lhs_converted = stringify_register(lhs_temp_reg.as_mut().unwrap());
                 }
 
-                if is_numeric_value(&rhs_temp_reg) {
-                    rhs_converted = stringify_register(&mut rhs_temp_reg);
+                if is_numeric_value(&state.registers[rhs]) {
+                    rhs_temp_reg = Some(state.registers[rhs].clone());
+                    rhs_converted = stringify_register(rhs_temp_reg.as_mut().unwrap());
                 }
             }
         }
 
         Affinity::Real => {
-            if matches!(lhs_temp_reg.get_owned_value(), Value::Text(_)) {
-                lhs_converted = apply_numeric_affinity(&mut lhs_temp_reg, false);
+            if matches!(state.registers[lhs].get_owned_value(), Value::Text(_)) {
+                lhs_temp_reg = Some(state.registers[lhs].clone());
+                lhs_converted = apply_numeric_affinity(lhs_temp_reg.as_mut().unwrap(), false);
             }
 
-            if matches!(rhs_temp_reg.get_owned_value(), Value::Text(_)) {
-                rhs_converted = apply_numeric_affinity(&mut rhs_temp_reg, false);
+            if matches!(state.registers[rhs].get_owned_value(), Value::Text(_)) {
+                rhs_temp_reg = Some(state.registers[rhs].clone());
+                rhs_converted = apply_numeric_affinity(rhs_temp_reg.as_mut().unwrap(), false);
             }
 
-            if let Value::Integer(i) = lhs_temp_reg.get_owned_value() {
-                lhs_temp_reg = Register::Value(Value::Float(*i as f64));
+            if let Value::Integer(i) =
+                (lhs_temp_reg.as_ref().unwrap_or(&state.registers[lhs])).get_owned_value()
+            {
+                lhs_temp_reg = Some(Register::Value(Value::Float(*i as f64)));
                 lhs_converted = true;
             }
 
-            if let Value::Integer(i) = rhs_temp_reg.get_owned_value() {
-                rhs_temp_reg = Register::Value(Value::Float(*i as f64));
+            if let Value::Integer(i) = rhs_temp_reg
+                .as_ref()
+                .unwrap_or(&state.registers[rhs])
+                .get_owned_value()
+            {
+                rhs_temp_reg = Some(Register::Value(Value::Float(*i as f64)));
                 rhs_converted = true;
             }
         }
@@ -819,17 +831,23 @@ pub fn op_comparison(
     }
 
     let should_jump = op.compare(
-        lhs_temp_reg.get_owned_value(),
-        rhs_temp_reg.get_owned_value(),
+        lhs_temp_reg
+            .as_ref()
+            .unwrap_or(&state.registers[lhs])
+            .get_owned_value(),
+        rhs_temp_reg
+            .as_ref()
+            .unwrap_or(&state.registers[rhs])
+            .get_owned_value(),
         &collation,
     );
 
     if lhs_converted {
-        state.registers[lhs] = lhs_temp_reg;
+        state.registers[lhs] = lhs_temp_reg.unwrap();
     }
 
     if rhs_converted {
-        state.registers[rhs] = rhs_temp_reg;
+        state.registers[rhs] = rhs_temp_reg.unwrap();
     }
 
     if should_jump {
