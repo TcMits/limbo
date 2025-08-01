@@ -1,4 +1,4 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use rand::Rng;
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
 use std::collections::HashMap;
@@ -550,7 +550,7 @@ fn generate_operation(
             shadow_db.get_visible_rows(None) // No transaction
         }
     };
-    match rng.gen_range(0..100) {
+    match rng.random_range(0..100) {
         0..=9 => {
             if !in_transaction {
                 (Operation::Begin, get_visible_rows(false))
@@ -576,7 +576,7 @@ fn generate_operation(
             }
         }
         20..=22 => {
-            let mode = match rng.gen_range(0..3) {
+            let mode = match rng.random_range(0..3) {
                 0 => CheckpointMode::Passive,
                 1 => CheckpointMode::Restart,
                 2 => CheckpointMode::Truncate,
@@ -593,28 +593,28 @@ fn generate_operation(
 }
 
 fn generate_data_operation(rng: &mut ChaCha8Rng, visible_rows: &[DbRow]) -> Operation {
-    match rng.gen_range(0..4) {
+    match rng.random_range(0..4) {
         0 => {
             // Insert - generate a new ID that doesn't exist
             let id = if visible_rows.is_empty() {
-                rng.gen_range(1..1000)
+                rng.random_range(1..1000)
             } else {
                 let max_id = visible_rows.iter().map(|r| r.id).max().unwrap();
-                rng.gen_range(max_id + 1..max_id + 100)
+                rng.random_range(max_id + 1..max_id + 100)
             };
-            let text = format!("text_{}", rng.gen_range(1..1000));
+            let text = format!("text_{}", rng.random_range(1..1000));
             Operation::Insert { id, text }
         }
         1 => {
             // Update - only if there are visible rows
             if visible_rows.is_empty() {
                 // No rows to update, try insert instead
-                let id = rng.gen_range(1..1000);
-                let text = format!("text_{}", rng.gen_range(1..1000));
+                let id = rng.random_range(1..1000);
+                let text = format!("text_{}", rng.random_range(1..1000));
                 Operation::Insert { id, text }
             } else {
                 let id = visible_rows.choose(rng).unwrap().id;
-                let text = format!("updated_{}", rng.gen_range(1..1000));
+                let text = format!("updated_{}", rng.random_range(1..1000));
                 Operation::Update { id, text }
             }
         }
@@ -622,8 +622,8 @@ fn generate_data_operation(rng: &mut ChaCha8Rng, visible_rows: &[DbRow]) -> Oper
             // Delete - only if there are visible rows
             if visible_rows.is_empty() {
                 // No rows to delete, try insert instead
-                let id = rng.gen_range(1..1000);
-                let text = format!("text_{}", rng.gen_range(1..1000));
+                let id = rng.random_range(1..1000);
+                let text = format!("text_{}", rng.random_range(1..1000));
                 Operation::Insert { id, text }
             } else {
                 let id = visible_rows.choose(rng).unwrap().id;
