@@ -1082,6 +1082,7 @@ impl Wal for WalFile {
         self.checkpoint_inner(pager, _write_counter, mode)
             .inspect_err(|_| {
                 let _ = self.checkpoint_guard.take();
+                self.ongoing_checkpoint.state = CheckpointState::Start;
             })
     }
 
