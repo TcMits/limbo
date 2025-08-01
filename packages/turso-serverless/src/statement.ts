@@ -45,7 +45,7 @@ export class Statement {
    * Execute the statement and return the first row.
    * 
    * @param args - Optional array of parameter values or object with named parameters
-   * @returns Promise resolving to the first row or null if no results
+   * @returns Promise resolving to the first row or undefined if no results
    * 
    * @example
    * ```typescript
@@ -58,7 +58,7 @@ export class Statement {
    */
   async get(args: any[] | Record<string, any> = []): Promise<any> {
     const result = await this.session.execute(this.sql, args);
-    return result.rows[0] || null;
+    return result.rows[0] || undefined;
   }
 
   /**
