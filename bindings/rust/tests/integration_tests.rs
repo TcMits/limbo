@@ -1,5 +1,5 @@
 use tokio::fs;
-use turso::{Builder, Value};
+use turso::{Builder, Error, Value};
 
 #[tokio::test]
 async fn test_rows_next() {
@@ -210,4 +210,90 @@ pub async fn test_execute_batch() {
     if let Some(row) = rows.next().await.unwrap() {
         assert_eq!(row.get_value(0).unwrap(), Value::Integer(2));
     }
+}
+
+#[tokio::test]
+async fn test_query_row_returns_first_row() {
+    let db = Builder::new_local(":memory:").build().await.unwrap();
+    let conn = db.connect().unwrap();
+
+    conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", ())
+        .await
+        .unwrap();
+
+    conn.execute("INSERT INTO users VALUES (1, 'Frodo')", ())
+        .await
+        .unwrap();
+
+    let row = conn
+        .prepare("SELECT id FROM users WHERE name = ?")
+        .await
+        .unwrap()
+        .query_row(&["Frodo"])
+        .await
+        .unwrap();
+
+    let id: i64 = row.get(0).unwrap();
+    assert_eq!(id, 1);
+}
+
+#[tokio::test]
+async fn test_query_row_returns_no_rows_error() {
+    let db = Builder::new_local(":memory:").build().await.unwrap();
+    let conn = db.connect().unwrap();
+
+    conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", ())
+        .await
+        .unwrap();
+
+    let result = conn
+        .prepare("SELECT id FROM users WHERE name = ?")
+        .await
+        .unwrap()
+        .query_row(&["Ghost"])
+        .await;
+
+    assert!(matches!(result, Err(Error::QueryReturnedNoRows)));
+}
+
+#[tokio::test]
+async fn test_row_get_column_typed() {
+    let db = Builder::new_local(":memory:").build().await.unwrap();
+    let conn = db.connect().unwrap();
+
+    conn.execute("CREATE TABLE v (n INTEGER, label TEXT)", ())
+        .await
+        .unwrap();
+
+    conn.execute("INSERT INTO v VALUES (42, 'answer')", ())
+        .await
+        .unwrap();
+
+    let mut rows = conn.query("SELECT * FROM v", ()).await.unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+
+    let n: i64 = row.get(0).unwrap();
+    let label: String = row.get(1).unwrap();
+
+    assert_eq!(n, 42);
+    assert_eq!(label, "answer");
+}
+
+#[tokio::test]
+async fn test_row_get_conversion_error() {
+    let db = Builder::new_local(":memory:").build().await.unwrap();
+    let conn = db.connect().unwrap();
+
+    conn.execute("CREATE TABLE t (x TEXT)", ()).await.unwrap();
+
+    conn.execute("INSERT INTO t VALUES (NULL)", ())
+        .await
+        .unwrap();
+
+    let mut rows = conn.query("SELECT x FROM t", ()).await.unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+
+    // Attempt to convert TEXT into integer (should fail)
+    let result: Result<u32, _> = row.get(0);
+    assert!(matches!(result, Err(Error::ConversionFailure(_))));
 }
