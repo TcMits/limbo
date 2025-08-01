@@ -4289,22 +4289,15 @@ impl BTreeCursor {
         if self.has_record.get() {
             let page = self.stack.top();
             return_if_locked_maybe_load!(self.pager, page);
-            // load record
-            let _ = return_if_io!(self.record());
             let page_type = page.get().get_contents().page_type();
             let page = page.get();
             let contents = page.get_contents();
             let cell_idx = self.stack.current_cell_index();
-            let cell = contents.cell_get(cell_idx as usize, self.usable_space())?;
             if page_type.is_table() {
-                let BTreeCell::TableLeafCell(TableLeafCell { rowid, .. }) = cell else {
-                    unreachable!(
-                        "BTreeCursor::rowid(): unexpected page_type: {:?}",
-                        page_type
-                    );
-                };
+                let rowid = contents.cell_table_leaf_read_rowid(cell_idx as usize)?;
                 Ok(IOResult::Done(Some(rowid)))
             } else {
+                let _ = return_if_io!(self.record());
                 Ok(IOResult::Done(self.get_index_rowid_from_record()))
             }
         } else {
