@@ -54,6 +54,54 @@ fn bench_open(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn bench_alter(criterion: &mut Criterion) {
+    // https://github.com/tursodatabase/turso/issues/174
+    // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
+    let enable_rusqlite = std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_err();
+
+    if !std::fs::exists("../testing/schema_5k.db").unwrap() {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let io = Arc::new(PlatformIO::new().unwrap());
+        let db = Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
+        let conn = db.connect().unwrap();
+
+        for i in 0..5000 {
+            conn.execute(
+                format!("CREATE TABLE table_{i} ( id INTEGER PRIMARY KEY, name TEXT, value INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP )")
+            ).unwrap();
+        }
+    }
+
+    let mut group = criterion.benchmark_group("`ALTER TABLE _ RENAME TO _`");
+
+    let stmts = ["CREATE TABLE x(a)", "ALTER TABLE x RENAME TO y", "DROP TABLE y"];
+
+    group.bench_function(BenchmarkId::new("limbo_rename_table", ""), |b| {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let io = Arc::new(PlatformIO::new().unwrap());
+        let db = Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
+        let conn = db.connect().unwrap();
+        b.iter(|| {
+            for stmt in stmts {
+                conn.execute(stmt).unwrap();
+            }
+        });
+    });
+
+    if enable_rusqlite {
+        group.bench_function(BenchmarkId::new("sqlite_rename_table", ""), |b| {
+            let conn = rusqlite::Connection::open("../testing/schema_5k.db").unwrap();
+            b.iter(|| {
+                for stmt in stmts {
+                    conn.execute(stmt, ()).unwrap();
+                }
+            });
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_prepare_query(criterion: &mut Criterion) {
     // https://github.com/tursodatabase/turso/issues/174
     // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
@@ -376,6 +424,6 @@ fn bench_insert_rows(criterion: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = bench_open, bench_prepare_query, bench_execute_select_1, bench_execute_select_rows, bench_execute_select_count, bench_insert_rows
+    targets = bench_open, bench_alter, bench_prepare_query, bench_execute_select_1, bench_execute_select_rows, bench_execute_select_count, bench_insert_rows
 }
 criterion_main!(benches);

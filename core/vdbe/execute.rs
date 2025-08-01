@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 use crate::function::AlterTableFunc;
 use crate::numeric::{NullableInteger, Numeric};
+use crate::schema::Table;
 use crate::storage::btree::{integrity_check, IntegrityCheckError, IntegrityCheckState};
 use crate::storage::database::DatabaseFile;
 use crate::storage::page_cache::DumbLruPageCache;
@@ -6774,6 +6775,53 @@ pub fn op_cast(
     };
 
     state.registers[*reg] = Register::Value(result);
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
+pub fn op_rename_table(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::RenameTable { from, to } = insn else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    let conn = program.connection.clone();
+    // set auto commit to false in order for parse schema to not commit changes as transaction state is stored in connection,
+    // and we use the same connection for nested query.
+    let previous_auto_commit = conn.auto_commit.get();
+    conn.auto_commit.set(false);
+
+    let stmt = conn.prepare("SELECT * FROM sqlite_schema")?;
+
+    conn.with_schema_mut(|schema| {
+        schema.indexes.remove(from).map(|mut indexes| {
+            indexes.iter_mut().for_each(|index| {
+                let index = Arc::make_mut(index);
+                index.table_name = to.to_owned();
+            });
+
+            schema.indexes.insert(to.to_owned(), indexes);
+        });
+
+        let mut table_ref = schema
+            .tables
+            .remove(from)
+            .expect("table being renamed should be in schema");
+        let table = Arc::make_mut(&mut table_ref);
+
+        let Table::BTree(btree) = table else {
+            panic!("only btree tables can be renamed");
+        };
+
+        schema.tables.insert(to.to_owned(), table_ref);
+    });
+
+    conn.auto_commit.set(previous_auto_commit);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
