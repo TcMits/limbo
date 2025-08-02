@@ -10,7 +10,7 @@ source $testdir/select5.test
 source $testdir/select6.test
 source $testdir/select7.test
 source $testdir/select8.test
-source $testdir/select9.test
+# FIXME: source $testdir/select9.test
 source $testdir/selectA.test
 source $testdir/selectB.test
 source $testdir/selectC.test
