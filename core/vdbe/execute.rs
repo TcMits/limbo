@@ -3,6 +3,7 @@ use crate::function::AlterTableFunc;
 use crate::numeric::{NullableInteger, Numeric};
 use crate::schema::Table;
 use crate::storage::btree::{integrity_check, IntegrityCheckError, IntegrityCheckState};
+use crate::storage::buffer_pool::BUFFER_POOL;
 use crate::storage::database::DatabaseFile;
 use crate::storage::page_cache::DumbLruPageCache;
 use crate::storage::pager::{AtomicDbState, CreateBTreeFlags, DbState};
@@ -62,9 +63,7 @@ use crate::{
     vector::{vector32, vector64, vector_distance_cos, vector_distance_l2, vector_extract},
 };
 
-use crate::{
-    info, turso_assert, BufferPool, OpenFlags, RefValue, Row, StepResult, TransactionState,
-};
+use crate::{info, turso_assert, OpenFlags, RefValue, Row, StepResult, TransactionState};
 
 use super::{
     insn::{Cookie, RegisterOrLiteral},
@@ -6460,7 +6459,7 @@ pub fn op_open_ephemeral(
                 .block(|| pager.with_header(|header| header.page_size))?
                 .get();
 
-            let buffer_pool = Arc::new(BufferPool::new(Some(page_size as usize)));
+            let buffer_pool = BUFFER_POOL.get().expect("Buffer pool not initialized");
             let page_cache = Arc::new(RwLock::new(DumbLruPageCache::default()));
 
             let pager = Rc::new(Pager::new(
@@ -6478,7 +6477,6 @@ pub fn op_open_ephemeral(
                 .block(|| pager.with_header(|header| header.page_size))
                 .unwrap_or_default()
                 .get() as usize;
-            buffer_pool.set_page_size(page_size);
 
             state.op_open_ephemeral_state = OpOpenEphemeralState::StartingTxn { pager };
         }
