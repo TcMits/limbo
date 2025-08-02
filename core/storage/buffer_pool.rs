@@ -137,6 +137,7 @@ impl Default for BufferPool {
 
 impl BufferPool {
     pub const DEFAULT_ARENA_SIZE: usize = 4 * 1024 * 1024; // 4MB arena
+    pub const TEST_AREA_SIZE: usize = 512 * 1024; // 512KB arena for testing
     pub const DEFAULT_PAGE_SIZE: usize = 4096; // 4KB default page size
     const MAX_ARENA_SIZE: usize = 32 * 1024 * 1024; // 32MB max arena
 
@@ -193,9 +194,6 @@ impl BufferPool {
     pub fn finalize_page_size(&self, page_size: usize) -> crate::Result<Arc<BufferPool>> {
         let pool = BUFFER_POOL.get().expect("BufferPool must be initialized");
         let inner = pool.inner_mut();
-        if inner.arena.is_some() {
-            return Ok(pool.clone());
-        }
         tracing::trace!("finalize page size called with size {page_size}");
         if page_size != BufferPool::DEFAULT_PAGE_SIZE {
             // so far we have handed out some temporary buffers, since the page size is not
@@ -203,6 +201,9 @@ impl BufferPool {
             TEMP_BUFFER_CACHE.with(|cache| {
                 cache.borrow_mut().reinit_cache(page_size);
             });
+        }
+        if inner.arena.is_some() {
+            return Ok(pool.clone());
         }
         inner.db_page_size.store(page_size, Ordering::Relaxed);
         inner.init_arena()?;
@@ -253,7 +254,7 @@ impl PoolInner {
         ) {
             Ok(arena) => {
                 tracing::trace!(
-                    "Growing buffer pool: added arena {} with size {} MB",
+                    "added arena {} with size {} MB",
                     arena.id,
                     arena_size / (1024 * 1024)
                 );

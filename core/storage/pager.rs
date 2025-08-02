@@ -1766,6 +1766,8 @@ impl Pager {
                 if let Some(size) = self.page_size.get() {
                     default_header.page_size = PageSize::new(size).expect("page size");
                 }
+                self.buffer_pool
+                    .finalize_page_size(default_header.page_size.get() as usize)?;
                 let page = allocate_new_page(1, &self.buffer_pool, 0);
 
                 let contents = page.get_contents();
@@ -2431,10 +2433,9 @@ mod ptrmap_tests {
         ));
 
         //  Construct interfaces for the pager
-        let buffer_pool = Arc::new(BufferPool::new(Some(page_size as usize)));
-        let page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(
-            (initial_db_pages + 10) as usize,
-        )));
+        let sz = initial_db_pages + 10;
+        let buffer_pool = BufferPool::begin_init(&io, (sz * page_size) as usize);
+        let page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(sz as usize)));
 
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
