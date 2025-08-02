@@ -3,7 +3,7 @@ use std::sync::Arc;
 use turso_sqlite3_parser::ast::SortOrder;
 
 use crate::{
-    schema::Index,
+    schema::{Index, Table},
     translate::plan::{IterationDirection, JoinOrderMember, JoinedTable},
     Result,
 };
@@ -20,30 +20,26 @@ pub struct AccessMethod<'a> {
     /// The estimated number of page fetches.
     /// We are ignoring CPU cost for now.
     pub cost: Cost,
-    /// The direction of iteration for the access method.
-    /// Typically this is backwards only if it helps satisfy an [OrderTarget].
-    pub iter_dir: IterationDirection,
-    /// The index that is being used, if any. For rowid based searches (and full table scans), this is None.
-    pub index: Option<Arc<Index>>,
-    /// The constraint references that are being used, if any.
-    /// An empty list of constraint refs means a scan (full table or index);
-    /// a non-empty list means a search.
-    pub constraint_refs: &'a [ConstraintRef],
+    /// Table-type specific access method details.
+    pub params: AccessMethodParams<'a>,
 }
 
-impl AccessMethod<'_> {
-    pub fn is_scan(&self) -> bool {
-        self.constraint_refs.is_empty()
-    }
-
-    pub fn new_table_scan(input_cardinality: f64, iter_dir: IterationDirection) -> Self {
-        Self {
-            cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
-            iter_dir,
-            index: None,
-            constraint_refs: &[],
-        }
-    }
+/// Table‑specific details of how an [`AccessMethod`] operates.
+#[derive(Debug, Clone)]
+pub enum AccessMethodParams<'a> {
+    BTreeTable {
+        /// The direction of iteration for the access method.
+        /// Typically this is backwards only if it helps satisfy an [OrderTarget].
+        iter_dir: IterationDirection,
+        /// The index that is being used, if any. For rowid based searches (and full table scans), this is None.
+        index: Option<Arc<Index>>,
+        /// The constraint references that are being used, if any.
+        /// An empty list of constraint refs means a scan (full table or index);
+        /// a non-empty list means a search.
+        constraint_refs: &'a [ConstraintRef],
+    },
+    VirtualTable,
+    Subquery,
 }
 
 /// Return the best [AccessMethod] for a given join order.
@@ -54,9 +50,39 @@ pub fn find_best_access_method_for_join_order<'a>(
     maybe_order_target: Option<&OrderTarget>,
     input_cardinality: f64,
 ) -> Result<AccessMethod<'a>> {
+    match &rhs_table.table {
+        Table::BTree(_) => find_best_access_method_for_btree(
+            rhs_table,
+            rhs_constraints,
+            join_order,
+            maybe_order_target,
+            input_cardinality,
+        ),
+        Table::Virtual(_) => Ok(AccessMethod {
+            cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
+            params: AccessMethodParams::VirtualTable,
+        }),
+        Table::FromClauseSubquery(_) => Ok(AccessMethod {
+            cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
+            params: AccessMethodParams::Subquery,
+        }),
+    }
+}
+
+fn find_best_access_method_for_btree<'a>(
+    rhs_table: &JoinedTable,
+    rhs_constraints: &'a TableConstraints,
+    join_order: &[JoinOrderMember],
+    maybe_order_target: Option<&OrderTarget>,
+    input_cardinality: f64,
+) -> Result<AccessMethod<'a>> {
     let table_no = join_order.last().unwrap().table_id;
-    let mut best_access_method =
-        AccessMethod::new_table_scan(input_cardinality, IterationDirection::Forwards);
+    let mut best_cost = estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality);
+    let mut best_params = AccessMethodParams::BTreeTable {
+        iter_dir: IterationDirection::Forwards,
+        index: None,
+        constraint_refs: &[],
+    };
     let rowid_column_idx = rhs_table.columns().iter().position(|c| c.is_rowid_alias);
 
     // Estimate cost for each candidate index (including the rowid index) and replace best_access_method if the cost is lower.
@@ -134,15 +160,18 @@ pub fn find_best_access_method_for_join_order<'a>(
         } else {
             (IterationDirection::Forwards, Cost(0.0))
         };
-        if cost < best_access_method.cost + order_satisfiability_bonus {
-            best_access_method = AccessMethod {
-                cost,
-                index: candidate.index.clone(),
+        if cost < best_cost + order_satisfiability_bonus {
+            best_cost = cost;
+            best_params = AccessMethodParams::BTreeTable {
                 iter_dir,
+                index: candidate.index.clone(),
                 constraint_refs: usable_constraint_refs,
             };
         }
     }
 
-    Ok(best_access_method)
+    Ok(AccessMethod {
+        cost: best_cost,
+        params: best_params,
+    })
 }

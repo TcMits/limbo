@@ -12,7 +12,10 @@ use turso_sqlite3_parser::ast::{self, fmt::ToTokens as _, Expr, SortOrder};
 use crate::{
     parameters::PARAM_PREFIX,
     schema::{Index, IndexColumn, Schema, Table},
-    translate::{expr::is_double_quoted_identifier, expr::walk_expr_mut, plan::TerminationKey},
+    translate::{
+        expr::is_double_quoted_identifier, expr::walk_expr_mut,
+        optimizer::access_method::AccessMethodParams, plan::TerminationKey,
+    },
     types::SeekOp,
     Result,
 };
@@ -240,119 +243,128 @@ fn optimize_table_access(
     for (i, join_order_member) in best_join_order.iter().enumerate() {
         let table_idx = join_order_member.original_idx;
         let access_method = &access_methods_arena.borrow()[best_access_methods[i]];
-        if access_method.is_scan() {
-            let try_to_build_ephemeral_index = if schema.indexes_enabled() {
-                let is_leftmost_table = i == 0;
-                let uses_index = access_method.index.is_some();
-                let source_table_does_not_support_search = matches!(
-                    &joined_tables[table_idx].table,
-                    Table::FromClauseSubquery(_) | Table::Virtual(_)
-                );
-                !is_leftmost_table && !uses_index && !source_table_does_not_support_search
-            } else {
-                false
-            };
 
-            if !try_to_build_ephemeral_index {
+        match &access_method.params {
+            AccessMethodParams::BTreeTable {
+                iter_dir,
+                index,
+                constraint_refs,
+            } => {
+                if constraint_refs.is_empty() {
+                    let try_to_build_ephemeral_index = if schema.indexes_enabled() {
+                        let is_leftmost_table = i == 0;
+                        let uses_index = index.is_some();
+                        !is_leftmost_table && !uses_index
+                    } else {
+                        false
+                    };
+
+                    if !try_to_build_ephemeral_index {
+                        joined_tables[table_idx].op = Operation::Scan {
+                            iter_dir: *iter_dir,
+                            index: index.clone(),
+                        };
+                        continue;
+                    }
+                    // This branch means we have a full table scan for a non-outermost table.
+                    // Try to construct an ephemeral index since it's going to be better than a scan.
+                    let table_constraints = constraints_per_table
+                        .iter()
+                        .find(|c| c.table_id == join_order_member.table_id);
+                    let Some(table_constraints) = table_constraints else {
+                        joined_tables[table_idx].op = Operation::Scan {
+                            iter_dir: *iter_dir,
+                            index: index.clone(),
+                        };
+                        continue;
+                    };
+                    let temp_constraint_refs = (0..table_constraints.constraints.len())
+                        .map(|i| ConstraintRef {
+                            constraint_vec_pos: i,
+                            index_col_pos: table_constraints.constraints[i].table_col_pos,
+                            sort_order: SortOrder::Asc,
+                        })
+                        .collect::<Vec<_>>();
+                    let usable_constraint_refs = usable_constraints_for_join_order(
+                        &table_constraints.constraints,
+                        &temp_constraint_refs,
+                        &best_join_order[..=i],
+                    );
+                    if usable_constraint_refs.is_empty() {
+                        joined_tables[table_idx].op = Operation::Scan {
+                            iter_dir: *iter_dir,
+                            index: index.clone(),
+                        };
+                        continue;
+                    }
+                    let ephemeral_index = ephemeral_index_build(
+                        &joined_tables[table_idx],
+                        &table_constraints.constraints,
+                        usable_constraint_refs,
+                    );
+                    let ephemeral_index = Arc::new(ephemeral_index);
+                    joined_tables[table_idx].op = Operation::Search(Search::Seek {
+                        index: Some(ephemeral_index),
+                        seek_def: build_seek_def_from_constraints(
+                            &table_constraints.constraints,
+                            usable_constraint_refs,
+                            *iter_dir,
+                            where_clause,
+                        )?,
+                    });
+                } else {
+                    for cref in constraint_refs.iter() {
+                        let constraint =
+                            &constraints_per_table[table_idx].constraints[cref.constraint_vec_pos];
+                        assert!(
+                            !where_clause[constraint.where_clause_pos.0].consumed.get(),
+                            "trying to consume a where clause term twice: {:?}",
+                            where_clause[constraint.where_clause_pos.0]
+                        );
+                        where_clause[constraint.where_clause_pos.0]
+                            .consumed
+                            .set(true);
+                    }
+                    if let Some(index) = &index {
+                        joined_tables[table_idx].op = Operation::Search(Search::Seek {
+                            index: Some(index.clone()),
+                            seek_def: build_seek_def_from_constraints(
+                                &constraints_per_table[table_idx].constraints,
+                                constraint_refs,
+                                *iter_dir,
+                                where_clause,
+                            )?,
+                        });
+                        continue;
+                    }
+                    assert!(
+                        constraint_refs.len() == 1,
+                        "expected exactly one constraint for rowid seek, got {constraint_refs:?}"
+                    );
+                    let constraint = &constraints_per_table[table_idx].constraints
+                        [constraint_refs[0].constraint_vec_pos];
+                    joined_tables[table_idx].op = match constraint.operator {
+                        ast::Operator::Equals => Operation::Search(Search::RowidEq {
+                            cmp_expr: constraint.get_constraining_expr(where_clause),
+                        }),
+                        _ => Operation::Search(Search::Seek {
+                            index: None,
+                            seek_def: build_seek_def_from_constraints(
+                                &constraints_per_table[table_idx].constraints,
+                                constraint_refs,
+                                *iter_dir,
+                                where_clause,
+                            )?,
+                        }),
+                    };
+                }
+            }
+            AccessMethodParams::VirtualTable | AccessMethodParams::Subquery => {
                 joined_tables[table_idx].op = Operation::Scan {
-                    iter_dir: access_method.iter_dir,
-                    index: access_method.index.clone(),
-                };
-                continue;
-            }
-            // This branch means we have a full table scan for a non-outermost table.
-            // Try to construct an ephemeral index since it's going to be better than a scan.
-            let table_constraints = constraints_per_table
-                .iter()
-                .find(|c| c.table_id == join_order_member.table_id);
-            let Some(table_constraints) = table_constraints else {
-                joined_tables[table_idx].op = Operation::Scan {
-                    iter_dir: access_method.iter_dir,
-                    index: access_method.index.clone(),
-                };
-                continue;
-            };
-            let temp_constraint_refs = (0..table_constraints.constraints.len())
-                .map(|i| ConstraintRef {
-                    constraint_vec_pos: i,
-                    index_col_pos: table_constraints.constraints[i].table_col_pos,
-                    sort_order: SortOrder::Asc,
-                })
-                .collect::<Vec<_>>();
-            let usable_constraint_refs = usable_constraints_for_join_order(
-                &table_constraints.constraints,
-                &temp_constraint_refs,
-                &best_join_order[..=i],
-            );
-            if usable_constraint_refs.is_empty() {
-                joined_tables[table_idx].op = Operation::Scan {
-                    iter_dir: access_method.iter_dir,
-                    index: access_method.index.clone(),
-                };
-                continue;
-            }
-            let ephemeral_index = ephemeral_index_build(
-                &joined_tables[table_idx],
-                &table_constraints.constraints,
-                usable_constraint_refs,
-            );
-            let ephemeral_index = Arc::new(ephemeral_index);
-            joined_tables[table_idx].op = Operation::Search(Search::Seek {
-                index: Some(ephemeral_index),
-                seek_def: build_seek_def_from_constraints(
-                    &table_constraints.constraints,
-                    usable_constraint_refs,
-                    access_method.iter_dir,
-                    where_clause,
-                )?,
-            });
-        } else {
-            let constraint_refs = access_method.constraint_refs;
-            assert!(!constraint_refs.is_empty());
-            for cref in constraint_refs.iter() {
-                let constraint =
-                    &constraints_per_table[table_idx].constraints[cref.constraint_vec_pos];
-                assert!(
-                    !where_clause[constraint.where_clause_pos.0].consumed.get(),
-                    "trying to consume a where clause term twice: {:?}",
-                    where_clause[constraint.where_clause_pos.0]
-                );
-                where_clause[constraint.where_clause_pos.0]
-                    .consumed
-                    .set(true);
-            }
-            if let Some(index) = &access_method.index {
-                joined_tables[table_idx].op = Operation::Search(Search::Seek {
-                    index: Some(index.clone()),
-                    seek_def: build_seek_def_from_constraints(
-                        &constraints_per_table[table_idx].constraints,
-                        constraint_refs,
-                        access_method.iter_dir,
-                        where_clause,
-                    )?,
-                });
-                continue;
-            }
-            assert!(
-                constraint_refs.len() == 1,
-                "expected exactly one constraint for rowid seek, got {constraint_refs:?}"
-            );
-            let constraint = &constraints_per_table[table_idx].constraints
-                [constraint_refs[0].constraint_vec_pos];
-            joined_tables[table_idx].op = match constraint.operator {
-                ast::Operator::Equals => Operation::Search(Search::RowidEq {
-                    cmp_expr: constraint.get_constraining_expr(where_clause),
-                }),
-                _ => Operation::Search(Search::Seek {
+                    iter_dir: IterationDirection::Forwards,
                     index: None,
-                    seek_def: build_seek_def_from_constraints(
-                        &constraints_per_table[table_idx].constraints,
-                        constraint_refs,
-                        access_method.iter_dir,
-                        where_clause,
-                    )?,
-                }),
-            };
+                };
+            }
         }
     }
 

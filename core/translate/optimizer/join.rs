@@ -498,7 +498,10 @@ mod tests {
     use crate::{
         schema::{BTreeTable, Column, Index, IndexColumn, Table, Type},
         translate::{
-            optimizer::constraints::{constraints_from_where_clause, BinaryExprSide},
+            optimizer::access_method::AccessMethodParams,
+            optimizer::constraints::{
+                constraints_from_where_clause, BinaryExprSide, ConstraintRef,
+            },
             plan::{
                 ColumnUsedMask, IterationDirection, JoinInfo, Operation, TableReferences, WhereTerm,
             },
@@ -571,8 +574,9 @@ mod tests {
         .unwrap();
         // Should just be a table scan access method
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
+        let (iter_dir, _, constraint_refs) = _as_btree(access_method);
+        assert!(constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
     }
 
     #[test]
@@ -612,11 +616,12 @@ mod tests {
         let BestJoinOrderResult { best_plan, .. } = result.unwrap();
         assert_eq!(best_plan.table_numbers().collect::<Vec<_>>(), vec![0]);
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.constraint_refs.len() == 1);
+        let (iter_dir, _, constraint_refs) = _as_btree(access_method);
+        assert!(!constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(constraint_refs.len() == 1);
         assert!(
-            table_constraints[0].constraints[access_method.constraint_refs[0].constraint_vec_pos]
+            table_constraints[0].constraints[constraint_refs[0].constraint_vec_pos]
                 .where_clause_pos
                 == (0, BinaryExprSide::Rhs)
         );
@@ -678,12 +683,13 @@ mod tests {
         let BestJoinOrderResult { best_plan, .. } = result.unwrap();
         assert_eq!(best_plan.table_numbers().collect::<Vec<_>>(), vec![0]);
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.as_ref().unwrap().name == "sqlite_autoindex_test_table_1");
-        assert!(access_method.constraint_refs.len() == 1);
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(!constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.as_ref().unwrap().name == "sqlite_autoindex_test_table_1");
+        assert!(constraint_refs.len() == 1);
         assert!(
-            table_constraints[0].constraints[access_method.constraint_refs[0].constraint_vec_pos]
+            table_constraints[0].constraints[constraint_refs[0].constraint_vec_pos]
                 .where_clause_pos
                 == (0, BinaryExprSide::Rhs)
         );
@@ -755,16 +761,17 @@ mod tests {
         let BestJoinOrderResult { best_plan, .. } = result.unwrap();
         assert_eq!(best_plan.table_numbers().collect::<Vec<_>>(), vec![1, 0]);
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
+        let (iter_dir, _, constraint_refs) = _as_btree(access_method);
+        assert!(constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
         let access_method = &access_methods_arena.borrow()[best_plan.data[1].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.as_ref().unwrap().name == "index1");
-        assert!(access_method.constraint_refs.len() == 1);
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(!constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.as_ref().unwrap().name == "index1");
+        assert!(constraint_refs.len() == 1);
         assert!(
-            table_constraints[TABLE1].constraints
-                [access_method.constraint_refs[0].constraint_vec_pos]
+            table_constraints[TABLE1].constraints[constraint_refs[0].constraint_vec_pos]
                 .where_clause_pos
                 == (0, BinaryExprSide::Rhs)
         );
@@ -933,30 +940,30 @@ mod tests {
         );
 
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.as_ref().unwrap().name == "sqlite_autoindex_customers_1");
-        assert!(access_method.constraint_refs.len() == 1);
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.as_ref().unwrap().name == "sqlite_autoindex_customers_1");
+        assert!(constraint_refs.len() == 1);
         let constraint = &table_constraints[TABLE_NO_CUSTOMERS].constraints
-            [access_method.constraint_refs[0].constraint_vec_pos];
+            [constraint_refs[0].constraint_vec_pos];
         assert!(constraint.lhs_mask.is_empty());
 
         let access_method = &access_methods_arena.borrow()[best_plan.data[1].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.as_ref().unwrap().name == "orders_customer_id_idx");
-        assert!(access_method.constraint_refs.len() == 1);
-        let constraint = &table_constraints[TABLE_NO_ORDERS].constraints
-            [access_method.constraint_refs[0].constraint_vec_pos];
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.as_ref().unwrap().name == "orders_customer_id_idx");
+        assert!(constraint_refs.len() == 1);
+        let constraint =
+            &table_constraints[TABLE_NO_ORDERS].constraints[constraint_refs[0].constraint_vec_pos];
         assert!(constraint.lhs_mask.contains_table(TABLE_NO_CUSTOMERS));
 
         let access_method = &access_methods_arena.borrow()[best_plan.data[2].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.as_ref().unwrap().name == "order_items_order_id_idx");
-        assert!(access_method.constraint_refs.len() == 1);
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.as_ref().unwrap().name == "order_items_order_id_idx");
+        assert!(constraint_refs.len() == 1);
         let constraint = &table_constraints[TABLE_NO_ORDER_ITEMS].constraints
-            [access_method.constraint_refs[0].constraint_vec_pos];
+            [constraint_refs[0].constraint_vec_pos];
         assert!(constraint.lhs_mask.contains_table(TABLE_NO_ORDERS));
     }
 
@@ -1038,19 +1045,22 @@ mod tests {
         assert_eq!(best_plan.table_numbers().next().unwrap(), 1);
         // Verify table scan is used since there are no indexes
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.is_none());
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.is_none());
         // Verify that t1 is chosen next due to its inequality filter
         let access_method = &access_methods_arena.borrow()[best_plan.data[1].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.is_none());
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.is_none());
         // Verify that t3 is chosen last due to no filters
         let access_method = &access_methods_arena.borrow()[best_plan.data[2].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.is_none());
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(constraint_refs.is_empty());
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.is_none());
     }
 
     #[test]
@@ -1150,19 +1160,19 @@ mod tests {
 
         // Verify access methods
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.is_none());
-        assert!(access_method.constraint_refs.is_empty());
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.is_none());
+        assert!(constraint_refs.is_empty());
 
         for (table_number, access_method_index) in best_plan.data.iter().skip(1) {
             let access_method = &access_methods_arena.borrow()[*access_method_index];
-            assert!(!access_method.is_scan());
-            assert!(access_method.iter_dir == IterationDirection::Forwards);
-            assert!(access_method.index.is_none());
-            assert!(access_method.constraint_refs.len() == 1);
+            let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+            assert!(iter_dir == IterationDirection::Forwards);
+            assert!(index.is_none());
+            assert!(constraint_refs.len() == 1);
             let constraint = &table_constraints[*table_number].constraints
-                [access_method.constraint_refs[0].constraint_vec_pos];
+                [constraint_refs[0].constraint_vec_pos];
             assert!(constraint.lhs_mask.contains_table(FACT_TABLE_IDX));
             assert!(constraint.operator == ast::Operator::Equals);
         }
@@ -1237,10 +1247,10 @@ mod tests {
         // Verify access methods:
         // - First table should use Table scan
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(access_method.is_scan());
-        assert!(access_method.iter_dir == IterationDirection::Forwards);
-        assert!(access_method.index.is_none());
-        assert!(access_method.constraint_refs.is_empty());
+        let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+        assert!(iter_dir == IterationDirection::Forwards);
+        assert!(index.is_none());
+        assert!(constraint_refs.is_empty());
 
         // all of the rest should use rowid equality
         for (i, table_constraints) in table_constraints
@@ -1250,12 +1260,11 @@ mod tests {
             .skip(1)
         {
             let access_method = &access_methods_arena.borrow()[best_plan.data[i].1];
-            assert!(!access_method.is_scan());
-            assert!(access_method.iter_dir == IterationDirection::Forwards);
-            assert!(access_method.index.is_none());
-            assert!(access_method.constraint_refs.len() == 1);
-            let constraint =
-                &table_constraints.constraints[access_method.constraint_refs[0].constraint_vec_pos];
+            let (iter_dir, index, constraint_refs) = _as_btree(access_method);
+            assert!(iter_dir == IterationDirection::Forwards);
+            assert!(index.is_none());
+            assert!(constraint_refs.len() == 1);
+            let constraint = &table_constraints.constraints[constraint_refs[0].constraint_vec_pos];
             assert!(constraint.lhs_mask.contains_table(i - 1));
             assert!(constraint.operator == ast::Operator::Equals);
         }
@@ -1346,7 +1355,8 @@ mod tests {
 
         // Verify access method is a scan, not a seek, because the index can't be used when only the second column is referenced
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(access_method.is_scan());
+        let (_, _, constraint_refs) = _as_btree(access_method);
+        assert!(constraint_refs.is_empty());
     }
 
     #[test]
@@ -1454,14 +1464,10 @@ mod tests {
 
         // Verify access method is a seek, and only uses the first column of the index
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method
-            .index
-            .as_ref()
-            .is_some_and(|i| i.name == "idx1"));
-        assert!(access_method.constraint_refs.len() == 1);
-        let constraint =
-            &table_constraints[0].constraints[access_method.constraint_refs[0].constraint_vec_pos];
+        let (_, index, constraint_refs) = _as_btree(access_method);
+        assert!(index.as_ref().is_some_and(|i| i.name == "idx1"));
+        assert!(constraint_refs.len() == 1);
+        let constraint = &table_constraints[0].constraints[constraint_refs[0].constraint_vec_pos];
         assert!(constraint.operator == ast::Operator::Equals);
         assert!(constraint.table_col_pos == 0); // c1
     }
@@ -1586,18 +1592,13 @@ mod tests {
         // Verify access method is a seek, and uses the first two columns of the index.
         // The third column can't be used because the second is a range query.
         let access_method = &access_methods_arena.borrow()[best_plan.data[0].1];
-        assert!(!access_method.is_scan());
-        assert!(access_method
-            .index
-            .as_ref()
-            .is_some_and(|i| i.name == "idx1"));
-        assert!(access_method.constraint_refs.len() == 2);
-        let constraint =
-            &table_constraints[0].constraints[access_method.constraint_refs[0].constraint_vec_pos];
+        let (_, index, constraint_refs) = _as_btree(access_method);
+        assert!(index.as_ref().is_some_and(|i| i.name == "idx1"));
+        assert!(constraint_refs.len() == 2);
+        let constraint = &table_constraints[0].constraints[constraint_refs[0].constraint_vec_pos];
         assert!(constraint.operator == ast::Operator::Equals);
         assert!(constraint.table_col_pos == 0); // c1
-        let constraint =
-            &table_constraints[0].constraints[access_method.constraint_refs[1].constraint_vec_pos];
+        let constraint = &table_constraints[0].constraints[constraint_refs[1].constraint_vec_pos];
         assert!(constraint.operator == ast::Operator::Greater);
         assert!(constraint.table_col_pos == 1); // c2
     }
@@ -1695,5 +1696,18 @@ mod tests {
     /// Creates a numeric literal expression
     fn _create_numeric_literal(value: &str) -> Expr {
         Expr::Literal(ast::Literal::Numeric(value.to_string()))
+    }
+
+    fn _as_btree<'a>(
+        access_method: &AccessMethod<'a>,
+    ) -> (IterationDirection, Option<Arc<Index>>, &'a [ConstraintRef]) {
+        match &access_method.params {
+            AccessMethodParams::BTreeTable {
+                iter_dir,
+                index,
+                constraint_refs,
+            } => (*iter_dir, index.clone(), constraint_refs),
+            _ => panic!("expected BTreeTable access method"),
+        }
     }
 }

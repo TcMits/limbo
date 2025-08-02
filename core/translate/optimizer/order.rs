@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use turso_sqlite3_parser::ast::{self, SortOrder, TableInternalId};
 
 use crate::{
+    translate::optimizer::access_method::AccessMethodParams,
     translate::plan::{GroupBy, IterationDirection, JoinedTable},
     util::exprs_are_equivalent,
 };
@@ -172,62 +173,68 @@ pub fn plan_satisfies_order_target(
 
         // Check if this table has an access method that provides the right ordering.
         let access_method = &access_methods_arena.borrow()[*access_method_index];
-        let iter_dir = access_method.iter_dir;
-        let index = access_method.index.as_ref();
-        match index {
-            None => {
-                // No index, so the next required column must be the rowid alias column.
-                let rowid_alias_col = table_ref
-                    .table
-                    .columns()
-                    .iter()
-                    .position(|c| c.is_rowid_alias);
-                let Some(rowid_alias_col) = rowid_alias_col else {
-                    return false;
-                };
-                let correct_column = target_col.column_no == rowid_alias_col;
-                if !correct_column {
-                    return false;
-                }
+        match &access_method.params {
+            AccessMethodParams::BTreeTable {
+                iter_dir, index, ..
+            } => {
+                match index {
+                    None => {
+                        // No index, so the next required column must be the rowid alias column.
+                        let rowid_alias_col = table_ref
+                            .table
+                            .columns()
+                            .iter()
+                            .position(|c| c.is_rowid_alias);
+                        let Some(rowid_alias_col) = rowid_alias_col else {
+                            return false;
+                        };
+                        let correct_column = target_col.column_no == rowid_alias_col;
+                        if !correct_column {
+                            return false;
+                        }
 
-                // Btree table rows are always in ascending order of rowid.
-                let correct_order = if iter_dir == IterationDirection::Forwards {
-                    target_col.order == SortOrder::Asc
-                } else {
-                    target_col.order == SortOrder::Desc
-                };
-                if !correct_order {
-                    return false;
-                }
-                target_col_idx += 1;
-                // All order columns matched.
-                if target_col_idx == num_cols_in_order_target {
-                    return true;
+                        // Btree table rows are always in ascending order of rowid.
+                        let correct_order = if *iter_dir == IterationDirection::Forwards {
+                            target_col.order == SortOrder::Asc
+                        } else {
+                            target_col.order == SortOrder::Desc
+                        };
+                        if !correct_order {
+                            return false;
+                        }
+                        target_col_idx += 1;
+                        // All order columns matched.
+                        if target_col_idx == num_cols_in_order_target {
+                            return true;
+                        }
+                    }
+                    Some(index) => {
+                        // All of the index columns must match the next required columns in the order target.
+                        for index_col in index.columns.iter() {
+                            let target_col = &order_target.0[target_col_idx];
+                            let correct_column = target_col.column_no == index_col.pos_in_table;
+                            if !correct_column {
+                                return false;
+                            }
+                            let correct_order = if *iter_dir == IterationDirection::Forwards {
+                                target_col.order == index_col.order
+                            } else {
+                                target_col.order != index_col.order
+                            };
+                            if !correct_order {
+                                return false;
+                            }
+                            target_col_idx += 1;
+                            // All order columns matched.
+                            if target_col_idx == num_cols_in_order_target {
+                                return true;
+                            }
+                        }
+                    }
                 }
             }
-            Some(index) => {
-                // All of the index columns must match the next required columns in the order target.
-                for index_col in index.columns.iter() {
-                    let target_col = &order_target.0[target_col_idx];
-                    let correct_column = target_col.column_no == index_col.pos_in_table;
-                    if !correct_column {
-                        return false;
-                    }
-                    let correct_order = if iter_dir == IterationDirection::Forwards {
-                        target_col.order == index_col.order
-                    } else {
-                        target_col.order != index_col.order
-                    };
-                    if !correct_order {
-                        return false;
-                    }
-                    target_col_idx += 1;
-                    // All order columns matched.
-                    if target_col_idx == num_cols_in_order_target {
-                        return true;
-                    }
-                }
-            }
+            AccessMethodParams::VirtualTable => return false,
+            AccessMethodParams::Subquery => return false,
         }
     }
     false
