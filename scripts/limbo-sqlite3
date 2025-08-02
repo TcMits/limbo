@@ -11,7 +11,7 @@ EXPERIMENTAL_FLAGS=""
 
 # if RUST_LOG is non-empty, enable tracing output
 if [ -n "$RUST_LOG" ]; then
-   "$TURSODB" -m list -q $EXPERIMENTAL_FLAGS -t testing/test.log "$@"
+   CI=true "$TURSODB" -m list -q $EXPERIMENTAL_FLAGS -t testing/test.log "$@"
 else
-   "$TURSODB" -m list -q $EXPERIMENTAL_FLAGS "$@"
+   CI=true "$TURSODB" -m list -q $EXPERIMENTAL_FLAGS "$@"
 fi
