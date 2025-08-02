@@ -543,6 +543,10 @@ impl File for UnixFile<'_> {
         buffers: Vec<Arc<RefCell<crate::Buffer>>>,
         c: Completion,
     ) -> Result<Completion> {
+        if buffers.len().eq(&1) {
+            // use `pwrite` for single buffer
+            return self.pwrite(pos, buffers[0].clone(), c);
+        }
         let file = self
             .file
             .lock()
