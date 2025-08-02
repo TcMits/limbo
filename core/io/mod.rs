@@ -19,6 +19,9 @@ pub trait File: Send + Sync {
             c.complete(0);
             return Ok(c);
         }
+        if buffers.len() == 1 {
+            return self.pwrite(pos, buffers[0].clone(), c);
+        }
         // naive default implementation can be overridden on backends where it makes sense to
         let mut pos = pos;
         let outstanding = Arc::new(AtomicUsize::new(buffers.len()));
