@@ -9,7 +9,7 @@ use tempfile;
 
 use crate::{
     error::LimboError,
-    io::{Buffer, BufferData, Completion, File, OpenFlags, IO},
+    io::{Buffer, Completion, File, OpenFlags, IO},
     storage::sqlite3_ondisk::{read_varint, varint_len, write_varint},
     translate::collate::CollationSeq,
     turso_assert,
@@ -364,8 +364,7 @@ impl SortedChunk {
         let read_buffer_size = self.buffer.borrow().len() - self.buffer_len.get();
         let read_buffer_size = read_buffer_size.min(self.chunk_size - self.total_bytes_read.get());
 
-        let drop_fn = Rc::new(|_buffer: BufferData| {});
-        let read_buffer = Buffer::allocate(read_buffer_size, drop_fn);
+        let read_buffer = Buffer::new_temporary(read_buffer_size);
         let read_buffer_ref = Arc::new(read_buffer);
 
         let chunk_io_state_copy = self.io_state.clone();
@@ -414,8 +413,7 @@ impl SortedChunk {
             self.chunk_size += size_len + record_size;
         }
 
-        let drop_fn = Rc::new(|_buffer: BufferData| {});
-        let buffer = Buffer::allocate(self.chunk_size, drop_fn);
+        let buffer = Buffer::new_temporary(self.chunk_size);
 
         let mut buf_pos = 0;
         let buf = buffer.as_mut_slice();
