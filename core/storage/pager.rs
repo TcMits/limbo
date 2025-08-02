@@ -1,17 +1,20 @@
 use crate::result::LimboResult;
-use crate::storage::btree::BTreePageInner;
-use crate::storage::buffer_pool::BufferPool;
-use crate::storage::database::DatabaseStorage;
-use crate::storage::sqlite3_ondisk::{
-    self, parse_wal_frame_header, DatabaseHeader, PageContent, PageSize, PageType,
+use crate::storage::{
+    btree::BTreePageInner,
+    buffer_pool::BufferPool,
+    database::DatabaseStorage,
+    sqlite3_ondisk::{
+        self, parse_wal_frame_header, DatabaseHeader, PageContent, PageSize, PageType,
+    },
+    wal::{CheckpointResult, Wal},
 };
-use crate::storage::wal::{CheckpointResult, Wal};
-use crate::types::{IOResult, WalFrameInfo};
 use crate::util::IOExt as _;
-use crate::{return_if_io, Completion, TransactionState};
-use crate::{turso_assert, Buffer, Connection, LimboError, Result};
+use crate::{
+    return_if_io, turso_assert, Completion, Connection, IOResult, LimboError, Result,
+    TransactionState, WalFrameInfo,
+};
 use parking_lot::RwLock;
-use std::cell::{Cell, OnceCell, RefCell, UnsafeCell};
+use std::cell::{Cell, OnceCell, UnsafeCell};
 use std::collections::HashSet;
 use std::hash;
 use std::rc::Rc;
@@ -2151,12 +2154,8 @@ impl Pager {
 pub fn allocate_new_page(page_id: usize, buffer_pool: &Arc<BufferPool>, offset: usize) -> PageRef {
     let page = Arc::new(Page::new(page_id));
     {
-        let buffer = buffer_pool.get();
-        let bp = buffer_pool.clone();
-        let drop_fn = Rc::new(move |buf| {
-            bp.put(buf);
-        });
-        let buffer = Arc::new(Buffer::new(buffer, drop_fn));
+        let buffer = buffer_pool.get_page();
+        let buffer = Arc::new(buffer);
         page.set_loaded();
         page.get().contents = Some(PageContent::new(offset, buffer));
     }

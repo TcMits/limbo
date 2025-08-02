@@ -621,10 +621,10 @@ impl PageHashMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{Buffer, BufferData};
     use crate::storage::page_cache::CacheError;
     use crate::storage::pager::{Page, PageRef};
     use crate::storage::sqlite3_ondisk::PageContent;
+    use crate::BufferPool;
     use std::ptr::NonNull;
     use std::{num::NonZeroUsize, pin::Pin, rc::Rc, sync::Arc};
 
@@ -642,8 +642,7 @@ mod tests {
     pub fn page_with_content(page_id: usize) -> PageRef {
         let page = Arc::new(Page::new(page_id));
         {
-            let buffer_drop_fn = Rc::new(|_data: BufferData| {});
-            let buffer = Buffer::new(Pin::new(vec![0; 4096]), buffer_drop_fn);
+            let buffer = BufferPool::allocate(4096);
             let page_content = PageContent {
                 offset: 0,
                 buffer: Arc::new(buffer),

@@ -7215,7 +7215,6 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::{
-        io::BufferData,
         storage::{
             btree::{compute_free_space, fill_cell_payload, payload_overflow_threshold_max},
             sqlite3_ondisk::{BTreeCell, PageContent, PageType},
@@ -7230,11 +7229,7 @@ mod tests {
     fn get_page(id: usize) -> BTreePage {
         let page = Arc::new(Page::new(id));
 
-        let drop_fn = Rc::new(|_| {});
-        let inner = PageContent::new(
-            0,
-            Arc::new(Buffer::new(BufferData::new(vec![0; 4096]), drop_fn)),
-        );
+        let inner = PageContent::new(0, Arc::new(Buffer::new_temporary(4096)));
         page.get().contents.replace(inner);
         let page = Arc::new(BTreePageInner {
             page: RefCell::new(page),
@@ -8455,21 +8450,16 @@ mod tests {
     fn setup_test_env(database_size: u32) -> Rc<Pager> {
         let page_size = 512;
 
-        let buffer_pool = Arc::new(BufferPool::new(Some(page_size as usize)));
-
-        // Initialize buffer pool with correctly sized buffers
-        for _ in 0..10 {
-            let vec = vec![0; page_size as usize]; // Initialize with correct length, not just capacity
-            buffer_pool.put(Pin::new(vec));
-        }
-
         let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
+        let buffer_pool =
+            BufferPool::begin_init(&io, page_size * 128).finalize_page_size(page_size);
+
         let db_file = Arc::new(DatabaseFile::new(
             io.open_file(":memory:", OpenFlags::Create, false).unwrap(),
         ));
 
         let wal_file = io.open_file("test.wal", OpenFlags::Create, false).unwrap();
-        let wal_shared = WalFileShared::new_shared(page_size, &io, wal_file).unwrap();
+        let wal_shared = WalFileShared::new_shared(page_size as u32, &io, wal_file).unwrap();
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
             wal_shared,
@@ -8522,16 +8512,17 @@ mod tests {
         // Setup overflow pages (2, 3, 4) with linking
         let mut current_page = 2u32;
         while current_page <= 4 {
-            let drop_fn = Rc::new(|_buf| {});
             #[allow(clippy::arc_with_non_send_sync)]
-            let buf = Arc::new(Buffer::allocate(
+            let buf = Arc::new(Buffer::new_temporary(
                 pager
                     .io
                     .block(|| pager.with_header(|header| header.page_size))?
                     .get() as usize,
-                drop_fn,
             ));
-            let c = Completion::new_write(|_| {});
+            let _buf = buf.clone();
+            let c = Completion::new_write(|_| {
+                let _ = _buf.clone();
+            });
             let _c = pager
                 .db_file
                 .write_page(current_page as usize, buf.clone(), c)?;

@@ -336,10 +336,8 @@ impl Batch {
         self.items.insert(id, buf_clone);
 
         // Re-initialize scratch with a fresh buffer
-        let raw = pool.get();
-        let pool_clone = pool.clone();
-        let drop_fn = Rc::new(move |b| pool_clone.put(b));
-        let new_buf = Arc::new(Buffer::new(raw, drop_fn));
+        let raw = pool.get_page();
+        let new_buf = Arc::new(raw);
 
         unsafe {
             let inner = &mut *scratch.inner.get();
@@ -1218,14 +1216,9 @@ impl WalFile {
         buffer_pool: Arc<BufferPool>,
     ) -> Self {
         let checkpoint_page = Arc::new(Page::new(0));
-        let buffer = buffer_pool.get();
+        let buffer = buffer_pool.get_page();
         {
-            let buffer_pool = buffer_pool.clone();
-            let drop_fn = Rc::new(move |buf| {
-                buffer_pool.put(buf);
-            });
-            checkpoint_page.get().contents =
-                Some(PageContent::new(0, Arc::new(Buffer::new(buffer, drop_fn))));
+            checkpoint_page.get().contents = Some(PageContent::new(0, Arc::new(buffer)));
         }
 
         let header = unsafe { shared.get().as_mut().unwrap().wal_header.lock() };

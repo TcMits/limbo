@@ -852,13 +852,9 @@ pub fn begin_read_page(
     allow_empty_read: bool,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_btree_page(page_idx = {})", page_idx);
-    let buf = buffer_pool.get();
-    let drop_fn = Rc::new(move |buf| {
-        let buffer_pool = buffer_pool.clone();
-        buffer_pool.put(buf);
-    });
+    let buf = buffer_pool.get_page();
     #[allow(clippy::arc_with_non_send_sync)]
-    let buf = Arc::new(Buffer::new(buf, drop_fn));
+    let buf = Arc::new(buf);
     let complete = Box::new(move |mut buf: Arc<Buffer>, bytes_read: i32| {
         let buf_len = buf.len();
         turso_assert!(
@@ -867,7 +863,7 @@ pub fn begin_read_page(
         );
         let page = page.clone();
         if bytes_read == 0 {
-            buf = Arc::new(Buffer::allocate(0, Rc::new(|_| {})));
+            buf = Arc::new(Buffer::new_temporary(0));
         }
         if finish_read_page(page_idx, buf, page.clone()).is_err() {
             page.set_error();
@@ -1557,10 +1553,9 @@ pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
 
 /// We need to read the WAL file on open to reconstruct the WAL frame cache.
 pub fn read_entire_wal_dumb(file: &Arc<dyn File>) -> Result<Arc<UnsafeCell<WalFileShared>>> {
-    let drop_fn = Rc::new(|_buf| {});
     let size = file.size()?;
     #[allow(clippy::arc_with_non_send_sync)]
-    let buf_for_pread = Arc::new(Buffer::allocate(size as usize, drop_fn));
+    let buf_for_pread = Arc::new(Buffer::new_temporary(size as usize));
     let header = Arc::new(SpinLock::new(WalHeader::default()));
     #[allow(clippy::arc_with_non_send_sync)]
     let wal_file_shared_ret = Arc::new(UnsafeCell::new(WalFileShared {
@@ -1768,13 +1763,11 @@ pub fn begin_read_wal_frame_raw(
     io: &Arc<dyn File>,
     offset: usize,
     page_size: u32,
-    complete: Box<dyn Fn(Arc<Buffer>, i32)>,
+    complete: Box<Complete>,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_wal_frame_raw(offset={})", offset);
-    let drop_fn = Rc::new(|_buf| {});
-    let buf = Arc::new(Buffer::allocate(
+    let buf = Arc::new(BufferPool::allocate(
         page_size as usize + WAL_FRAME_HEADER_SIZE,
-        drop_fn,
     ));
     #[allow(clippy::arc_with_non_send_sync)]
     let c = Completion::new_read(buf, complete);
@@ -1786,15 +1779,11 @@ pub fn begin_read_wal_frame(
     io: &Arc<dyn File>,
     offset: usize,
     buffer_pool: Arc<BufferPool>,
-    complete: Box<dyn Fn(Arc<Buffer>, i32)>,
+    complete: Box<Complete>,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_wal_frame(offset={})", offset);
-    let buf = buffer_pool.get();
-    let drop_fn = Rc::new(move |buf| {
-        let buffer_pool = buffer_pool.clone();
-        buffer_pool.put(buf);
-    });
-    let buf = Arc::new(Buffer::new(buf, drop_fn));
+    let buf = buffer_pool.get_page();
+    let buf = Arc::new(buf);
     #[allow(clippy::arc_with_non_send_sync)]
     let c = Completion::new_read(buf, complete);
     let c = io.pread(offset, c)?;
@@ -1830,8 +1819,7 @@ pub fn prepare_wal_frame(
 ) -> ((u32, u32), Arc<Buffer>) {
     tracing::trace!(page_number);
 
-    let drop_fn = Rc::new(|_buf| {});
-    let buffer = Buffer::allocate(page_size as usize + WAL_FRAME_HEADER_SIZE, drop_fn);
+    let buffer = BufferPool::allocate(page_size as usize + WAL_FRAME_HEADER_SIZE);
     let frame = buffer.as_mut_slice();
     frame[WAL_FRAME_HEADER_SIZE..].copy_from_slice(page);
 
@@ -1858,9 +1846,7 @@ pub fn prepare_wal_frame(
 pub fn begin_write_wal_header(io: &Arc<dyn File>, header: &WalHeader) -> Result<Completion> {
     tracing::trace!("begin_write_wal_header");
     let buffer = {
-        let drop_fn = Rc::new(|_buf| {});
-
-        let buffer = Buffer::allocate(WAL_HEADER_SIZE, drop_fn);
+        let buffer = BufferPool::new_temporary(WAL_HEADER_SIZE);
         let buf = buffer.as_mut_slice();
 
         buf[0..4].copy_from_slice(&header.magic.to_be_bytes());

@@ -135,41 +135,6 @@ impl Default for BufferPool {
     }
 }
 
-/// Helper for initializing the pool properly. We need buffers for IO to read the
-/// header to discover the page_size, so we don't want to initialize a whole arena
-/// just to drop it when we find out the page size is different. So we have this
-/// builder that is returned which can either be called `finalize` with the page size,
-/// or it will simply finalize with the default page size when it goes out of scope.
-pub struct BufferPoolBuilder;
-impl BufferPoolBuilder {
-    pub fn finalize_page_size(&self, page_size: usize) -> crate::Result<()> {
-        let pool = BUFFER_POOL.get().expect("BufferPool must be initialized");
-        let inner = pool.inner_mut();
-        if inner.arena.is_some() {
-            return Ok(());
-        }
-        tracing::trace!("finalize page size called with size {page_size}");
-        if page_size != BufferPool::DEFAULT_PAGE_SIZE {
-            // so far we have handed out some temporary buffers, since the page size is not
-            // default, we need to clear the cache so they aren't reused for other operations.
-            TEMP_BUFFER_CACHE.with(|cache| {
-                cache.borrow_mut().reinit_cache(page_size);
-            });
-        }
-        inner.db_page_size.store(page_size, Ordering::Relaxed);
-        inner.init_arena()
-    }
-}
-
-/// If `begin_init` is called without `finalize`, we will just finalize
-/// the pool with the default page size.
-impl Drop for BufferPoolBuilder {
-    fn drop(&mut self) {
-        // finalize_page_size is idempotent, and will not do anything if an arena already exists
-        let _ = self.finalize_page_size(BufferPool::DEFAULT_PAGE_SIZE);
-    }
-}
-
 impl BufferPool {
     pub const DEFAULT_ARENA_SIZE: usize = 4 * 1024 * 1024; // 4MB arena
     pub const DEFAULT_PAGE_SIZE: usize = 4096; // 4KB default page size
@@ -197,9 +162,8 @@ impl BufferPool {
         pool.inner().allocate(len)
     }
 
-    pub fn get_page() -> Buffer {
-        let pool = BUFFER_POOL.get().expect("BufferPool must be initialized");
-        let inner = pool.inner();
+    pub fn get_page(&self) -> Buffer {
+        let inner = self.inner();
         inner.allocate(inner.db_page_size.load(Ordering::Relaxed))
     }
 
@@ -212,16 +176,37 @@ impl BufferPool {
         unsafe { &mut *self.inner.get() }
     }
 
-    /// Initialize the pool to the default page size, WITHOUT creating an arena
-    /// Arena will be created when set_page_size is called
-    pub fn begin_init(io: &Arc<dyn IO>, arena_size: usize) -> BufferPoolBuilder {
+    /// Initialize the pool to the default page size, **without** creating an arena
+    /// Arena will be created when finalize_page_size is called,
+    /// until then the pool will return temporary buffers to prevent reallocation of the
+    /// arena if the page size is set to something other than the default value.
+    pub fn begin_init(io: &Arc<dyn IO>, arena_size: usize) -> Arc<Self> {
         let pool = BUFFER_POOL.get_or_init(|| Arc::new(BufferPool::new(arena_size)));
         let inner = pool.inner_mut();
         // Just store the IO handle, don't create arena yet
         if inner.io.is_none() {
             inner.io = Some(Arc::clone(io));
         }
-        BufferPoolBuilder {}
+        pool.clone()
+    }
+
+    pub fn finalize_page_size(&self, page_size: usize) -> crate::Result<Arc<BufferPool>> {
+        let pool = BUFFER_POOL.get().expect("BufferPool must be initialized");
+        let inner = pool.inner_mut();
+        if inner.arena.is_some() {
+            return Ok(pool.clone());
+        }
+        tracing::trace!("finalize page size called with size {page_size}");
+        if page_size != BufferPool::DEFAULT_PAGE_SIZE {
+            // so far we have handed out some temporary buffers, since the page size is not
+            // default, we need to clear the cache so they aren't reused for other operations.
+            TEMP_BUFFER_CACHE.with(|cache| {
+                cache.borrow_mut().reinit_cache(page_size);
+            });
+        }
+        inner.db_page_size.store(page_size, Ordering::Relaxed);
+        inner.init_arena()?;
+        Ok(pool.clone())
     }
 
     #[inline]
