@@ -6671,8 +6671,9 @@ fn defragment_page(page: &PageContent, usable_space: u16) {
 
         // Basic corruption check
         turso_assert!(
-            new_offset < first_cell_content_byte || old_offset + cell.size > usable_space,
-            "corrupt page detected during defragmentation"
+            new_offset >= first_cell_content_byte && old_offset + cell.size <= usable_space,
+            "corrupt page detected during defragmentation: new_offset={new_offset} first_cell_content_byte={first_cell_content_byte} old_offset={old_offset} cell.size={} usable_space={usable_space}",
+            cell.size
         );
 
         // Move the cell data. `copy_within` is the idiomatic and safe
