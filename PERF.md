@@ -8,15 +8,14 @@
 git clone git@github.com:penberg/Mobibench.git
 ```
 
-2. Change `LIBS` in `shell/Makefile` to point to your Turso source repository.
-
-3. Build Mobibench:
+2. Build Mobibench:
 
 ```console
-cd shell && make
+cd shell
+LIBS="../turso/target/release/libturso_sqlite3.a -m" make
 ```
 
-4. Run Mobibench:
+3. Run Mobibench:
 
 ```console
 ./mobibench -p <benchmark-directory> -n 1000 -d 0 -j 4
