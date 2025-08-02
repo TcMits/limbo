@@ -50,3 +50,27 @@ do_execsql_test_in_memory_any_error collate_unique_constraint {
     CREATE TABLE t (a TEXT COLLATE NOCASE PRIMARY KEY);
     INSERT INTO t VALUES ('lol'), ('LOL'), ('lOl');
 }
+
+do_execsql_test_on_specific_db {:memory:} collate_aggregation_default_binary {
+    create table fruits(name collate binary);
+    insert into fruits(name) values ('Apple') ,('banana') ,('CHERRY');
+    select max(name) from fruits;
+} {banana}
+
+do_execsql_test_on_specific_db {:memory:} collate_aggregation_default_nocase {
+    create table fruits(name collate nocase);
+    insert into fruits(name) values ('Apple') ,('banana') ,('CHERRY');
+    select max(name) from fruits;
+} {CHERRY}
+
+do_execsql_test_on_specific_db {:memory:} collate_aggregation_explicit_binary {
+    create table fruits(name collate nocase);
+    insert into fruits(name) values ('Apple') ,('banana') ,('CHERRY');
+    select max(name collate binary) from fruits;
+} {banana}
+
+do_execsql_test_on_specific_db {:memory:} collate_aggregation_explicit_nocase {
+    create table fruits(name collate binary);
+    insert into fruits(name) values ('Apple') ,('banana') ,('CHERRY');
+    select max(name collate nocase) from fruits;
+} {CHERRY}

@@ -6114,6 +6114,29 @@ pub fn op_is_null(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub fn op_coll_seq(
+    _program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    _pager: &Rc<Pager>,
+    _mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::CollSeq { reg, collation } = insn else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    // Set the current collation sequence for use by subsequent functions
+    state.current_collation = Some(*collation);
+
+    // If P1 is not zero, initialize that register to 0
+    if let Some(reg_idx) = reg {
+        state.registers[*reg_idx] = Register::Value(Value::Integer(0));
+    }
+
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 pub fn op_page_count(
     program: &Program,
     state: &mut ProgramState,

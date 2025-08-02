@@ -431,7 +431,7 @@ Modifiers:
 | Checkpoint     | Yes    |         |
 | Clear          | No     |         |
 | Close          | Yes    |         |
-| CollSeq        | No     |         |
+| CollSeq        | Yes    |         |
 | Column         | Yes    |         |
 | Compare        | Yes    |         |
 | Concat         | Yes    |         |

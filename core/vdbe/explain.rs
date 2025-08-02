@@ -1636,6 +1636,15 @@ pub fn insn_to_str(
                 0,
                 format!("rename_table({from}, {to})"),
             ),
+            Insn::CollSeq { reg, collation } => (
+                "CollSeq",
+                reg.unwrap_or(0) as i32,
+                0,
+                0,
+                Value::build_text(collation.to_string().as_str()),
+                0,
+                format!("collation={collation}"),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

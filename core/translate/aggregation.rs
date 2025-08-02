@@ -2,6 +2,7 @@ use turso_sqlite3_parser::ast;
 
 use crate::{
     function::AggFunc,
+    translate::collate::CollationSeq,
     vdbe::{
         builder::ProgramBuilder,
         insn::{IdxInsertFlags, Insn},
@@ -58,6 +59,37 @@ pub fn emit_ungrouped_aggregation<'a>(
     )?;
 
     Ok(())
+}
+
+fn emit_collseq_if_needed(
+    program: &mut ProgramBuilder,
+    referenced_tables: &TableReferences,
+    expr: &ast::Expr,
+) {
+    // Check if this is a column expression with explicit COLLATE clause
+    if let ast::Expr::Collate(_, collation_name) = expr {
+        if let Ok(collation) = CollationSeq::new(collation_name) {
+            program.emit_insn(Insn::CollSeq {
+                reg: None,
+                collation,
+            });
+        }
+        return;
+    }
+
+    // If no explicit collation, check if this is a column with table-defined collation
+    if let ast::Expr::Column { table, column, .. } = expr {
+        if let Some(table_ref) = referenced_tables.find_table_by_internal_id(*table) {
+            if let Some(table_column) = table_ref.get_column_at(*column) {
+                if let Some(collation) = &table_column.collation {
+                    program.emit_insn(Insn::CollSeq {
+                        reg: None,
+                        collation: *collation,
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Emits the bytecode for handling duplicates in a distinct aggregate.
@@ -196,6 +228,7 @@ pub fn translate_aggregation_step(
             let expr_reg = program.alloc_register();
             let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             handle_distinct(program, agg, expr_reg);
+            emit_collseq_if_needed(program, referenced_tables, expr);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -212,6 +245,7 @@ pub fn translate_aggregation_step(
             let expr_reg = program.alloc_register();
             let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             handle_distinct(program, agg, expr_reg);
+            emit_collseq_if_needed(program, referenced_tables, expr);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,

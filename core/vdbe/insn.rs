@@ -864,6 +864,22 @@ pub enum Insn {
         /// Jump to this PC if the register is null (P2).
         target_pc: BranchOffset,
     },
+
+    /// Set the collation sequence for the next function call.
+    /// P4 is a pointer to a CollationSeq. If the next call to a user function
+    /// or aggregate calls sqlite3GetFuncCollSeq(), this collation sequence will
+    /// be returned. This is used by the built-in min(), max() and nullif()
+    /// functions.
+    ///
+    /// If P1 is not zero, then it is a register that a subsequent min() or
+    /// max() aggregate will set to 1 if the current row is not the minimum or
+    /// maximum.  The P1 register is initialized to 0 by this instruction.
+    CollSeq {
+        /// Optional register to initialize to 0 (P1).
+        reg: Option<usize>,
+        /// The collation sequence to set (P4).
+        collation: CollationSeq,
+    },
     ParseSchema {
         db: usize,
         where_clause: Option<String>,
@@ -1121,6 +1137,7 @@ impl Insn {
             Insn::DropTable { .. } => execute::op_drop_table,
             Insn::Close { .. } => execute::op_close,
             Insn::IsNull { .. } => execute::op_is_null,
+            Insn::CollSeq { .. } => execute::op_coll_seq,
             Insn::ParseSchema { .. } => execute::op_parse_schema,
             Insn::ShiftRight { .. } => execute::op_shift_right,
             Insn::ShiftLeft { .. } => execute::op_shift_left,

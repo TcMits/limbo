@@ -29,6 +29,7 @@ use crate::{
     function::{AggFunc, FuncCtx},
     state_machine::StateTransition,
     storage::sqlite3_ondisk::SmallVec,
+    translate::collate::CollationSeq,
     translate::plan::TableReferences,
     types::{IOResult, RawSlice, TextRef},
     vdbe::execute::{
@@ -260,6 +261,8 @@ pub struct ProgramState {
     op_insert_state: OpInsertState,
     op_no_conflict_state: OpNoConflictState,
     seek_state: OpSeekState,
+    /// Current collation sequence set by OP_CollSeq instruction
+    current_collation: Option<CollationSeq>,
 }
 
 impl ProgramState {
@@ -291,6 +294,7 @@ impl ProgramState {
             op_insert_state: OpInsertState::Insert,
             op_no_conflict_state: OpNoConflictState::Start,
             seek_state: OpSeekState::Start,
+            current_collation: None,
         }
     }
 
@@ -330,6 +334,7 @@ impl ProgramState {
         self.regex_cache.like.clear();
         self.interrupted = false;
         self.parameters.clear();
+        self.current_collation = None;
         #[cfg(feature = "json")]
         self.json_cache.clear()
     }
