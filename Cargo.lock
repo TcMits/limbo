@@ -2206,19 +2206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "limbo_sqlite3"
-version = "0.1.4-pre.1"
-dependencies = [
- "env_logger 0.11.7",
- "libc",
- "tempfile",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "turso_core",
-]
-
-[[package]]
 name = "limbo_sqlite_test_ext"
 version = "0.1.4-pre.1"
 dependencies = [
@@ -4352,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "turso_parser"
-version = "0.1.3"
+version = "0.1.4-pre.1"
 dependencies = [
  "bitflags 2.9.0",
  "criterion",
@@ -4363,7 +4350,19 @@ dependencies = [
  "strum",
  "strum_macros",
  "turso_sqlite3_parser",
- "walkdir",
+]
+
+[[package]]
+name = "turso_sqlite3"
+version = "0.1.4-pre.1"
+dependencies = [
+ "env_logger 0.11.7",
+ "libc",
+ "tempfile",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "turso_core",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ use crate::{return_if_io, Completion, TransactionState};
 use crate::{turso_assert, Buffer, Connection, LimboError, Result};
 use parking_lot::RwLock;
 use std::cell::{Cell, OnceCell, RefCell, UnsafeCell};
+use std::cell::{Ref, RefMut};
 use std::collections::HashSet;
 use std::hash;
 use std::rc::Rc;
@@ -20,13 +21,79 @@ use std::sync::{Arc, Mutex};
 use tracing::{instrument, trace, Level};
 
 use super::btree::{btree_init_page, BTreePage};
-use super::header_accessor::{HeaderRef, HeaderRefMut};
 use super::page_cache::{CacheError, CacheResizeResult, DumbLruPageCache, PageCacheKey};
 use super::sqlite3_ondisk::begin_write_btree_page;
 use super::wal::CheckpointMode;
 
 #[cfg(not(feature = "omit_autovacuum"))]
 use {crate::io::Buffer as IoBuffer, ptrmap::*};
+
+struct HeaderRef(PageRef);
+
+impl HeaderRef {
+    pub fn from_pager(pager: &Pager) -> Result<IOResult<Self>> {
+        if !pager.db_state.is_initialized() {
+            return Err(LimboError::InternalError(
+                "Database is empty, header does not exist - page 1 should've been allocated before this".to_string()
+            ));
+        }
+
+        let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
+        if page.is_locked() {
+            return Ok(IOResult::IO);
+        }
+
+        turso_assert!(
+            page.get().id == DatabaseHeader::PAGE_ID,
+            "incorrect header page id"
+        );
+
+        Ok(IOResult::Done(Self(page)))
+    }
+
+    pub fn borrow(&self) -> Ref<'_, DatabaseHeader> {
+        // TODO: Instead of erasing mutability, implement `get_mut_contents` and return a shared reference.
+        let content: &PageContent = self.0.get_contents();
+        Ref::map(content.buffer.borrow(), |buffer| {
+            bytemuck::from_bytes::<DatabaseHeader>(&buffer.as_slice()[0..DatabaseHeader::SIZE])
+        })
+    }
+}
+
+pub struct HeaderRefMut(PageRef);
+
+impl HeaderRefMut {
+    pub fn from_pager(pager: &Pager) -> Result<IOResult<Self>> {
+        if !pager.db_state.is_initialized() {
+            return Err(LimboError::InternalError(
+                "Database is empty, header does not exist - page 1 should've been allocated before this".to_string(),
+            ));
+        }
+
+        let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
+        if page.is_locked() {
+            return Ok(IOResult::IO);
+        }
+
+        turso_assert!(
+            page.get().id == DatabaseHeader::PAGE_ID,
+            "incorrect header page id"
+        );
+
+        pager.add_dirty(&page);
+
+        Ok(IOResult::Done(Self(page)))
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<'_, DatabaseHeader> {
+        let content = self.0.get_contents();
+        RefMut::map(content.buffer.borrow_mut(), |buffer| {
+            bytemuck::from_bytes_mut::<DatabaseHeader>(
+                &mut buffer.as_mut_slice()[0..DatabaseHeader::SIZE],
+            )
+        })
+    }
+}
 
 pub struct PageInner {
     pub flags: AtomicUsize,
