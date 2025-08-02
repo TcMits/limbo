@@ -177,9 +177,9 @@ impl BufferPool {
         unsafe { &mut *self.inner.get() }
     }
 
-    /// Initialize the pool to the default page size, **without** creating an arena
-    /// Arena will be created when finalize_page_size is called,
-    /// until then the pool will return temporary buffers to prevent reallocation of the
+    /// Create a static `BufferPool` initialize the pool to the default page size, **without**
+    /// creating an arena. Arena will be created when `[BufferPool::finalize_page_size]` is called.
+    /// Until then the pool will return temporary buffers to prevent reallocation of the
     /// arena if the page size is set to something other than the default value.
     pub fn begin_init(io: &Arc<dyn IO>, arena_size: usize) -> Arc<Self> {
         let pool = BUFFER_POOL.get_or_init(|| Arc::new(BufferPool::new(arena_size)));
@@ -191,7 +191,9 @@ impl BufferPool {
         pool.clone()
     }
 
-    pub fn finalize_page_size(&self, page_size: usize) -> crate::Result<Arc<BufferPool>> {
+    /// Call when `[Database::db_state]` is initialized, providing the `page_size` to allocate
+    /// an arena for the pool. Before this call, the pool will use temporary buffers
+    pub fn finalize_with_page_size(&self, page_size: usize) -> crate::Result<Arc<Self>> {
         let pool = BUFFER_POOL.get().expect("BufferPool must be initialized");
         let inner = pool.inner_mut();
         tracing::trace!("finalize page size called with size {page_size}");

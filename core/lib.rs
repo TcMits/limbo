@@ -393,7 +393,7 @@ impl Database {
                 Some(size) => size,
             };
             let buffer_pool =
-                BufferPool::begin_init(&self.io, arena_size).finalize_page_size(size)?;
+                BufferPool::begin_init(&self.io, arena_size).finalize_with_page_size(size)?;
 
             let db_state = self.db_state.clone();
             let wal = Rc::new(RefCell::new(WalFile::new(

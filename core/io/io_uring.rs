@@ -584,17 +584,30 @@ impl File for UringFile {
 
     fn pread(&self, pos: usize, c: Completion) -> Result<Completion> {
         let r = c.as_read();
-        trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let mut io = self.io.borrow_mut();
         let read_e = {
             let buf = r.buf();
             let len = buf.len();
-            let buf = buf.as_mut_ptr();
             with_fd!(self, |fd| {
-                io_uring::opcode::Read::new(fd, buf, len as u32)
-                    .offset(pos as u64)
-                    .build()
-                    .user_data(get_key(c.clone()))
+                if let Some(idx) = buf.fixed_id() {
+                    trace!(
+                        "pread_fixed(pos = {}, length = {}, idx = {})",
+                        pos,
+                        len,
+                        idx
+                    );
+                    io_uring::opcode::ReadFixed::new(fd, buf.as_mut_ptr(), len as u32, idx as u16)
+                        .offset(pos as u64)
+                        .build()
+                        .user_data(get_key(c.clone()))
+                } else {
+                    trace!("pread(pos = {}, length = {})", pos, len);
+                    // Use Read opcode if fixed buffer is not available
+                    io_uring::opcode::Read::new(fd, buf.as_mut_ptr(), len as u32)
+                        .offset(pos as u64)
+                        .build()
+                        .user_data(get_key(c.clone()))
+                }
             })
         };
         io.ring.submit_entry(&read_e);
@@ -604,12 +617,30 @@ impl File for UringFile {
     fn pwrite(&self, pos: usize, buffer: Arc<crate::Buffer>, c: Completion) -> Result<Completion> {
         let mut io = self.io.borrow_mut();
         let write = {
-            trace!("pwrite(pos = {}, length = {})", pos, buffer.len());
             with_fd!(self, |fd| {
-                io_uring::opcode::Write::new(fd, buffer.as_ptr(), buffer.len() as u32)
+                if let Some(idx) = buf.fixed_id() {
+                    trace!(
+                        "pwrite_fixed(pos = {}, length = {}, idx= {})",
+                        pos,
+                        buffer.len(),
+                        idx
+                    );
+                    io_uring::opcode::WriteFixed::new(
+                        fd,
+                        buffer.as_ptr(),
+                        buffer.len() as u32,
+                        idx as u16,
+                    )
                     .offset(pos as u64)
                     .build()
                     .user_data(get_key(c.clone()))
+                } else {
+                    trace!("pwrite(pos = {}, length = {})", pos, buffer.len());
+                    io_uring::opcode::Write::new(fd, buffer.as_ptr(), buffer.len() as u32)
+                        .offset(pos as u64)
+                        .build()
+                        .user_data(get_key(c.clone()))
+                }
             })
         };
         io.ring.submit_entry(&write);

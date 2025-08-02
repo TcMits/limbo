@@ -8452,7 +8452,7 @@ mod tests {
 
         let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
         let buffer_pool =
-            BufferPool::begin_init(&io, page_size * 128).finalize_page_size(page_size);
+            BufferPool::begin_init(&io, page_size * 128).finalize_with_page_size(page_size);
 
         let db_file = Arc::new(DatabaseFile::new(
             io.open_file(":memory:", OpenFlags::Create, false).unwrap(),

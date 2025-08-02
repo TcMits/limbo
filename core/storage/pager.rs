@@ -1767,7 +1767,7 @@ impl Pager {
                     default_header.page_size = PageSize::new(size).expect("page size");
                 }
                 self.buffer_pool
-                    .finalize_page_size(default_header.page_size.get() as usize)?;
+                    .finalize_with_page_size(default_header.page_size.get() as usize)?;
                 let page = allocate_new_page(1, &self.buffer_pool, 0);
 
                 let contents = page.get_contents();
