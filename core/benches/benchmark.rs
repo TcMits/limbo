@@ -1,6 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use turso_core::{Database, PlatformIO};
 
 fn rusqlite_open() -> rusqlite::Connection {
@@ -74,27 +77,43 @@ fn bench_alter(criterion: &mut Criterion) {
 
     let mut group = criterion.benchmark_group("`ALTER TABLE _ RENAME TO _`");
 
-    let stmts = ["CREATE TABLE x(a)", "ALTER TABLE x RENAME TO y", "DROP TABLE y"];
-
     group.bench_function(BenchmarkId::new("limbo_rename_table", ""), |b| {
         #[allow(clippy::arc_with_non_send_sync)]
         let io = Arc::new(PlatformIO::new().unwrap());
         let db = Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
         let conn = db.connect().unwrap();
-        b.iter(|| {
-            for stmt in stmts {
-                conn.execute(stmt).unwrap();
-            }
+        b.iter_custom(|iters| {
+            (0..iters)
+                .map(|_| {
+                    conn.execute("CREATE TABLE x(a)").unwrap();
+                    let elapsed = {
+                        let start = Instant::now();
+                        conn.execute("ALTER TABLE x RENAME TO y").unwrap();
+                        start.elapsed()
+                    };
+                    conn.execute("DROP TABLE y").unwrap();
+                    elapsed
+                })
+                .sum()
         });
     });
 
     if enable_rusqlite {
         group.bench_function(BenchmarkId::new("sqlite_rename_table", ""), |b| {
             let conn = rusqlite::Connection::open("../testing/schema_5k.db").unwrap();
-            b.iter(|| {
-                for stmt in stmts {
-                    conn.execute(stmt, ()).unwrap();
-                }
+            b.iter_custom(|iters| {
+                (0..iters)
+                    .map(|_| {
+                        conn.execute("CREATE TABLE x(a)", ()).unwrap();
+                        let elapsed = {
+                            let start = Instant::now();
+                            conn.execute("ALTER TABLE x RENAME TO y", ()).unwrap();
+                            start.elapsed()
+                        };
+                        conn.execute("DROP TABLE y", ()).unwrap();
+                        elapsed
+                    })
+                    .sum()
             });
         });
     }

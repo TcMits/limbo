@@ -6791,12 +6791,6 @@ pub fn op_rename_table(
     };
 
     let conn = program.connection.clone();
-    // set auto commit to false in order for parse schema to not commit changes as transaction state is stored in connection,
-    // and we use the same connection for nested query.
-    let previous_auto_commit = conn.auto_commit.get();
-    conn.auto_commit.set(false);
-
-    let stmt = conn.prepare("SELECT * FROM sqlite_schema")?;
 
     conn.with_schema_mut(|schema| {
         schema.indexes.remove(from).map(|mut indexes| {
@@ -6808,20 +6802,25 @@ pub fn op_rename_table(
             schema.indexes.insert(to.to_owned(), indexes);
         });
 
-        let mut table_ref = schema
+        let mut table = schema
             .tables
             .remove(from)
             .expect("table being renamed should be in schema");
-        let table = Arc::make_mut(&mut table_ref);
 
-        let Table::BTree(btree) = table else {
-            panic!("only btree tables can be renamed");
-        };
+        {
+            let table = Arc::make_mut(&mut table);
 
-        schema.tables.insert(to.to_owned(), table_ref);
+            let Table::BTree(btree) = table else {
+                panic!("only btree tables can be renamed");
+            };
+
+            let btree = Arc::make_mut(btree);
+            btree.name = to.to_owned();
+        }
+
+        schema.tables.insert(to.to_owned(), table);
     });
 
-    conn.auto_commit.set(previous_auto_commit);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
