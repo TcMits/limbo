@@ -1237,11 +1237,6 @@ impl Pager {
                     let is_last_frame = current_page_to_append_idx
                         == self.commit_info.borrow().dirty_pages.len() - 1;
                     if is_last_frame {
-                        // Let's clear the page cache now
-                        {
-                            let mut cache = self.page_cache.write();
-                            cache.clear().unwrap();
-                        }
                         self.dirty_pages.borrow_mut().clear();
                         self.commit_info.borrow_mut().state = CommitState::SyncWal;
                     } else {
