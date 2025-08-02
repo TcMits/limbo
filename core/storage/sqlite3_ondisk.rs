@@ -1846,7 +1846,7 @@ pub fn prepare_wal_frame(
 pub fn begin_write_wal_header(io: &Arc<dyn File>, header: &WalHeader) -> Result<Completion> {
     tracing::trace!("begin_write_wal_header");
     let buffer = {
-        let buffer = BufferPool::new_temporary(WAL_HEADER_SIZE);
+        let buffer = Buffer::new_temporary(WAL_HEADER_SIZE);
         let buf = buffer.as_mut_slice();
 
         buf[0..4].copy_from_slice(&header.magic.to_be_bytes());
