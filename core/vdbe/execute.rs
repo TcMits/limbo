@@ -6388,10 +6388,21 @@ pub fn op_noop(
     Ok(InsnFunctionStepResult::Step)
 }
 
+#[derive(Default)]
 pub enum OpOpenEphemeralState {
+    #[default]
     Start,
-    StartingTxn { pager: Rc<Pager> },
-    CreateBtree { pager: Rc<Pager> },
+    StartingTxn {
+        pager: Rc<Pager>,
+    },
+    CreateBtree {
+        pager: Rc<Pager>,
+    },
+    // clippy complains this variant is too big when compared to the rest of the variants
+    // so it says we need to box it here
+    Rewind {
+        cursor: Box<BTreeCursor>,
+    },
 }
 pub fn op_open_ephemeral(
     program: &Program,
@@ -6408,7 +6419,7 @@ pub fn op_open_ephemeral(
         Insn::OpenAutoindex { cursor_id } => (*cursor_id, false),
         _ => unreachable!("unexpected Insn {:?}", insn),
     };
-    match &state.op_open_ephemeral_state {
+    match &mut state.op_open_ephemeral_state {
         OpOpenEphemeralState::Start => {
             tracing::trace!("Start");
             let conn = program.connection.clone();
@@ -6491,7 +6502,7 @@ pub fn op_open_ephemeral(
                 _ => unreachable!("This should not have happened"),
             };
 
-            let mut cursor = if let CursorType::BTreeIndex(index) = cursor_type {
+            let cursor = if let CursorType::BTreeIndex(index) = cursor_type {
                 BTreeCursor::new_index(
                     mv_cursor,
                     pager.clone(),
@@ -6502,10 +6513,23 @@ pub fn op_open_ephemeral(
             } else {
                 BTreeCursor::new_table(mv_cursor, pager.clone(), root_page as usize, num_columns)
             };
-            let res = cursor.rewind()?; // Will never return io
+            state.op_open_ephemeral_state = OpOpenEphemeralState::Rewind {
+                cursor: Box::new(cursor),
+            };
+        }
+        OpOpenEphemeralState::Rewind { cursor } => {
+            return_if_io!(cursor.rewind());
 
             let mut cursors: std::cell::RefMut<'_, Vec<Option<Cursor>>> =
                 state.cursors.borrow_mut();
+
+            let (_, cursor_type) = program.cursor_ref.get(cursor_id).unwrap();
+
+            let OpOpenEphemeralState::Rewind { cursor } =
+                std::mem::take(&mut state.op_open_ephemeral_state)
+            else {
+                unreachable!()
+            };
 
             // Table content is erased if the cursor already exists
             match cursor_type {
@@ -6513,13 +6537,13 @@ pub fn op_open_ephemeral(
                     cursors
                         .get_mut(cursor_id)
                         .unwrap()
-                        .replace(Cursor::new_btree(cursor));
+                        .replace(Cursor::new_btree(*cursor));
                 }
                 CursorType::BTreeIndex(_) => {
                     cursors
                         .get_mut(cursor_id)
                         .unwrap()
-                        .replace(Cursor::new_btree(cursor));
+                        .replace(Cursor::new_btree(*cursor));
                 }
                 CursorType::Pseudo(_) => {
                     panic!("OpenEphemeral on pseudo cursor");
