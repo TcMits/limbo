@@ -1309,13 +1309,11 @@ mod tests {
         let mut available_indexes = HashMap::new();
         available_indexes.insert("t1".to_string(), vec![index]);
 
+        let table = Table::BTree(table);
         joined_tables.push(JoinedTable {
-            table: Table::BTree(table),
+            op: Operation::default_scan_for(&table),
+            table,
             internal_id: table_id_counter.next(),
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
             identifier: "t1".to_string(),
             join_info: None,
             col_used_mask: ColumnUsedMask::default(),
@@ -1402,13 +1400,11 @@ mod tests {
         });
         available_indexes.insert("t1".to_string(), vec![index]);
 
+        let table = Table::BTree(table);
         joined_tables.push(JoinedTable {
-            table: Table::BTree(table),
+            op: Operation::default_scan_for(&table),
+            table,
             internal_id: table_id_counter.next(),
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
             identifier: "t1".to_string(),
             join_info: None,
             col_used_mask: ColumnUsedMask::default(),
@@ -1515,13 +1511,11 @@ mod tests {
         });
         available_indexes.insert("t1".to_string(), vec![index]);
 
+        let table = Table::BTree(table);
         joined_tables.push(JoinedTable {
-            table: Table::BTree(table),
+            op: Operation::default_scan_for(&table),
+            table,
             internal_id: table_id_counter.next(),
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
             identifier: "t1".to_string(),
             join_info: None,
             col_used_mask: ColumnUsedMask::default(),
@@ -1660,12 +1654,10 @@ mod tests {
         internal_id: TableInternalId,
     ) -> JoinedTable {
         let name = table.name.clone();
+        let table = Table::BTree(table);
         JoinedTable {
-            table: Table::BTree(table),
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
+            op: Operation::default_scan_for(&table),
+            table,
             identifier: name,
             internal_id,
             join_info,

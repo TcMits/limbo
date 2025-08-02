@@ -863,12 +863,7 @@ impl ColumnUsedMask {
 pub enum Operation {
     // Scan operation
     // This operation is used to scan a table.
-    // The iter_dir is used to indicate the direction of the iterator.
-    Scan {
-        iter_dir: IterationDirection,
-        /// The index that we are using to scan the table, if any.
-        index: Option<Arc<Index>>,
-    },
+    Scan(Scan),
     // Search operation
     // This operation is used to search for a row in a table using an index
     // (i.e. a primary key or a secondary index)
@@ -876,9 +871,21 @@ pub enum Operation {
 }
 
 impl Operation {
+    pub fn default_scan_for(table: &Table) -> Self {
+        match table {
+            Table::BTree(_) => Operation::Scan(Scan::BTreeTable {
+                iter_dir: IterationDirection::Forwards,
+                index: None,
+            }),
+            Table::Virtual(_) => Operation::Scan(Scan::VirtualTable),
+            Table::FromClauseSubquery(_) => Operation::Scan(Scan::Subquery),
+        }
+    }
+
     pub fn index(&self) -> Option<&Arc<Index>> {
         match self {
-            Operation::Scan { index, .. } => index.as_ref(),
+            Operation::Scan(Scan::BTreeTable { index, .. }) => index.as_ref(),
+            Operation::Scan(_) => None,
             Operation::Search(Search::RowidEq { .. }) => None,
             Operation::Search(Search::Seek { index, .. }) => index.as_ref(),
         }
@@ -931,10 +938,7 @@ impl JoinedTable {
             result_columns_start_reg: None,
         });
         Self {
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
+            op: Operation::default_scan_for(&table),
             table,
             identifier,
             internal_id,
@@ -1108,6 +1112,22 @@ pub struct TerminationKey {
     pub null_pad: bool,
     /// The comparison operator to use when terminating the scan that follows the seek.
     pub op: SeekOp,
+}
+
+/// Represents the type of table scan performed during query execution.
+#[derive(Clone, Debug)]
+pub enum Scan {
+    /// A scan of a B-tree–backed table, optionally using an index, and with an iteration direction.
+    BTreeTable {
+        /// The iter_dir is used to indicate the direction of the iterator.
+        iter_dir: IterationDirection,
+        /// The index that we are using to scan the table, if any.
+        index: Option<Arc<Index>>,
+    },
+    /// A scan of a virtual table, delegated to the table’s `filter` and related methods.
+    VirtualTable,
+    /// A scan of a subquery in the `FROM` clause.
+    Subquery,
 }
 
 /// An enum that represents a search operation that can be used to search for a row in a table using an index

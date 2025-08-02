@@ -3459,10 +3459,7 @@ pub fn process_returning_clause(
     Vec<super::plan::ResultSetColumn>,
     super::plan::TableReferences,
 )> {
-    use super::plan::{
-        ColumnUsedMask, IterationDirection, JoinedTable, Operation, ResultSetColumn,
-        TableReferences,
-    };
+    use super::plan::{ColumnUsedMask, JoinedTable, Operation, ResultSetColumn, TableReferences};
     use super::planner::bind_column_references;
 
     let mut result_columns = vec![];
@@ -3477,10 +3474,7 @@ pub fn process_returning_clause(
             },
             identifier: table_name.to_string(),
             internal_id,
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
+            op: Operation::default_scan_for(table),
             join_info: None,
             col_used_mask: ColumnUsedMask::default(),
             database_id: 0,

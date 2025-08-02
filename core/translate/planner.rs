@@ -4,9 +4,9 @@ use std::sync::Arc;
 use super::{
     expr::walk_expr,
     plan::{
-        Aggregate, ColumnUsedMask, Distinctness, EvalAt, IterationDirection, JoinInfo,
-        JoinOrderMember, JoinedTable, Operation, OuterQueryReference, Plan, QueryDestination,
-        ResultSetColumn, TableReferences, WhereTerm,
+        Aggregate, ColumnUsedMask, Distinctness, EvalAt, JoinInfo, JoinOrderMember, JoinedTable,
+        Operation, OuterQueryReference, Plan, QueryDestination, ResultSetColumn, TableReferences,
+        WhereTerm,
     },
     select::prepare_select_plan,
     SymbolTable,
@@ -444,10 +444,7 @@ fn parse_table(
             ));
         };
         table_references.add_joined_table(JoinedTable {
-            op: Operation::Scan {
-                iter_dir: IterationDirection::Forwards,
-                index: None,
-            },
+            op: Operation::default_scan_for(&tbl_ref),
             table: tbl_ref,
             identifier: alias.unwrap_or(normalized_qualified_name),
             internal_id,
@@ -470,10 +467,7 @@ fn parse_table(
     {
         if matches!(outer_ref.table, Table::FromClauseSubquery(_)) {
             table_references.add_joined_table(JoinedTable {
-                op: Operation::Scan {
-                    iter_dir: IterationDirection::Forwards,
-                    index: None,
-                },
+                op: Operation::default_scan_for(&outer_ref.table),
                 table: outer_ref.table.clone(),
                 identifier: outer_ref.identifier.clone(),
                 internal_id: table_ref_counter.next(),

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::schema::{BTreeTable, Column, Type};
 use crate::translate::optimizer::optimize_select_plan;
-use crate::translate::plan::{Operation, QueryDestination, Search, SelectPlan};
+use crate::translate::plan::{Operation, QueryDestination, Scan, Search, SelectPlan};
 use crate::vdbe::builder::CursorType;
 use crate::{
     bail_parse_error,
@@ -138,10 +138,7 @@ pub fn prepare_update_plan(
         },
         identifier: table_name.as_str().to_string(),
         internal_id: program.table_reference_counter.next(),
-        op: Operation::Scan {
-            iter_dir,
-            index: None,
-        },
+        op: build_scan_op(&table, iter_dir),
         join_info: None,
         col_used_mask: ColumnUsedMask::default(),
         database_id: 0,
@@ -235,10 +232,7 @@ pub fn prepare_update_plan(
             },
             identifier: table_name.as_str().to_string(),
             internal_id,
-            op: Operation::Scan {
-                iter_dir,
-                index: None,
-            },
+            op: build_scan_op(&table, iter_dir),
             join_info: None,
             col_used_mask: ColumnUsedMask::default(),
             database_id: 0,
@@ -368,4 +362,15 @@ pub fn prepare_update_plan(
         indexes_to_update,
         ephemeral_plan,
     }))
+}
+
+fn build_scan_op(table: &Table, iter_dir: IterationDirection) -> Operation {
+    match table {
+        Table::BTree(_) => Operation::Scan(Scan::BTreeTable {
+            iter_dir,
+            index: None,
+        }),
+        Table::Virtual(_) => Operation::Scan(Scan::VirtualTable),
+        _ => unreachable!(),
+    }
 }

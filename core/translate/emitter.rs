@@ -16,7 +16,7 @@ use super::main_loop::{
 };
 use super::order_by::{emit_order_by, init_order_by, SortMetadata};
 use super::plan::{
-    Distinctness, JoinOrderMember, Operation, SelectPlan, TableReferences, UpdatePlan,
+    Distinctness, JoinOrderMember, Operation, Scan, SelectPlan, TableReferences, UpdatePlan,
 };
 use super::select::emit_simple_count;
 use super::subquery::emit_subqueries;
@@ -774,7 +774,7 @@ fn emit_update_insns(
     let loop_labels = t_ctx.labels_main_loop.first().unwrap();
     let cursor_id = program.resolve_cursor_id(&CursorKey::table(table_ref.internal_id));
     let (index, is_virtual) = match &table_ref.op {
-        Operation::Scan { index, .. } => (
+        Operation::Scan(Scan::BTreeTable { index, .. }) => (
             index.as_ref().map(|index| {
                 (
                     index.clone(),
@@ -782,8 +782,9 @@ fn emit_update_insns(
                         .resolve_cursor_id(&CursorKey::index(table_ref.internal_id, index.clone())),
                 )
             }),
-            table_ref.virtual_table().is_some(),
+            false,
         ),
+        Operation::Scan(_) => (None, table_ref.virtual_table().is_some()),
         Operation::Search(search) => match search {
             &Search::RowidEq { .. } | Search::Seek { index: None, .. } => (None, false),
             Search::Seek {

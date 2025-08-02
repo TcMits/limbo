@@ -14,7 +14,7 @@ use crate::{
     schema::{Index, IndexColumn, Schema, Table},
     translate::{
         expr::is_double_quoted_identifier, expr::walk_expr_mut,
-        optimizer::access_method::AccessMethodParams, plan::TerminationKey,
+        optimizer::access_method::AccessMethodParams, plan::Scan, plan::TerminationKey,
     },
     types::SeekOp,
     Result,
@@ -260,10 +260,10 @@ fn optimize_table_access(
                     };
 
                     if !try_to_build_ephemeral_index {
-                        joined_tables[table_idx].op = Operation::Scan {
+                        joined_tables[table_idx].op = Operation::Scan(Scan::BTreeTable {
                             iter_dir: *iter_dir,
                             index: index.clone(),
-                        };
+                        });
                         continue;
                     }
                     // This branch means we have a full table scan for a non-outermost table.
@@ -272,10 +272,10 @@ fn optimize_table_access(
                         .iter()
                         .find(|c| c.table_id == join_order_member.table_id);
                     let Some(table_constraints) = table_constraints else {
-                        joined_tables[table_idx].op = Operation::Scan {
+                        joined_tables[table_idx].op = Operation::Scan(Scan::BTreeTable {
                             iter_dir: *iter_dir,
                             index: index.clone(),
-                        };
+                        });
                         continue;
                     };
                     let temp_constraint_refs = (0..table_constraints.constraints.len())
@@ -291,10 +291,10 @@ fn optimize_table_access(
                         &best_join_order[..=i],
                     );
                     if usable_constraint_refs.is_empty() {
-                        joined_tables[table_idx].op = Operation::Scan {
+                        joined_tables[table_idx].op = Operation::Scan(Scan::BTreeTable {
                             iter_dir: *iter_dir,
                             index: index.clone(),
-                        };
+                        });
                         continue;
                     }
                     let ephemeral_index = ephemeral_index_build(
@@ -359,11 +359,11 @@ fn optimize_table_access(
                     };
                 }
             }
-            AccessMethodParams::VirtualTable | AccessMethodParams::Subquery => {
-                joined_tables[table_idx].op = Operation::Scan {
-                    iter_dir: IterationDirection::Forwards,
-                    index: None,
-                };
+            AccessMethodParams::VirtualTable => {
+                joined_tables[table_idx].op = Operation::Scan(Scan::VirtualTable);
+            }
+            AccessMethodParams::Subquery => {
+                joined_tables[table_idx].op = Operation::Scan(Scan::Subquery);
             }
         }
     }

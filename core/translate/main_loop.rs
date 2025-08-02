@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     schema::{Affinity, Index, IndexColumn, Table},
     translate::{
-        plan::{DistinctCtx, Distinctness},
+        plan::{DistinctCtx, Distinctness, Scan},
         result_row::emit_select_result,
     },
     types::SeekOp,
@@ -203,7 +203,7 @@ pub fn init_loop(
         }
         let (table_cursor_id, index_cursor_id) = table.open_cursors(program, mode)?;
         match &table.op {
-            Operation::Scan { index, .. } => match (mode, &table.table) {
+            Operation::Scan(Scan::BTreeTable { index, .. }) => match (mode, &table.table) {
                 (OperationMode::SELECT, Table::BTree(btree)) => {
                     let root_page = btree.root_page;
                     if let Some(cursor_id) = table_cursor_id {
@@ -274,7 +274,10 @@ pub fn init_loop(
                         });
                     }
                 }
-                (_, Table::Virtual(tbl)) => {
+                _ => {}
+            },
+            Operation::Scan(Scan::VirtualTable) => {
+                if let Table::Virtual(tbl) = &table.table {
                     let is_write = matches!(
                         mode,
                         OperationMode::INSERT | OperationMode::UPDATE | OperationMode::DELETE
@@ -286,8 +289,8 @@ pub fn init_loop(
                         program.emit_insn(Insn::VOpen { cursor_id });
                     }
                 }
-                _ => {}
-            },
+            }
+            Operation::Scan(_) => {}
             Operation::Search(search) => {
                 match mode {
                     OperationMode::SELECT => {
@@ -431,9 +434,9 @@ pub fn open_loop(
         let (table_cursor_id, index_cursor_id) = table.resolve_cursors(program)?;
 
         match &table.op {
-            Operation::Scan { iter_dir, .. } => {
-                match &table.table {
-                    Table::BTree(_) => {
+            Operation::Scan(scan) => {
+                match (scan, &table.table) {
+                    (Scan::BTreeTable { iter_dir, .. }, Table::BTree(_)) => {
                         let iteration_cursor_id = temp_cursor_id.unwrap_or_else(|| {
                             index_cursor_id.unwrap_or_else(|| {
                                 table_cursor_id.expect(
@@ -454,7 +457,7 @@ pub fn open_loop(
                         }
                         program.preassign_label_to_next_insn(loop_start);
                     }
-                    Table::Virtual(vtab) => {
+                    (Scan::VirtualTable, Table::Virtual(vtab)) => {
                         let (start_reg, count, maybe_idx_str, maybe_idx_int) = {
                             // Virtual‑table modules can receive constraints via xBestIndex.
                             // They return information with which to pass to VFilter operation.
@@ -556,7 +559,7 @@ pub fn open_loop(
                         });
                         program.preassign_label_to_next_insn(loop_start);
                     }
-                    Table::FromClauseSubquery(from_clause_subquery) => {
+                    (Scan::Subquery, Table::FromClauseSubquery(from_clause_subquery)) => {
                         let (yield_reg, coroutine_implementation_start) =
                             match &from_clause_subquery.plan.query_destination {
                                 QueryDestination::CoroutineYield {
@@ -581,6 +584,10 @@ pub fn open_loop(
                             end_offset: loop_end,
                         });
                     }
+                    _ => unreachable!(
+                        "{:?} scan cannot be used with {:?} table",
+                        scan, table.table
+                    ),
                 }
 
                 if let Some(table_cursor_id) = table_cursor_id {
@@ -1059,10 +1066,10 @@ pub fn close_loop(
         let (table_cursor_id, index_cursor_id) = table.resolve_cursors(program)?;
 
         match &table.op {
-            Operation::Scan { iter_dir, .. } => {
+            Operation::Scan(scan) => {
                 program.resolve_label(loop_labels.next, program.offset());
-                match &table.table {
-                    Table::BTree(_) => {
+                match scan {
+                    Scan::BTreeTable { iter_dir, .. } => {
                         let iteration_cursor_id = temp_cursor_id.unwrap_or_else(|| {
                             index_cursor_id.unwrap_or_else(|| {
                                 table_cursor_id.expect(
@@ -1082,14 +1089,14 @@ pub fn close_loop(
                             });
                         }
                     }
-                    Table::Virtual(_) => {
+                    Scan::VirtualTable => {
                         program.emit_insn(Insn::VNext {
                             cursor_id: table_cursor_id
                                 .expect("Virtual tables do not support covering indexes"),
                             pc_if_next: loop_labels.loop_start,
                         });
                     }
-                    Table::FromClauseSubquery(_) => {
+                    Scan::Subquery => {
                         // A subquery has no cursor to call Next on, so it just emits a Goto
                         // to the Yield instruction, which in turn jumps back to the main loop of the subquery,
                         // so that the next row from the subquery can be read.
