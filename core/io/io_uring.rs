@@ -312,13 +312,6 @@ impl WrappedIOUring {
         });
         let mut iov_count = 0;
         let mut last_end: Option<(*const u8, usize)> = None;
-        for (idx, buffer) in st
-            .bufs
-            .iter()
-            .enumerate()
-            .skip(st.current_buffer_idx)
-            .take(MAX_IOVEC_ENTRIES)
-        {
         for buffer in st.bufs.iter().skip(st.current_buffer_idx) {
             let ptr = buffer.as_ptr();
             let len = buffer.len();

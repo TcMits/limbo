@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use std::cell::UnsafeCell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
 pub static BUFFER_POOL: OnceLock<Arc<BufferPool>> = OnceLock::new();
 
@@ -298,7 +298,7 @@ impl PoolInner {
     }
 
     pub fn free(&self, size: usize, arena_id: u32, page_idx: u32) {
-        // Check WAL frame arena first
+        // common case: check WAL frame arena first
         if let Some(wal_arena) = self.wal_frame_arena.as_ref() {
             if arena_id == wal_arena.id {
                 let pages = size.div_ceil(wal_arena.page_size);
@@ -307,7 +307,6 @@ impl PoolInner {
                 return;
             }
         }
-
         // Otherwise use regular arena
         let arena = self
             .page_arena
@@ -400,13 +399,6 @@ impl Arena {
         let offset = first_idx as usize * self.page_size;
         let ptr = unsafe { NonNull::new_unchecked(self.base.as_ptr().add(offset)) };
         Some(FreeEntry { ptr, first_idx })
-    }
-
-    /// Allocate a contiguous run of `pages`. Returns the first page index.
-    #[inline]
-    pub fn alloc_run(&self, pages: u32) -> Option<u32> {
-        let mut bm = self.free_pages.lock();
-        bm.alloc_run(pages)
     }
 
     pub fn free(&self, page_idx: u32, count: usize) {

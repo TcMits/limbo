@@ -10,8 +10,8 @@ use crate::storage::{
 };
 use crate::util::IOExt as _;
 use crate::{
-    return_if_io, turso_assert, Completion, Connection, IOResult, LimboError, Result,
-    TransactionState, WalFrameInfo,
+    return_if_io, turso_assert, types::WalFrameInfo, Completion, Connection, IOResult, LimboError,
+    Result, TransactionState,
 };
 use parking_lot::RwLock;
 use std::cell::{Cell, OnceCell, UnsafeCell};
