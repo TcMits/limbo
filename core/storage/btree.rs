@@ -8451,8 +8451,7 @@ mod tests {
         let page_size = 512;
 
         let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
-        let buffer_pool =
-            BufferPool::begin_init(&io, page_size * 128).finalize_with_page_size(page_size);
+        let buffer_pool = BufferPool::begin_init(&io, page_size * 128);
 
         let db_file = Arc::new(DatabaseFile::new(
             io.open_file(":memory:", OpenFlags::Create, false).unwrap(),
@@ -8489,7 +8488,9 @@ mod tests {
         pager
             .io
             .block(|| {
-                pager.with_header_mut(|header| header.page_size = PageSize::new(page_size).unwrap())
+                pager.with_header_mut(|header| {
+                    header.page_size = PageSize::new(page_size as u32).unwrap()
+                })
             })
             .unwrap();
 
