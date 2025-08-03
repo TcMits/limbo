@@ -176,13 +176,15 @@ impl Completion {
     }
 
     pub fn complete(&self, result: i32) {
-        match &self.inner.completion_type {
-            CompletionType::Read(r) => r.complete(result),
-            CompletionType::Write(w) => w.complete(result),
-            CompletionType::Sync(s) => s.complete(result), // fix
-            CompletionType::Truncate(t) => t.complete(result),
-        };
-        self.inner.is_completed.set(true);
+        if !self.inner.is_completed.get() {
+            match &self.inner.completion_type {
+                CompletionType::Read(r) => r.complete(result),
+                CompletionType::Write(w) => w.complete(result),
+                CompletionType::Sync(s) => s.complete(result), // fix
+                CompletionType::Truncate(t) => t.complete(result),
+            };
+            self.inner.is_completed.set(true);
+        }
     }
 
     /// only call this method if you are sure that the completion is
