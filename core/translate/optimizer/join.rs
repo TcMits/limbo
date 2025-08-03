@@ -8,7 +8,7 @@ use crate::{
         plan::{JoinOrderMember, JoinedTable},
         planner::TableMask,
     },
-    Result,
+    LimboError, Result,
 };
 
 use super::{
@@ -142,23 +142,24 @@ pub fn compute_best_join_order<'a>(
     // We assign Some Cost (tm) to any required sort operation, so the best ordered plan may end up being
     // the one we choose, if the cost reduction from avoiding sorting brings it below the cost of the overall best one.
     let mut best_ordered_plan: Option<JoinN> = None;
-    let mut best_plan_is_also_ordered = if let Some(order_target) = maybe_order_target {
-        plan_satisfies_order_target(
-            &naive_plan,
-            access_methods_arena,
-            joined_tables,
-            order_target,
-        )
-    } else {
-        false
+    let mut best_plan_is_also_ordered = match (naive_plan.as_ref(), maybe_order_target) {
+        (Some(plan), Some(order_target)) => {
+            plan_satisfies_order_target(plan, access_methods_arena, joined_tables, order_target)
+        }
+        _ => false,
     };
 
     // If we have one table, then the "naive left-to-right plan" is always the best.
     if joined_tables.len() == 1 {
-        return Ok(Some(BestJoinOrderResult {
-            best_plan: naive_plan,
-            best_ordered_plan: None,
-        }));
+        return match naive_plan {
+            Some(plan) => Ok(Some(BestJoinOrderResult {
+                best_plan: plan,
+                best_ordered_plan: None,
+            })),
+            None => Err(LimboError::PlanningError(
+                "No valid query plan found".to_string(),
+            )),
+        };
     }
     let mut best_plan = naive_plan;
 
@@ -172,7 +173,7 @@ pub fn compute_best_join_order<'a>(
 
     // Keep track of the current best cost so we can short-circuit planning for subplans
     // that already exceed the cost of the current best plan.
-    let cost_upper_bound = best_plan.cost;
+    let cost_upper_bound = best_plan.as_ref().map_or(Cost(f64::MAX), |plan| plan.cost);
 
     // Keep track of the best plan for a given subset of tables.
     // Consider this example: we have tables a,b,c,d to join.
@@ -367,7 +368,7 @@ pub fn compute_best_join_order<'a>(
                 let has_all_tables = mask.table_count() == num_tables;
                 if has_all_tables {
                     if cost_upper_bound > cost {
-                        best_plan = rel;
+                        best_plan = Some(rel);
                         best_plan_is_also_ordered = best_for_mask_is_also_ordered;
                     }
                 } else {
@@ -377,14 +378,19 @@ pub fn compute_best_join_order<'a>(
         }
     }
 
-    Ok(Some(BestJoinOrderResult {
-        best_plan,
-        best_ordered_plan: if best_plan_is_also_ordered {
-            None
-        } else {
-            best_ordered_plan
-        },
-    }))
+    match best_plan {
+        Some(best_plan) => Ok(Some(BestJoinOrderResult {
+            best_plan,
+            best_ordered_plan: if best_plan_is_also_ordered {
+                None
+            } else {
+                best_ordered_plan
+            },
+        })),
+        None => Err(LimboError::PlanningError(
+            "No valid query plan found".to_string(),
+        )),
+    }
 }
 
 /// Specialized version of [compute_best_join_order] that just joins tables in the order they are given
@@ -395,7 +401,7 @@ pub fn compute_naive_left_deep_plan<'a>(
     maybe_order_target: Option<&OrderTarget>,
     access_methods_arena: &'a RefCell<Vec<AccessMethod<'a>>>,
     constraints: &'a [TableConstraints],
-) -> Result<JoinN> {
+) -> Result<Option<JoinN>> {
     let n = joined_tables.len();
     assert!(n > 0);
 
@@ -418,23 +424,25 @@ pub fn compute_naive_left_deep_plan<'a>(
         maybe_order_target,
         access_methods_arena,
         Cost(f64::MAX),
-    )?
-    .expect("call to join_lhs_and_rhs in compute_naive_left_deep_plan always returns Some(JoinN)");
+    )?;
+    if best_plan.is_none() {
+        return Ok(None);
+    }
 
     // Add remaining tables one at a time from left to right
     for i in 1..n {
         best_plan = join_lhs_and_rhs(
-            Some(&best_plan),
+            best_plan.as_ref(),
             &joined_tables[i],
             &constraints[i],
             &join_order[..=i],
             maybe_order_target,
             access_methods_arena,
             Cost(f64::MAX),
-        )?
-        .expect(
-            "call to join_lhs_and_rhs in compute_naive_left_deep_plan always returns Some(JoinN)",
-        );
+        )?;
+        if best_plan.is_none() {
+            return Ok(None);
+        }
     }
 
     Ok(best_plan)
