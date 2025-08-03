@@ -1,5 +1,6 @@
-use crate::storage::buffer_pool::{ArenaBuffer, TEMP_BUFFER_CACHE};
-use crate::Result;
+use crate::storage::buffer_pool::ArenaBuffer;
+use crate::storage::sqlite3_ondisk::WAL_FRAME_HEADER_SIZE;
+use crate::{BufferPool, Result};
 use bitflags::bitflags;
 use cfg_block::cfg_block;
 use std::fmt;
@@ -293,9 +294,11 @@ impl Drop for Buffer {
     fn drop(&mut self) {
         let len = self.len();
         if let Self::Heap(buf) = self {
-            crate::storage::buffer_pool::TEMP_BUFFER_CACHE.with(|cache| {
+            TEMP_BUFFER_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                // take ownership of the buffer by swapping it with a dummy
                 let buffer = std::mem::replace(buf, Pin::new(vec![].into_boxed_slice()));
-                cache.borrow_mut().return_buffer(buffer, len);
+                cache.return_buffer(buffer, len);
             });
         }
     }
@@ -365,6 +368,56 @@ impl Buffer {
         match self {
             Self::Heap(buf) => buf.as_mut_ptr(),
             Self::Pooled(buf) => buf.as_mut_ptr(),
+        }
+    }
+}
+
+thread_local! {
+    /// thread local cache to re-use temporary buffers to prevent churn when pool overflows
+    pub static TEMP_BUFFER_CACHE: RefCell<TempBufferCache> = RefCell::new(TempBufferCache::new());
+}
+
+pub(crate) struct TempBufferCache {
+    // Buffers indexed by size, we only cache common sizes
+    page_size: usize,
+    page_buffers: Vec<BufferData>,
+    wal_frame_buffers: Vec<BufferData>,
+    max_cached: usize,
+}
+
+impl TempBufferCache {
+    fn new() -> Self {
+        Self {
+            page_size: BufferPool::DEFAULT_PAGE_SIZE,
+            page_buffers: Vec::with_capacity(8),
+            wal_frame_buffers: Vec::with_capacity(8),
+            max_cached: 512,
+        }
+    }
+
+    pub fn reinit_cache(&mut self, page_size: usize) {
+        self.page_buffers.clear();
+        self.wal_frame_buffers.clear();
+        self.page_size = page_size;
+    }
+
+    fn get_buffer(&mut self, size: usize) -> Option<BufferData> {
+        match size {
+            sz if sz == self.page_size => self.page_buffers.pop(),
+            sz if sz == (self.page_size + WAL_FRAME_HEADER_SIZE) => self.wal_frame_buffers.pop(),
+            _ => None,
+        }
+    }
+
+    fn return_buffer(&mut self, buff: BufferData, len: usize) {
+        let sz = self.page_size;
+        let cache = match len {
+            n if n.eq(&sz) => &mut self.page_buffers,
+            n if n.eq(&(sz + WAL_FRAME_HEADER_SIZE)) => &mut self.wal_frame_buffers,
+            _ => return,
+        };
+        if self.max_cached > cache.len() {
+            cache.push(buff);
         }
     }
 }
