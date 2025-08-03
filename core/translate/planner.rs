@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::sync::Arc;
 
 use super::{
@@ -662,7 +661,7 @@ pub fn parse_where(
             out_where_clause.push(WhereTerm {
                 expr,
                 from_outer_join: None,
-                consumed: Cell::new(false),
+                consumed: false,
             });
         }
         Ok(())
@@ -950,7 +949,7 @@ fn parse_join(
                         } else {
                             None
                         },
-                        consumed: Cell::new(false),
+                        consumed: false,
                     });
                 }
             }
@@ -1031,7 +1030,7 @@ fn parse_join(
                         } else {
                             None
                         },
-                        consumed: Cell::new(false),
+                        consumed: false,
                     });
                 }
                 using = Some(distinct_names);

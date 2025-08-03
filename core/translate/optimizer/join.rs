@@ -501,7 +501,7 @@ fn generate_join_bitmasks(table_number_max_exclusive: usize, how_many: usize) ->
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, sync::Arc};
+    use std::sync::Arc;
 
     use turso_sqlite3_parser::ast::{self, Expr, Operator, SortOrder, TableInternalId};
 
@@ -1344,7 +1344,7 @@ mod tests {
                 Box::new(Expr::Literal(ast::Literal::Numeric(5.to_string()))),
             ),
             from_outer_join: None,
-            consumed: Cell::new(false),
+            consumed: false,
         }];
 
         let table_references = TableReferences::new(joined_tables, vec![]);
@@ -1436,7 +1436,7 @@ mod tests {
                     Box::new(Expr::Literal(ast::Literal::Numeric(5.to_string()))),
                 ),
                 from_outer_join: None,
-                consumed: Cell::new(false),
+                consumed: false,
             },
             WhereTerm {
                 expr: Expr::Binary(
@@ -1450,7 +1450,7 @@ mod tests {
                     Box::new(Expr::Literal(ast::Literal::Numeric(7.to_string()))),
                 ),
                 from_outer_join: None,
-                consumed: Cell::new(false),
+                consumed: false,
             },
         ];
 
@@ -1547,7 +1547,7 @@ mod tests {
                     Box::new(Expr::Literal(ast::Literal::Numeric(5.to_string()))),
                 ),
                 from_outer_join: None,
-                consumed: Cell::new(false),
+                consumed: false,
             },
             WhereTerm {
                 expr: Expr::Binary(
@@ -1561,7 +1561,7 @@ mod tests {
                     Box::new(Expr::Literal(ast::Literal::Numeric(10.to_string()))),
                 ),
                 from_outer_join: None,
-                consumed: Cell::new(false),
+                consumed: false,
             },
             WhereTerm {
                 expr: Expr::Binary(
@@ -1575,7 +1575,7 @@ mod tests {
                     Box::new(Expr::Literal(ast::Literal::Numeric(7.to_string()))),
                 ),
                 from_outer_join: None,
-                consumed: Cell::new(false),
+                consumed: false,
             },
         ];
 
@@ -1692,7 +1692,7 @@ mod tests {
         WhereTerm {
             expr: Expr::Binary(Box::new(lhs), op, Box::new(rhs)),
             from_outer_join: None,
-            consumed: Cell::new(false),
+            consumed: false,
         }
     }
 

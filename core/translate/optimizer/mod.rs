@@ -319,13 +319,11 @@ fn optimize_table_access(
                         let constraint =
                             &constraints_per_table[table_idx].constraints[cref.constraint_vec_pos];
                         assert!(
-                            !where_clause[constraint.where_clause_pos.0].consumed.get(),
+                            !where_clause[constraint.where_clause_pos.0].consumed,
                             "trying to consume a where clause term twice: {:?}",
                             where_clause[constraint.where_clause_pos.0]
                         );
-                        where_clause[constraint.where_clause_pos.0]
-                            .consumed
-                            .set(true);
+                        where_clause[constraint.where_clause_pos.0].consumed = true;
                     }
                     if let Some(index) = &index {
                         joined_tables[table_idx].op = Operation::Search(Search::Seek {
@@ -428,9 +426,7 @@ fn build_vtab_scan_op(
         let (pred_idx, _) = vtab_constraint.unpack_plan_info();
         let constraint = &table_constraints.constraints[pred_idx];
         if usage.omit {
-            where_clause[constraint.where_clause_pos.0]
-                .consumed
-                .set(true);
+            where_clause[constraint.where_clause_pos.0].consumed = true;
         }
         let expr = constraint.get_constraining_expr(where_clause);
         constraints[zero_based_argv_index] = Some(expr);
@@ -476,7 +472,7 @@ fn eliminate_constant_conditions(
         let predicate = &where_clause[i];
         if predicate.expr.is_always_true()? {
             // true predicates can be removed since they don't affect the result
-            where_clause[i].consumed.set(true);
+            where_clause[i].consumed = true;
             i += 1;
         } else if predicate.expr.is_always_false()? {
             // any false predicate in a list of conjuncts (AND-ed predicates) will make the whole list false,
@@ -487,7 +483,7 @@ fn eliminate_constant_conditions(
             }
             where_clause
                 .iter_mut()
-                .for_each(|term| term.consumed.set(true));
+                .for_each(|term| term.consumed = true);
             return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
         } else {
             i += 1;

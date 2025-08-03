@@ -16,7 +16,6 @@ use crate::vdbe::builder::{ProgramBuilderOpts, TableRefIdCounter};
 use crate::vdbe::insn::Insn;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
 use crate::{Connection, SymbolTable};
-use std::cell::Cell;
 use std::sync::Arc;
 use turso_sqlite3_parser::ast::{self, CompoundSelect, Expr, SortOrder};
 use turso_sqlite3_parser::ast::{ResultColumn, SelectInner};
@@ -661,7 +660,7 @@ fn add_vtab_predicates_to_where_clause(
         plan.where_clause.push(WhereTerm {
             expr,
             from_outer_join: None,
-            consumed: Cell::new(false),
+            consumed: false,
         });
     }
     Ok(())
