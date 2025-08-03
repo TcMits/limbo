@@ -32,7 +32,7 @@ const FILES: u32 = 8;
 const IOVEC_POOL_SIZE: usize = 64;
 
 /// Maximum number of iovec entries per writev operation.
-/// IOV_MAX is typically 1024, but we limit it to a smaller number
+/// IOV_MAX is typically 1024
 const MAX_IOVEC_ENTRIES: usize = CKPT_BATCH_PAGES;
 
 /// Maximum number of I/O operations to wait for in a single run,
@@ -57,6 +57,7 @@ struct WrappedIOUring {
 struct InnerUringIO {
     ring: WrappedIOUring,
     free_files: VecDeque<u32>,
+    free_arenas: [u32; 2],
 }
 
 /// preallocated vec of iovec arrays to avoid allocations during writev operations
@@ -117,6 +118,7 @@ impl UringIO {
                 iov_pool: IovecPool::new(),
             },
             free_files: (0..FILES).collect(),
+            free_arenas: [u32::MAX; 2],
         };
         debug!("Using IO backend 'io-uring'");
         Ok(Self {
@@ -310,6 +312,13 @@ impl WrappedIOUring {
         });
         let mut iov_count = 0;
         let mut last_end: Option<(*const u8, usize)> = None;
+        for (idx, buffer) in st
+            .bufs
+            .iter()
+            .enumerate()
+            .skip(st.current_buffer_idx)
+            .take(MAX_IOVEC_ENTRIES)
+        {
         for buffer in st.bufs.iter().skip(st.current_buffer_idx) {
             let ptr = buffer.as_ptr();
             let len = buffer.len();
@@ -333,21 +342,34 @@ impl WrappedIOUring {
                 break;
             }
         }
+        // If we have coalesced everything into a single iovec, submit as a single`pwrite`
         if iov_count == 1 {
-            // If we have coalesced everything into a single iovec, submit as a single`pwrite`
             let entry = with_fd!(st.file_id, |fd| {
-                io_uring::opcode::Write::new(
-                    fd,
-                    iov_allocation[0].iov_base as *const u8,
-                    iov_allocation[0].iov_len as u32,
-                )
-                .offset(st.file_pos as u64)
-                .build()
-                .user_data(key)
+                if let Some(id) = st.bufs[st.current_buffer_idx].borrow().fixed_id() {
+                    io_uring::opcode::WriteFixed::new(
+                        fd,
+                        iov_allocation[0].iov_base as *const u8,
+                        iov_allocation[0].iov_len as u32,
+                        id as u16,
+                    )
+                    .offset(st.file_pos as u64)
+                    .build()
+                    .user_data(key)
+                } else {
+                    io_uring::opcode::Write::new(
+                        fd,
+                        iov_allocation[0].iov_base as *const u8,
+                        iov_allocation[0].iov_len as u32,
+                    )
+                    .offset(st.file_pos as u64)
+                    .build()
+                    .user_data(key)
+                }
             });
             self.submit_entry(&entry);
             return;
         }
+
         // Store the pointers and get the pointer to the iovec array that we pass
         // to the writev operation, and keep the array itself alive
         let ptr = iov_allocation.as_ptr() as *mut libc::iovec;
@@ -477,16 +499,20 @@ impl IO for UringIO {
         Arc::new(MemoryIO::new())
     }
 
-    fn register_fixed_buffer(&self, ptr: std::ptr::NonNull<u8>, len: usize) -> Result<()> {
+    fn register_fixed_buffer(&self, ptr: std::ptr::NonNull<u8>, len: usize) -> Result<u32> {
         turso_assert!(
             len % 512 == 0,
             "fixed buffer length must be logical block aligned"
         );
         let inner = self.inner.borrow_mut();
-        let default_id = 0;
+        let Some(id) = inner.free_arenas.iter().position(|&x| x == u32::MAX) else {
+            return Err(LimboError::UringIOError(
+                "no free fixed buffer slots available".to_string(),
+            ));
+        };
         unsafe {
             inner.ring.ring.submitter().register_buffers_update(
-                default_id,
+                id as u32,
                 &[libc::iovec {
                     iov_base: ptr.as_ptr() as *mut libc::c_void,
                     iov_len: len,
@@ -494,7 +520,7 @@ impl IO for UringIO {
                 None,
             )?
         };
-        Ok(())
+        Ok(id as u32)
     }
 }
 

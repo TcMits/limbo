@@ -42,7 +42,7 @@ impl ArenaBuffer {
     }
 
     /// The requested size of the allocation. The actual size is always rounded up to
-    /// the next multiple of ARENA_PAGE_SIZE.
+    /// the next multiple of the arena.page_size
     pub const fn logical_len(&self) -> usize {
         self.len
     }
