@@ -146,6 +146,19 @@ pub trait VTable {
     fn destroy(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    /// The query planner may call this method multiple times during optimization, exploring
+    /// different join orders. Each call asks the virtual table which constraints (WHERE clause
+    /// terms) it can efficiently handle. Based on the incoming `ConstraintInfo`s, the virtual table
+    /// should decide:
+    /// - which constraints it can consume (`ConstraintUsage`),
+    /// - how they map to arguments passed into `filter`,
+    /// - and return an `IndexInfo` describing the resulting plan.
+    ///
+    /// The return value’s `idx_num`, `idx_str`, and `constraint_usages` are later passed back to
+    /// the virtual table’s `filter` method if the chosen plan is selected for execution. There is
+    /// no guarantee that `filter` will ever be called — many `best_index` candidates are discarded
+    /// during planning.
     fn best_index(
         _constraints: &[ConstraintInfo],
         _order_by: &[OrderByInfo],

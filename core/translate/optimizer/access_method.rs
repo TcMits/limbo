@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
+use turso_ext::{ConstraintInfo, ConstraintUsage};
 use turso_sqlite3_parser::ast::SortOrder;
 
+use crate::translate::optimizer::constraints::{convert_to_vtab_constraint, Constraint};
 use crate::{
     schema::{Index, Table},
     translate::plan::{IterationDirection, JoinOrderMember, JoinedTable},
-    Result,
+    vtab::VirtualTable,
+    LimboError, Result,
 };
 
 use super::{
@@ -38,7 +41,18 @@ pub enum AccessMethodParams<'a> {
         /// a non-empty list means a search.
         constraint_refs: &'a [ConstraintRef],
     },
-    VirtualTable,
+    VirtualTable {
+        /// Index identifier returned by the table's `best_index` method.
+        idx_num: i32,
+        /// Optional index string returned by the table's `best_index` method.
+        idx_str: Option<String>,
+        /// Constraint descriptors passed to the virtual table’s `filter` method.
+        /// Each corresponds to a column/operator pair from the WHERE clause.
+        constraints: Vec<ConstraintInfo>,
+        /// Information returned by the virtual table's `best_index` method
+        /// describing how each constraint will be used.
+        constraint_usages: Vec<ConstraintUsage>,
+    },
     Subquery,
 }
 
@@ -58,10 +72,12 @@ pub fn find_best_access_method_for_join_order<'a>(
             maybe_order_target,
             input_cardinality,
         ),
-        Table::Virtual(_) => Ok(AccessMethod {
-            cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
-            params: AccessMethodParams::VirtualTable,
-        }),
+        Table::Virtual(vtab) => find_best_access_method_for_vtab(
+            vtab,
+            &rhs_constraints.constraints,
+            join_order,
+            input_cardinality,
+        ),
         Table::FromClauseSubquery(_) => Ok(AccessMethod {
             cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
             params: AccessMethodParams::Subquery,
@@ -174,4 +190,33 @@ fn find_best_access_method_for_btree<'a>(
         cost: best_cost,
         params: best_params,
     })
+}
+
+fn find_best_access_method_for_vtab<'a>(
+    vtab: &VirtualTable,
+    constraints: &[Constraint],
+    join_order: &[JoinOrderMember],
+    input_cardinality: f64,
+) -> Result<AccessMethod<'a>> {
+    let vtab_constraints = convert_to_vtab_constraint(constraints, join_order);
+
+    // TODO: get proper order_by information to pass to the vtab.
+    // maybe encode more info on t_ctx? we need: [col_idx , is_descending]
+    let best_index_result = vtab.best_index(&vtab_constraints, &[]);
+
+    match best_index_result {
+        Ok(index_info) => {
+            Ok(AccessMethod {
+                // TODO: Base cost on `IndexInfo::estimated_cost` and output cardinality on `IndexInfo::estimated_rows`
+                cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
+                params: AccessMethodParams::VirtualTable {
+                    idx_num: index_info.idx_num,
+                    idx_str: index_info.idx_str,
+                    constraints: vtab_constraints,
+                    constraint_usages: index_info.constraint_usages,
+                },
+            })
+        }
+        Err(e) => Err(LimboError::from(e)),
+    }
 }

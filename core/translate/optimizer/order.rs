@@ -233,7 +233,7 @@ pub fn plan_satisfies_order_target(
                     }
                 }
             }
-            AccessMethodParams::VirtualTable => return false,
+            AccessMethodParams::VirtualTable { .. } => return false,
             AccessMethodParams::Subquery => return false,
         }
     }

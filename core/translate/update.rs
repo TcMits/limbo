@@ -370,7 +370,7 @@ fn build_scan_op(table: &Table, iter_dir: IterationDirection) -> Operation {
             iter_dir,
             index: None,
         }),
-        Table::Virtual(_) => Operation::Scan(Scan::VirtualTable),
+        Table::Virtual(_) => Operation::default_scan_for(table),
         _ => unreachable!(),
     }
 }

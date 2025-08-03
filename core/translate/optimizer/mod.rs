@@ -7,6 +7,7 @@ use cost::Cost;
 use join::{compute_best_join_order, BestJoinOrderResult};
 use lift_common_subexpressions::lift_common_subexpressions_from_binary_or_terms;
 use order::{compute_order_target, plan_satisfies_order_target, EliminatesSortBy};
+use turso_ext::{ConstraintInfo, ConstraintUsage};
 use turso_sqlite3_parser::ast::{self, fmt::ToTokens as _, Expr, SortOrder};
 
 use crate::{
@@ -14,10 +15,11 @@ use crate::{
     schema::{Index, IndexColumn, Schema, Table},
     translate::{
         expr::is_double_quoted_identifier, expr::walk_expr_mut,
-        optimizer::access_method::AccessMethodParams, plan::Scan, plan::TerminationKey,
+        optimizer::access_method::AccessMethodParams, optimizer::constraints::TableConstraints,
+        plan::Scan, plan::TerminationKey,
     },
     types::SeekOp,
-    Result,
+    LimboError, Result,
 };
 
 use super::{
@@ -359,8 +361,20 @@ fn optimize_table_access(
                     };
                 }
             }
-            AccessMethodParams::VirtualTable => {
-                joined_tables[table_idx].op = Operation::Scan(Scan::VirtualTable);
+            AccessMethodParams::VirtualTable {
+                idx_num,
+                idx_str,
+                constraints,
+                constraint_usages,
+            } => {
+                joined_tables[table_idx].op = build_vtab_scan_op(
+                    where_clause,
+                    &constraints_per_table[table_idx],
+                    idx_num,
+                    idx_str,
+                    constraints,
+                    constraint_usages,
+                )?;
             }
             AccessMethodParams::Subquery => {
                 joined_tables[table_idx].op = Operation::Scan(Scan::Subquery);
@@ -369,6 +383,80 @@ fn optimize_table_access(
     }
 
     Ok(Some(best_join_order))
+}
+
+fn build_vtab_scan_op(
+    where_clause: &mut [WhereTerm],
+    table_constraints: &TableConstraints,
+    idx_num: &i32,
+    idx_str: &Option<String>,
+    vtab_constraints: &[ConstraintInfo],
+    constraint_usages: &[ConstraintUsage],
+) -> Result<Operation> {
+    if constraint_usages.len() != vtab_constraints.len() {
+        return Err(LimboError::ExtensionError(format!(
+            "Constraint usage count mismatch (expected {}, got {})",
+            vtab_constraints.len(),
+            constraint_usages.len()
+        )));
+    }
+
+    let mut constraints = vec![None; constraint_usages.len()];
+    let mut arg_count = 0;
+
+    for (i, vtab_constraint) in vtab_constraints.iter().enumerate() {
+        let usage = constraint_usages[i];
+        let argv_index = match usage.argv_index {
+            Some(idx) if idx >= 1 && (idx as usize) <= constraint_usages.len() => idx,
+            Some(idx) => {
+                return Err(LimboError::ExtensionError(format!(
+                    "argv_index {} is out of valid range [1..{}]",
+                    idx,
+                    constraint_usages.len()
+                )));
+            }
+            None => continue,
+        };
+
+        let zero_based_argv_index = (argv_index - 1) as usize;
+        if constraints[zero_based_argv_index].is_some() {
+            return Err(LimboError::ExtensionError(format!(
+                "duplicate argv_index {argv_index}"
+            )));
+        }
+
+        let (pred_idx, _) = vtab_constraint.unpack_plan_info();
+        let constraint = &table_constraints.constraints[pred_idx];
+        if usage.omit {
+            where_clause[constraint.where_clause_pos.0]
+                .consumed
+                .set(true);
+        }
+        let expr = constraint.get_constraining_expr(where_clause);
+        constraints[zero_based_argv_index] = Some(expr);
+        arg_count += 1;
+    }
+
+    // Verify that used indices form a contiguous sequence starting from 1
+    let constraints = constraints
+        .into_iter()
+        .take(arg_count)
+        .enumerate()
+        .map(|(i, c)| {
+            c.ok_or_else(|| {
+                LimboError::ExtensionError(format!(
+                    "argv_index values must form contiguous sequence starting from 1, missing index {}", 
+                    i + 1
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(Operation::Scan(Scan::VirtualTable {
+        idx_num: *idx_num,
+        idx_str: idx_str.clone(),
+        constraints,
+    }))
 }
 
 #[derive(Debug, PartialEq, Clone)]

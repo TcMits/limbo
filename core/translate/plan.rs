@@ -1,5 +1,4 @@
 use std::{cell::Cell, cmp::Ordering, sync::Arc};
-use turso_ext::{ConstraintInfo, ConstraintOp};
 use turso_sqlite3_parser::ast::{self, SortOrder};
 
 use crate::{
@@ -12,7 +11,7 @@ use crate::{
     },
     Result, VirtualTable,
 };
-use crate::{schema::Type, types::SeekOp, util::can_pushdown_predicate};
+use crate::{schema::Type, types::SeekOp};
 
 use turso_sqlite3_parser::ast::TableInternalId;
 
@@ -118,142 +117,8 @@ impl WhereTerm {
     }
 }
 
-use crate::ast::{Expr, Operator};
+use crate::ast::Expr;
 
-// This function takes an operator and returns the operator you would obtain if the operands were swapped.
-// e.g. "literal < column"
-// which is not the canonical order for constraint pushdown.
-// This function will return > so that the expression can be treated as if it were written "column > literal"
-fn reverse_operator(op: &Operator) -> Option<Operator> {
-    match op {
-        Operator::Equals => Some(Operator::Equals),
-        Operator::Less => Some(Operator::Greater),
-        Operator::LessEquals => Some(Operator::GreaterEquals),
-        Operator::Greater => Some(Operator::Less),
-        Operator::GreaterEquals => Some(Operator::LessEquals),
-        Operator::NotEquals => Some(Operator::NotEquals),
-        Operator::Is => Some(Operator::Is),
-        Operator::IsNot => Some(Operator::IsNot),
-        _ => None,
-    }
-}
-
-fn to_ext_constraint_op(op: &Operator) -> Option<ConstraintOp> {
-    match op {
-        Operator::Equals => Some(ConstraintOp::Eq),
-        Operator::Less => Some(ConstraintOp::Lt),
-        Operator::LessEquals => Some(ConstraintOp::Le),
-        Operator::Greater => Some(ConstraintOp::Gt),
-        Operator::GreaterEquals => Some(ConstraintOp::Ge),
-        Operator::NotEquals => Some(ConstraintOp::Ne),
-        _ => None,
-    }
-}
-
-/// This function takes a WhereTerm for a select involving a VTab at index 'table_index'.
-/// It determines whether or not it involves the given table and whether or not it can
-/// be converted into a ConstraintInfo which can be passed to the vtab module's xBestIndex
-/// method, which will possibly calculate some information to improve the query plan, that we can send
-/// back to it as arguments for the VFilter operation.
-/// is going to be filtered against: e.g:
-/// 'SELECT key, value FROM vtab WHERE key = 'some_key';
-/// we need to send the Value('some_key') as an argument to VFilter, and possibly omit it from
-/// the filtration in the vdbe layer.
-pub fn convert_where_to_vtab_constraint(
-    term: &WhereTerm,
-    table_idx: usize,
-    pred_idx: usize,
-    join_order: &[JoinOrderMember],
-) -> Result<Option<ConstraintInfo>> {
-    if term.from_outer_join.is_some() {
-        return Ok(None);
-    }
-    let Expr::Binary(lhs, op, rhs) = &term.expr else {
-        return Ok(None);
-    };
-    let expr_is_ready =
-        |e: &Expr| -> Result<bool> { can_pushdown_predicate(e, table_idx, join_order) };
-    let (vcol_idx, op_for_vtab, usable, is_rhs) = match (&**lhs, &**rhs) {
-        (
-            Expr::Column {
-                table: tbl_l,
-                column: col_l,
-                ..
-            },
-            Expr::Column {
-                table: tbl_r,
-                column: col_r,
-                ..
-            },
-        ) => {
-            // one side must be the virtual table
-            let tbl_l_idx = join_order
-                .iter()
-                .position(|j| j.table_id == *tbl_l)
-                .unwrap();
-            let tbl_r_idx = join_order
-                .iter()
-                .position(|j| j.table_id == *tbl_r)
-                .unwrap();
-            let vtab_on_l = tbl_l_idx == table_idx;
-            let vtab_on_r = tbl_r_idx == table_idx;
-            if vtab_on_l == vtab_on_r {
-                return Ok(None); // either both or none -> not convertible
-            }
-
-            if vtab_on_l {
-                // vtab on left side: operator unchanged
-                let usable = tbl_r_idx < table_idx; // usable if the other table is already positioned
-                (col_l, op, usable, false)
-            } else {
-                // vtab on right side of the expr: reverse operator
-                let usable = tbl_l_idx < table_idx;
-                (col_r, &reverse_operator(op).unwrap_or(*op), usable, true)
-            }
-        }
-        (Expr::Column { table, column, .. }, other)
-            if join_order
-                .iter()
-                .position(|j| j.table_id == *table)
-                .unwrap()
-                == table_idx =>
-        {
-            (
-                column,
-                op,
-                expr_is_ready(other)?, // literal / earlier‑table / deterministic func ?
-                false,
-            )
-        }
-        (other, Expr::Column { table, column, .. })
-            if join_order
-                .iter()
-                .position(|j| j.table_id == *table)
-                .unwrap()
-                == table_idx =>
-        {
-            (
-                column,
-                &reverse_operator(op).unwrap_or(*op),
-                expr_is_ready(other)?,
-                true,
-            )
-        }
-
-        _ => return Ok(None), // does not involve the virtual table at all
-    };
-
-    let Some(op) = to_ext_constraint_op(op_for_vtab) else {
-        return Ok(None);
-    };
-
-    Ok(Some(ConstraintInfo {
-        column_index: *vcol_idx as u32,
-        op,
-        usable,
-        plan_info: ConstraintInfo::pack_plan_info(pred_idx as u32, is_rhs),
-    }))
-}
 /// The loop index where to evaluate the condition.
 /// For example, in `SELECT * FROM u JOIN p WHERE u.id = 5`, the condition can already be evaluated at the first loop (idx 0),
 /// because that is the rightmost table that it references.
@@ -877,7 +742,11 @@ impl Operation {
                 iter_dir: IterationDirection::Forwards,
                 index: None,
             }),
-            Table::Virtual(_) => Operation::Scan(Scan::VirtualTable),
+            Table::Virtual(_) => Operation::Scan(Scan::VirtualTable {
+                idx_num: -1,
+                idx_str: None,
+                constraints: Vec::new(),
+            }),
             Table::FromClauseSubquery(_) => Operation::Scan(Scan::Subquery),
         }
     }
@@ -1125,7 +994,15 @@ pub enum Scan {
         index: Option<Arc<Index>>,
     },
     /// A scan of a virtual table, delegated to the table’s `filter` and related methods.
-    VirtualTable,
+    VirtualTable {
+        /// Index identifier returned by the table's `best_index` method.
+        idx_num: i32,
+        /// Optional index name returned by the table’s `best_index` method.
+        idx_str: Option<String>,
+        /// Constraining expressions to be passed to the table’s `filter` method.
+        /// The order of expressions matches the argument order expected by the virtual table.
+        constraints: Vec<Expr>,
+    },
     /// A scan of a subquery in the `FROM` clause.
     Subquery,
 }

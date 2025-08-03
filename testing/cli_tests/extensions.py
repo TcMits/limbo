@@ -321,6 +321,11 @@ def _test_series(limbo: TestTursoShell):
         lambda res: res == "1\n2\n3\n4\n5\n6\n7\n8\n9\n10",
     )
     limbo.run_test_fn(
+        "SELECT * FROM generate_series WHERE 1 = start AND 10 = stop;",
+        lambda res: res == "1\n2\n3\n4\n5\n6\n7\n8\n9\n10",
+        "Constraint with column on RHS used as TVF arg"
+    )
+    limbo.run_test_fn(
         "SELECT * FROM generate_series WHERE stop = 10 AND start = 1;",
         lambda res: res == "1\n2\n3\n4\n5\n6\n7\n8\n9\n10",
     )

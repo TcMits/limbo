@@ -61,7 +61,11 @@ i.e. straight from the 70s! The DP algorithm is explained below.
   - `n=3`: for each 2-table subset found, find the best way to join that result to each other table. Memoize the result.
   - `n=m`: for each `m-1` table subset found, find the best way to join that result to the `m'th` table
   - **Use pruning to reduce search space:**
-    - Compute the literal query order first, and store its _cost_  as an upper threshold
+    - Compute the literal query order first, and store its _cost_ as an upper threshold.
+      In some cases it is not possible to compute this upper threshold from the literal order—for example, when 
+      table-valued functions are involved and their arguments reference tables that appear to the right in the join order. 
+      In such situations, the literal order cannot be executed directly, so no meaningful _cost_ can be assigned. 
+      In these cases, the threshold is set to infinity, ensuring that valid plans are still considered.
     - If at any point a considered join order exceeds the upper threshold, discard that search path since it cannot be better than the current best.
       - For example, we have `SELECT * FROM a JOIN b JOIN c JOIN d`. Compute `JOIN(a,b,c,d)` first. If `JOIN (b,a)` is already worse than `JOIN(a,b,c,d)`, we don't have to even try `JOIN(b,a,c)`.
     - Also keep track of the best plan per _subset_:

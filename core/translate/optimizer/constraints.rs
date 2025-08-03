@@ -9,6 +9,7 @@ use crate::{
     },
     Result,
 };
+use turso_ext::{ConstraintInfo, ConstraintOp};
 use turso_sqlite3_parser::ast::{self, SortOrder, TableInternalId};
 
 use super::cost::ESTIMATED_HARDCODED_ROWS_PER_TABLE;
@@ -400,6 +401,48 @@ pub fn usable_constraints_for_join_order<'a>(
         usable_until += 1;
     }
     &refs[..usable_until]
+}
+
+pub fn convert_to_vtab_constraint(
+    constraints: &[Constraint],
+    join_order: &[JoinOrderMember],
+) -> Vec<ConstraintInfo> {
+    let table_idx = join_order.last().unwrap().original_idx;
+    let lhs_mask = TableMask::from_table_number_iter(
+        join_order
+            .iter()
+            .take(join_order.len() - 1)
+            .map(|j| j.original_idx),
+    );
+    constraints
+        .iter()
+        .enumerate()
+        .filter_map(|(i, constraint)| {
+            let other_side_refers_to_self = constraint.lhs_mask.contains_table(table_idx);
+            if other_side_refers_to_self {
+                return None;
+            }
+            let all_required_tables_are_on_left_side = lhs_mask.contains_all(&constraint.lhs_mask);
+            to_ext_constraint_op(&constraint.operator).map(|op| ConstraintInfo {
+                column_index: constraint.table_col_pos as u32,
+                op,
+                usable: all_required_tables_are_on_left_side,
+                plan_info: ConstraintInfo::pack_plan_info(i as u32, true),
+            })
+        })
+        .collect()
+}
+
+fn to_ext_constraint_op(op: &ast::Operator) -> Option<ConstraintOp> {
+    match op {
+        ast::Operator::Equals => Some(ConstraintOp::Eq),
+        ast::Operator::Less => Some(ConstraintOp::Lt),
+        ast::Operator::LessEquals => Some(ConstraintOp::Le),
+        ast::Operator::Greater => Some(ConstraintOp::Gt),
+        ast::Operator::GreaterEquals => Some(ConstraintOp::Ge),
+        ast::Operator::NotEquals => Some(ConstraintOp::Ne),
+        _ => None,
+    }
 }
 
 fn opposite_cmp_op(op: ast::Operator) -> ast::Operator {
