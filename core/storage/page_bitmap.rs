@@ -277,3 +277,291 @@ impl PageBitmap {
         None
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+
+    fn pb_free_vec(pb: &PageBitmap) -> Vec<bool> {
+        let mut v = vec![false; pb.n_pages as usize];
+        v.iter_mut()
+            .enumerate()
+            .take(pb.n_pages as usize)
+            .map(|(i, v)| {
+                let w = pb.words[i >> 6];
+                let bit = i & 63;
+                *v = (w & (1u64 << bit)) != 0;
+                *v
+            })
+            .collect()
+    }
+
+    /// Count free bits in the reference model.
+    fn ref_count_free(model: &[bool]) -> usize {
+        model.iter().filter(|&&b| b).count()
+    }
+
+    /// Find the first free index >= from in the reference model.
+    fn ref_first_free_from(model: &[bool], from: u32) -> Option<u32> {
+        let from = from as usize;
+        model
+            .iter()
+            .enumerate()
+            .skip(from)
+            .find_map(|(i, &f)| if f { Some(i as u32) } else { None })
+    }
+
+    /// Check whether [start, start+len) are all free in the reference model.
+    fn ref_check_run_free(model: &[bool], start: u32, len: u32) -> bool {
+        let s = start as usize;
+        let l = len as usize;
+        if s + l > model.len() {
+            return false;
+        }
+        model[s..s + l].iter().all(|&b| b)
+    }
+
+    /// Mark [start, start+len) free(=true) or allocated(=false) in the reference model.
+    fn ref_mark_run(model: &mut [bool], start: u32, len: u32, free: bool) {
+        let st = start as usize;
+        let len = len as usize;
+        for page in &mut model[st..st + len] {
+            *page = free;
+        }
+    }
+
+    /// Returns `true` if the bitmap's notion of free bits equals the reference model exactly.
+    fn assert_equivalent(pb: &PageBitmap, model: &[bool]) {
+        let pv = pb_free_vec(pb);
+        assert_eq!(pv, model, "bitmap bits disagree with reference model");
+    }
+
+    #[test]
+    fn new_masks_trailing_bits() {
+        // test weird page counts
+        for n_pages in [1, 63, 64, 65, 127, 128, 129, 255, 256, 1023] {
+            let pb = PageBitmap::new(n_pages);
+            // All valid pages must be free.
+            let free = pb_free_vec(&pb);
+            assert_eq!(free.len(), n_pages as usize);
+            assert!(free.iter().all(|&b| b), "all pages should start free");
+
+            // Bits beyond n_pages must be treated as allocated (masked out).
+            // We check the last word explicitly.
+            if n_pages > 0 {
+                let words_len = pb.words.len();
+                let valid_bits = (n_pages as usize) & 63;
+                if valid_bits != 0 {
+                    let last = pb.words[words_len - 1];
+                    let mask = (1u64 << valid_bits) - 1;
+                    assert_eq!(last & !mask, 0, "bits beyond n_pages must be 0");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn alloc_one_exhausts_all() {
+        let mut pb = PageBitmap::new(257);
+        let mut model = vec![true; 257];
+
+        let mut count = 0;
+        while let Some(idx) = pb.alloc_one() {
+            assert!(model[idx as usize], "must be free in model");
+            model[idx as usize] = false;
+            count += 1;
+        }
+        assert_eq!(count, 257, "should allocate all pages once");
+        assert!(pb.alloc_one().is_none(), "no pages left");
+        assert_equivalent(&pb, &model);
+    }
+
+    #[test]
+    fn alloc_run_basic_and_free() {
+        let mut pb = PageBitmap::new(200);
+        let mut model = vec![true; 200];
+
+        // Allocate a run of 70 crossing word boundaries
+        let need = 70;
+        let start = pb.alloc_run(need).expect("expected a run");
+        assert!(ref_check_run_free(&model, start, need));
+        ref_mark_run(&mut model, start, need, false);
+        assert!(!pb.check_run_free(start, need));
+        assert_equivalent(&pb, &model);
+
+        // Free it and verify again
+        pb.free_run(start, need);
+        ref_mark_run(&mut model, start, need, true);
+        assert!(pb.check_run_free(start, need));
+        assert_equivalent(&pb, &model);
+    }
+
+    #[test]
+    fn alloc_run_none_when_only_smaller_gaps() {
+        let n = 128u32;
+        let mut pb = PageBitmap::new(n);
+
+        // Allocate everything in one go.
+        let start = pb.alloc_run(n).expect("whole arena should be free");
+        assert_eq!(start, 0);
+        let mut model = vec![false; n as usize];
+        assert_equivalent(&pb, &model);
+
+        // heavily fragment, free exactly every other page to create isolated 1-page holes
+        for i in (0..n).step_by(2) {
+            pb.free_run(i, 1);
+            model[i as usize] = true;
+        }
+        assert_equivalent(&pb, &model);
+
+        // no run of 2 should exist
+        assert!(
+            pb.alloc_run(2).is_none(),
+            "no free run of length 2 should exist"
+        );
+        assert_equivalent(&pb, &model);
+    }
+
+    #[test]
+    fn next_free_bit_from_matches_reference() {
+        let mut pb = PageBitmap::new(130);
+        let mut model = vec![true; 130];
+
+        // Allocate a few arbitrary runs/singles
+        let r1 = pb.alloc_run(10).unwrap();
+        ref_mark_run(&mut model, r1, 10, false);
+
+        let r2 = pb.alloc_run(1).unwrap();
+        model[r2 as usize] = false;
+
+        let r3 = pb.alloc_run(50).unwrap();
+        ref_mark_run(&mut model, r3, 50, false);
+
+        // Check random 'from' points
+        for from in [0, 1, 5, 9, 10, 59, 60, 61, 64, 100, 129] {
+            let expect = ref_first_free_from(&model, from);
+            let got = pb.next_free_bit_from(from);
+            assert_eq!(got, expect, "from={from}");
+        }
+        assert_equivalent(&pb, &model);
+    }
+
+    #[test]
+    fn singles_from_tail_preserve_front_run() {
+        // This asserts the desirable policy, single-page allocations should
+        // not destroy large runs at the front
+        let mut pb = PageBitmap::new(512);
+        let mut model = vec![true; 512];
+
+        // Take 100 single pages, model updates at returned indices
+        for _ in 0..100 {
+            let idx = pb.alloc_one().unwrap();
+            model[idx as usize] = false;
+        }
+        assert_equivalent(&pb, &model);
+
+        // There should still be a long free run near the beginning.
+        // Request 64, it should succeed
+        let r = pb.alloc_run(64).expect("64-run should still be available");
+        assert!(ref_check_run_free(&model, r, 64));
+        ref_mark_run(&mut model, r, 64, false);
+        assert_equivalent(&pb, &model);
+    }
+
+    #[test]
+    fn fuzz_rand_compare_with_reference_model() {
+        let seeds: &[u64] = &[
+            std::time::SystemTime::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+            1234567890,
+            0x69420,
+            94822,
+            165029,
+        ];
+        for &seed in seeds {
+            let mut rng = StdRng::seed_from_u64(seed);
+            // random size including tricky boundaries
+            let n_pages = match rng.gen_range(0..6) {
+                0 => 777,
+                1 => 1,
+                2 => 63,
+                3 => 64,
+                4 => 65,
+                _ => rng.gen_range(1..=2048),
+            } as u32;
+
+            let mut pb = PageBitmap::new(n_pages);
+            let mut model = vec![true; n_pages as usize];
+
+            let iters = 2000usize;
+            for _ in 0..iters {
+                let op = rng.gen_range(0..100);
+                match op {
+                    0..=49 => {
+                        // alloc_one
+                        let before_free = ref_count_free(&model);
+                        let got = pb.alloc_one();
+                        if let Some(i) = got {
+                            assert!(i < n_pages, "index in range");
+                            assert!(model[i as usize], "bit must be free");
+                            model[i as usize] = false;
+                            assert_eq!(ref_count_free(&model), before_free - 1);
+                        } else {
+                            // Then model must have no free bits
+                            assert_eq!(before_free, 0, "no free bits if None returned");
+                        }
+                    }
+                    50..=79 => {
+                        // alloc_run with random length
+                        let need =
+                            rng.gen_range(1..=std::cmp::max(1, (n_pages as usize).min(128))) as u32;
+                        let got = pb.alloc_run(need);
+                        if let Some(start) = got {
+                            assert!(start + need <= n_pages, "within bounds");
+                            assert!(
+                                ref_check_run_free(&model, start, need),
+                                "run must be free in model"
+                            );
+                            ref_mark_run(&mut model, start, need, false);
+                        } else {
+                            // If None, assert there is no free run of 'need' in the model.
+                            let mut exists = false;
+                            for s in 0..=n_pages.saturating_sub(need) {
+                                if ref_check_run_free(&model, s, need) {
+                                    exists = true;
+                                    break;
+                                }
+                            }
+                            assert!(!exists, "allocator returned None but a free run exists");
+                        }
+                    }
+                    _ => {
+                        // free_run on a random valid range
+                        let len =
+                            rng.gen_range(1..=std::cmp::max(1, (n_pages as usize).min(128))) as u32;
+                        let max_start = n_pages.saturating_sub(len);
+                        let start = if max_start == 0 {
+                            0
+                        } else {
+                            rng.gen_range(0..=max_start)
+                        };
+                        pb.free_run(start, len);
+                        ref_mark_run(&mut model, start, len, true);
+                    }
+                }
+                // Occasionally check next_free_bit_from correctness against model
+                if rng.gen_bool(0.2) {
+                    let from = rng.gen_range(0..n_pages);
+                    let got = pb.next_free_bit_from(from);
+                    let expect = ref_first_free_from(&model, from);
+                    assert_eq!(got, expect, "next_free_bit_from(from={from})");
+                }
+                // Keep both representations in sync
+                assert_equivalent(&pb, &model);
+            }
+        }
+    }
+}
