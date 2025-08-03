@@ -1,7 +1,7 @@
 use super::emitter::{emit_program, TranslateCtx};
 use super::plan::{
     select_star, Distinctness, JoinOrderMember, Operation, OuterQueryReference, QueryDestination,
-    Search, TableReferences,
+    Search, TableReferences, WhereTerm,
 };
 use crate::function::{AggFunc, ExtFunc, Func};
 use crate::schema::Table;
@@ -14,10 +14,11 @@ use crate::translate::planner::{
 use crate::util::normalize_ident;
 use crate::vdbe::builder::{ProgramBuilderOpts, TableRefIdCounter};
 use crate::vdbe::insn::Insn;
-use crate::SymbolTable;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
+use crate::{Connection, SymbolTable};
+use std::cell::Cell;
 use std::sync::Arc;
-use turso_sqlite3_parser::ast::{self, CompoundSelect, SortOrder};
+use turso_sqlite3_parser::ast::{self, CompoundSelect, Expr, SortOrder};
 use turso_sqlite3_parser::ast::{ResultColumn, SelectInner};
 
 pub struct TranslateSelectResult {
@@ -207,6 +208,7 @@ fn prepare_one_select_plan(
             }
 
             let mut where_predicates = vec![];
+            let mut vtab_predicates = vec![];
 
             let mut table_references = TableReferences::new(vec![], outer_query_refs.to_vec());
 
@@ -225,6 +227,7 @@ fn prepare_one_select_plan(
                 syms,
                 with,
                 &mut where_predicates,
+                &mut vtab_predicates,
                 &mut table_references,
                 table_ref_counter,
                 connection,
@@ -521,6 +524,11 @@ fn prepare_one_select_plan(
                 }
             }
 
+            // This step can only be performed at this point, because all table references are now available.
+            // Virtual table predicates may depend on column bindings from tables to the right in the join order,
+            // so we must wait until the full set of references has been collected.
+            add_vtab_predicates_to_where_clause(&mut vtab_predicates, &mut plan, connection)?;
+
             // Parse the actual WHERE clause and add its conditions to the plan WHERE clause that already contains the join conditions.
             parse_where(
                 where_clause,
@@ -634,6 +642,29 @@ fn prepare_one_select_plan(
             Ok(plan)
         }
     }
+}
+
+fn add_vtab_predicates_to_where_clause(
+    vtab_predicates: &mut Vec<Expr>,
+    plan: &mut SelectPlan,
+    connection: &Arc<Connection>,
+) -> Result<()> {
+    for expr in vtab_predicates.iter_mut() {
+        bind_column_references(
+            expr,
+            &mut plan.table_references,
+            Some(&plan.result_columns),
+            connection,
+        )?;
+    }
+    for expr in vtab_predicates.drain(..) {
+        plan.where_clause.push(WhereTerm {
+            expr,
+            from_outer_join: None,
+            consumed: Cell::new(false),
+        });
+    }
+    Ok(())
 }
 
 /// Replaces a column number in an ORDER BY or GROUP BY expression with a copy of the column expression.

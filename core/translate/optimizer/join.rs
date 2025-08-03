@@ -42,7 +42,7 @@ impl JoinN {
 }
 
 /// Join n-1 tables with the n'th table.
-/// Returns None if the plan is worse than the provided cost upper bound.
+/// Returns None if the plan is worse than the provided cost upper bound or if no valid access method is found.
 pub fn join_lhs_and_rhs<'a>(
     lhs: Option<&JoinN>,
     rhs_table_reference: &JoinedTable,
@@ -64,6 +64,10 @@ pub fn join_lhs_and_rhs<'a>(
         maybe_order_target,
         input_cardinality as f64,
     )?;
+
+    let Some(best_access_method) = best_access_method else {
+        return Ok(None);
+    };
 
     let lhs_cost = lhs.map_or(Cost(0.0), |l| l.cost);
     let cost = lhs_cost + best_access_method.cost;

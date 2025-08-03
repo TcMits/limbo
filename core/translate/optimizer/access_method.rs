@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use turso_ext::{ConstraintInfo, ConstraintUsage};
+use turso_ext::{ConstraintInfo, ConstraintUsage, ResultCode};
 use turso_sqlite3_parser::ast::SortOrder;
 
 use crate::translate::optimizer::constraints::{convert_to_vtab_constraint, Constraint};
@@ -63,7 +63,7 @@ pub fn find_best_access_method_for_join_order<'a>(
     join_order: &[JoinOrderMember],
     maybe_order_target: Option<&OrderTarget>,
     input_cardinality: f64,
-) -> Result<AccessMethod<'a>> {
+) -> Result<Option<AccessMethod<'a>>> {
     match &rhs_table.table {
         Table::BTree(_) => find_best_access_method_for_btree(
             rhs_table,
@@ -78,10 +78,10 @@ pub fn find_best_access_method_for_join_order<'a>(
             join_order,
             input_cardinality,
         ),
-        Table::FromClauseSubquery(_) => Ok(AccessMethod {
+        Table::FromClauseSubquery(_) => Ok(Some(AccessMethod {
             cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
             params: AccessMethodParams::Subquery,
-        }),
+        })),
     }
 }
 
@@ -91,7 +91,7 @@ fn find_best_access_method_for_btree<'a>(
     join_order: &[JoinOrderMember],
     maybe_order_target: Option<&OrderTarget>,
     input_cardinality: f64,
-) -> Result<AccessMethod<'a>> {
+) -> Result<Option<AccessMethod<'a>>> {
     let table_no = join_order.last().unwrap().table_id;
     let mut best_cost = estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality);
     let mut best_params = AccessMethodParams::BTreeTable {
@@ -186,10 +186,10 @@ fn find_best_access_method_for_btree<'a>(
         }
     }
 
-    Ok(AccessMethod {
+    Ok(Some(AccessMethod {
         cost: best_cost,
         params: best_params,
-    })
+    }))
 }
 
 fn find_best_access_method_for_vtab<'a>(
@@ -197,7 +197,7 @@ fn find_best_access_method_for_vtab<'a>(
     constraints: &[Constraint],
     join_order: &[JoinOrderMember],
     input_cardinality: f64,
-) -> Result<AccessMethod<'a>> {
+) -> Result<Option<AccessMethod<'a>>> {
     let vtab_constraints = convert_to_vtab_constraint(constraints, join_order);
 
     // TODO: get proper order_by information to pass to the vtab.
@@ -206,7 +206,7 @@ fn find_best_access_method_for_vtab<'a>(
 
     match best_index_result {
         Ok(index_info) => {
-            Ok(AccessMethod {
+            Ok(Some(AccessMethod {
                 // TODO: Base cost on `IndexInfo::estimated_cost` and output cardinality on `IndexInfo::estimated_rows`
                 cost: estimate_cost_for_scan_or_seek(None, &[], &[], input_cardinality),
                 params: AccessMethodParams::VirtualTable {
@@ -215,8 +215,9 @@ fn find_best_access_method_for_vtab<'a>(
                     constraints: vtab_constraints,
                     constraint_usages: index_info.constraint_usages,
                 },
-            })
+            }))
         }
+        Err(ResultCode::ConstraintViolation) => Ok(None),
         Err(e) => Err(LimboError::from(e)),
     }
 }

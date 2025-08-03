@@ -71,23 +71,28 @@ impl VTable for GenerateSeriesTable {
         let mut idx_num = 0;
         let mut positions = [None; 4]; // maps column index to constraint position
         let mut start_exists = false;
+        let mut usable = true;
 
         for (i, c) in constraints.iter().enumerate() {
             if c.column_index == START_COLUMN_INDEX && c.op == ConstraintOp::Eq {
                 start_exists = true;
             }
-            if !c.usable || c.op != ConstraintOp::Eq {
-                continue;
-            }
             if c.column_index >= START_COLUMN_INDEX && c.column_index <= STEP_COLUMN_INDEX {
-                let bit = 1 << (c.column_index - 1);
-                idx_num |= bit;
-                positions[c.column_index as usize] = Some(i);
+                if !c.usable {
+                    usable = false;
+                } else if c.op == ConstraintOp::Eq {
+                    let bit = 1 << (c.column_index - 1);
+                    idx_num |= bit;
+                    positions[c.column_index as usize] = Some(i);
+                }
             }
         }
 
         if !start_exists {
             return Err(ResultCode::InvalidArgs);
+        }
+        if !usable {
+            return Err(ResultCode::ConstraintViolation);
         }
 
         // Assign argv indexes contiguously
@@ -763,11 +768,9 @@ mod tests {
             plan_info: 0,
         }];
 
-        let index_info = GenerateSeriesTable::best_index(&constraints, &[]).unwrap();
+        let result = GenerateSeriesTable::best_index(&constraints, &[]);
 
-        // Verify no argv_index is assigned
-        assert_eq!(index_info.constraint_usages[0].argv_index, None);
-        assert_eq!(index_info.idx_num, 0); // No bits set
+        assert!(matches!(result, Err(ResultCode::ConstraintViolation)));
     }
 
     fn usable_constraint(column_index: u32) -> ConstraintInfo {

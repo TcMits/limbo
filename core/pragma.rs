@@ -178,12 +178,15 @@ impl PragmaVirtualTable {
         let mut arg1_idx = None;
 
         for (i, c) in constraints.iter().enumerate() {
-            if !c.usable || c.op != ConstraintOp::Eq {
+            if c.op != ConstraintOp::Eq {
                 continue;
             }
             let visible_count = self.visible_column_count as u32;
             if c.column_index < visible_count {
                 continue;
+            }
+            if !c.usable {
+                return Err(ResultCode::ConstraintViolation);
             }
             let hidden_idx = c.column_index - visible_count;
             match hidden_idx {
@@ -444,11 +447,9 @@ mod tests {
             plan_info: 0,
         }];
 
-        let index_info = pragma_vtab.best_index(&constraints).unwrap();
+        let result = pragma_vtab.best_index(&constraints);
 
-        // Verify no argv_index is assigned
-        assert_eq!(index_info.constraint_usages[0].argv_index, None);
-        assert!(!index_info.constraint_usages[0].omit);
+        assert!(matches!(result, Err(ResultCode::ConstraintViolation)));
     }
 
     fn usable_constraint(column_index: u32) -> ConstraintInfo {

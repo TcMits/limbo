@@ -159,6 +159,11 @@ pub trait VTable {
     /// the virtual table’s `filter` method if the chosen plan is selected for execution. There is
     /// no guarantee that `filter` will ever be called — many `best_index` candidates are discarded
     /// during planning.
+    ///
+    /// If an error occurs, an appropriate error code is returned. A return value of
+    /// `ResultCode::ConstraintViolation` from `best_index` is not considered an error. Instead, it
+    /// indicates that the current configuration of `usable` flags in `ConstraintInfo` cannot
+    /// produce a valid plan.
     fn best_index(
         _constraints: &[ConstraintInfo],
         _order_by: &[OrderByInfo],

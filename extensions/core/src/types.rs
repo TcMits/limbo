@@ -26,6 +26,7 @@ pub enum ResultCode {
     Row = 18,
     Interrupt = 19,
     Busy = 20,
+    ConstraintViolation = 21,
 }
 
 impl ResultCode {
@@ -66,6 +67,7 @@ impl Display for ResultCode {
             ResultCode::Row => write!(f, "Row"),
             ResultCode::Interrupt => write!(f, "Interrupt"),
             ResultCode::Busy => write!(f, "Busy"),
+            ResultCode::ConstraintViolation => write!(f, "Constraint Violation"),
         }
     }
 }

@@ -262,3 +262,37 @@ do_execsql_test_on_specific_db $test_pragma_page_size_db pragma-page-size-set-un
 } {1024}
 catch {file delete -force $test_pragma_page_size_db}
 catch {file delete -force "${test_pragma_page_size_db}-wal"}
+
+do_execsql_test pragma-vtab-join {
+  SELECT s.name, ti.name FROM sqlite_schema AS s, pragma_table_info(s.name) AS ti;
+} {users|id
+users|first_name
+users|last_name
+users|email
+users|phone_number
+users|address
+users|city
+users|state
+users|zipcode
+users|age
+products|id
+products|name
+products|price
+}
+
+do_execsql_test pragma-vtab-reversed-join-order {
+  SELECT s.name, ti.name FROM pragma_table_info(s.name) AS ti, sqlite_schema AS s;
+} {users|id
+users|first_name
+users|last_name
+users|email
+users|phone_number
+users|address
+users|city
+users|state
+users|zipcode
+users|age
+products|id
+products|name
+products|price
+}
