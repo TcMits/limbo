@@ -87,7 +87,7 @@ pub trait IO: Clock + Send + Sync {
 
     fn get_memory_io(&self) -> Arc<MemoryIO>;
 
-    fn register_fixed_buffer(&self, _ptr: NonNull<u8>, _len: usize) -> Result<()> {
+    fn register_fixed_buffer(&self, _ptr: NonNull<u8>, _len: usize) -> Result<u32> {
         Err(crate::LimboError::InternalError(
             "unsupported operation".to_string(),
         ))
