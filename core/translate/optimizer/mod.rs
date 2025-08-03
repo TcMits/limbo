@@ -423,8 +423,7 @@ fn build_vtab_scan_op(
             )));
         }
 
-        let (pred_idx, _) = vtab_constraint.unpack_plan_info();
-        let constraint = &table_constraints.constraints[pred_idx];
+        let constraint = &table_constraints.constraints[vtab_constraint.index];
         if usage.omit {
             where_clause[constraint.where_clause_pos.0].consumed = true;
         }

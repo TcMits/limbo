@@ -385,20 +385,13 @@ pub struct ConstraintInfo {
     pub op: ConstraintOp,
     /// Whether or not constraint is garaunteed to be enforced.
     pub usable: bool,
-    /// packed integer with the index of the constraint in the planner,
-    /// and the side of the binary expr that the relevant column is on.
-    pub plan_info: u32,
-}
-
-impl ConstraintInfo {
-    #[inline(always)]
-    pub fn pack_plan_info(pred_idx: u32, is_right_side: bool) -> u32 {
-        ((pred_idx) << 1) | (is_right_side as u32)
-    }
-    #[inline(always)]
-    pub fn unpack_plan_info(&self) -> (usize, bool) {
-        ((self.plan_info >> 1) as usize, (self.plan_info & 1) != 0)
-    }
+    /// Index of the `Constraint` in the array precomputed by the optimizer
+    /// from the WHERE clause. Used internally to match this constraint with
+    /// the corresponding entry in `TableConstraints`.
+    ///
+    /// This field is for optimizer use only and should not be accessed
+    /// by extensions.
+    pub index: usize,
 }
 
 pub type PrepareStmtFn = unsafe extern "C" fn(api: *mut Conn, sql: *const c_char) -> *mut Stmt;

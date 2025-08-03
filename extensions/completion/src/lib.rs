@@ -341,7 +341,7 @@ mod tests {
             column_index: 1,
             op: ConstraintOp::Eq,
             usable: false,
-            plan_info: 0,
+            index: 0,
         }];
 
         let index_info = CompletionTable::best_index(&constraints, &[]).unwrap();
@@ -356,7 +356,7 @@ mod tests {
             column_index,
             op: ConstraintOp::Eq,
             usable: true,
-            plan_info: 0,
+            index: 0,
         }
     }
 }

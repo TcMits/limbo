@@ -444,7 +444,7 @@ mod tests {
             column_index: 6,
             op: ConstraintOp::Eq,
             usable: false,
-            plan_info: 0,
+            index: 0,
         }];
 
         let result = pragma_vtab.best_index(&constraints);
@@ -457,7 +457,7 @@ mod tests {
             column_index,
             op: ConstraintOp::Eq,
             usable: true,
-            plan_info: 0,
+            index: 0,
         }
     }
 }

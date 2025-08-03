@@ -427,7 +427,7 @@ pub fn convert_to_vtab_constraint(
                 column_index: constraint.table_col_pos as u32,
                 op,
                 usable: all_required_tables_are_on_left_side,
-                plan_info: ConstraintInfo::pack_plan_info(i as u32, true),
+                index: i,
             })
         })
         .collect()
