@@ -215,13 +215,13 @@ impl PageBitmap {
     #[inline]
     fn is_full_free(&self, idx: usize) -> bool {
         if idx + 1 != self.words.len() {
-            return self.words[idx] == u64::MAX;
+            return self.words[idx] == Self::ALL_FREE;
         }
 
         // handle the case where the last word has some bits that we dont include
         let trailing = self.n_pages % Self::WORD_BITS;
         if trailing == 0 {
-            self.words[idx] == u64::MAX
+            self.words[idx] == Self::ALL_FREE
         } else {
             self.masked_word(idx) == ((1u64 << trailing) - 1)
         }
@@ -238,18 +238,17 @@ impl PageBitmap {
     /// If zero: no free bit in this word at or after `pos`, so we jump to next word boundary:
     /// pos = (word_idx + 1) << WORD_SHIFT and continue.
     ///
-    /// Otherwise, locate the first free bit at or after `pos`, and measure the free span in the
-    /// word starting at `first`
+    /// Otherwise, locate the first free bit at or after `run_start` position, and measure the free span in the
+    /// word starting at `first` to get `free_in_curr`.
     ///
-    /// If `free_in_cur >= need`: the entire run fits in this word, and we return `run_start`.
-    /// If `first + free_in_cur < 64`: the free span ends before the word boundary, the run cannot
+    /// If there are enough consecutive free bits and the entire run fits in this word, then return our `run_start`.
+    /// If `first + free_in_cur < 64`: then the free span ends before the word boundary, and the run cannot
     /// bridge into the next word so we advance to the next.
     ///
-    /// If the span reaches the boundary exactly, we try to extend across words:
-    /// consume subsequent words while `is_full_free(word)` in 64-page chunks and return if `need` is
-    /// satisfied.
+    /// If the span reaches the boundary exactly, we try to extend across, consume subsequent words while
+    /// `is_full_free(word)` in 64-page chunks and return if `need` is satisfied.
     ///
-    /// If still short, then check the tail in the next (partial) word and if tail >= remaining, return.
+    /// If still short, then check the tail in the next (partial) word and if tail >= remaining: return.
     /// otherwise advance `pos = run_start + pages_found + 1`.
     fn find_free_run_up(&self, start: u32, need: u32) -> Option<u32> {
         let limit = self.n_pages.saturating_sub(need - 1);
@@ -392,7 +391,7 @@ impl PageBitmap {
         while remaining > 0 {
             let bits = (Self::WORD_BITS as usize) - bit_offset as usize;
             let take = remaining.min(bits);
-            let mask = if take == 64 {
+            let mask = if take == Self::WORD_BITS as usize {
                 Self::ALL_FREE
             } else {
                 ((1u64 << take) - 1) << bit_offset
@@ -409,7 +408,7 @@ impl PageBitmap {
         // keep last-word tail clamped to the proper amount of pages
         let last = self.words.len() - 1;
         self.words[last] &= if (self.n_pages % Self::WORD_BITS) == 0 {
-            u64::MAX
+            Self::ALL_FREE
         } else {
             (1u64 << (self.n_pages % Self::WORD_BITS)) - 1
         };
