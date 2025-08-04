@@ -437,9 +437,6 @@ pub struct WalFile {
     /// Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
     last_checksum: (u32, u32),
 
-    /// Hack for now in case of rollback, will not be needed once we remove this bullshit frame cache.
-    start_pages_in_frames: usize,
-
     /// Count of possible pages to checkpoint, and number of backfilled
     prev_checkpoint: CheckpointResult,
 
@@ -734,7 +731,7 @@ impl Wal for WalFile {
 
         // Now take a shared read on that slot, and if we are successful,
         // grab another snapshot of the shared state.
-        let (mx2, nb2, cksm2, start_pages, ckpt_seq2) = {
+        let (mx2, nb2, cksm2, ckpt_seq2) = {
             let shared = self.get_shared();
             if !shared.read_locks[best_idx as usize].read() {
                 // TODO: we should retry here instead of always returning Busy
@@ -744,7 +741,6 @@ impl Wal for WalFile {
                 shared.max_frame.load(Ordering::SeqCst),
                 shared.nbackfills.load(Ordering::SeqCst),
                 shared.last_checksum,
-                shared.pages_in_frames.lock().len(),
                 shared.wal_header.lock().checkpoint_seq,
             )
         };
@@ -778,7 +774,6 @@ impl Wal for WalFile {
             return Err(LimboError::Busy);
         }
         self.max_frame = best_mark as u64;
-        self.start_pages_in_frames = start_pages;
         self.max_frame_read_lock_index.set(best_idx as usize);
         tracing::debug!(
             "begin_read_tx(min={}, max={}, slot={}, max_frame_in_wal={})",
@@ -1148,7 +1143,9 @@ impl Wal for WalFile {
                     frames.truncate(last_valid_frame);
                 }
                 let mut pages_in_frames = shared.pages_in_frames.lock();
-                pages_in_frames.truncate(self.start_pages_in_frames);
+                pages_in_frames.retain(|page| {
+                    frame_cache.contains_key(page) && !frame_cache.get(page).unwrap().is_empty()
+                });
             }
             self.last_checksum = shared.last_checksum;
         }
@@ -1191,7 +1188,6 @@ impl WalFile {
 
         let header = unsafe { shared.get().as_mut().unwrap().wal_header.lock() };
         let last_checksum = unsafe { (*shared.get()).last_checksum };
-        let start_pages_in_frames = unsafe { (*shared.get()).pages_in_frames.lock().len() };
         Self {
             io,
             // default to max frame in WAL, so that when we read schema we can read from WAL too if it's there.
@@ -1215,7 +1211,6 @@ impl WalFile {
             last_checksum,
             prev_checkpoint: CheckpointResult::default(),
             checkpoint_guard: None,
-            start_pages_in_frames,
             header: *header,
         }
     }
@@ -1243,8 +1238,12 @@ impl WalFile {
         {
             let mut frame_cache = shared.frame_cache.lock();
             let frames = frame_cache.get_mut(&page_id);
-            match frames {
-                Some(frames) => frames.push(frame_id),
+            match frames.filter(|frames| !frames.is_empty()) {
+                Some(frames) => {
+                    let pages_in_frames = shared.pages_in_frames.lock();
+                    turso_assert!(pages_in_frames.contains(&page_id), "page_id={page_id} must be in pages_in_frames if it's also already in frame_cache: pages_in_frames={:?}, frames={:?}", *pages_in_frames, frames);
+                    frames.push(frame_id);
+                }
                 None => {
                     frame_cache.insert(page_id, vec![frame_id]);
                     shared.pages_in_frames.lock().push(page_id);
