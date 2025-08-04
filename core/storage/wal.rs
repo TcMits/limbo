@@ -223,6 +223,9 @@ pub trait Wal {
     fn end_write_tx(&self);
 
     /// Find the latest frame containing a page.
+    ///
+    /// optional frame_watermark parameter can be passed to force WAL to find frame not larger than watermark value
+    /// caller must guarantee, that frame_watermark must be greater than last checkpointed frame, otherwise method will panic
     fn find_frame(&self, page_id: u64, frame_watermark: Option<u64>) -> Result<Option<u64>>;
 
     /// Read a frame from the WAL.
@@ -858,6 +861,15 @@ impl Wal for WalFile {
         turso_assert!(
             frame_watermark.unwrap_or(0) <= self.max_frame,
             "frame_watermark must be <= than current WAL max_frame value"
+        );
+
+        // we can guarantee correctness of the method, only if frame_watermark is strictly after the current checkpointed prefix
+        //
+        // if it's not, than pages from WAL range [frame_watermark..nBackfill] are already in the DB file,
+        // and in case if page first occurrence in WAL was after frame_watermark - we will be unable to read proper previous version of the page
+        turso_assert!(
+            frame_watermark.is_none() || frame_watermark.unwrap() >= self.min_frame,
+            "frame_watermark must be >= than current WAL min_value value"
         );
 
         // if we are holding read_lock 0, skip and read right from db file.
