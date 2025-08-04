@@ -929,7 +929,7 @@ impl Pager {
         Ok(())
     }
 
-    /// Reads a page from disk bypassing page-cache
+    /// Reads a page from disk (either WAL or DB file) bypassing page-cache
     #[tracing::instrument(skip_all, level = Level::DEBUG)]
     pub fn read_page_no_cache(
         &self,

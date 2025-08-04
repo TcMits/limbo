@@ -1141,6 +1141,8 @@ impl Connection {
         Ok(())
     }
 
+    /// Try to read page with given ID with fixed WAL watermark position
+    /// This method return false if page is not found (so, this is probably new page created after watermark position which wasn't checkpointed to the DB file yet)
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn try_wal_watermark_read_page(
         &self,
@@ -1161,6 +1163,8 @@ impl Connection {
         Ok(true)
     }
 
+    /// Return unique set of page numbers changes after WAL watermark position in the current WAL session
+    /// (so, if concurrent connection wrote something to the WAL - this method will not see this change)
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_changed_pages_after(&self, frame_watermark: u64) -> Result<Vec<u32>> {
         self.pager.borrow().wal_changed_pages_after(frame_watermark)

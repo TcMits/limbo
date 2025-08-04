@@ -393,7 +393,7 @@ fn revert_to(conn: &Arc<turso_core::Connection>, frame_watermark: u64) -> turso_
         if !has_page {
             continue;
         }
-        frames.push((page_id, frame.clone()));
+        frames.push((page_id, frame));
     }
 
     let mut frame_no = conn.wal_frame_count().unwrap();

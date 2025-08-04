@@ -855,6 +855,11 @@ impl Wal for WalFile {
             "unexpected use of frame_watermark optional argument"
         );
 
+        turso_assert!(
+            frame_watermark.unwrap_or(0) <= self.max_frame,
+            "frame_watermark must be <= than current WAL max_frame value"
+        );
+
         // if we are holding read_lock 0, skip and read right from db file.
         if self.max_frame_read_lock_index.get() == 0 {
             return Ok(None);
