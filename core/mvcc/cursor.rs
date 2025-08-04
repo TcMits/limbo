@@ -177,12 +177,8 @@ impl<Clock: LogicalClock> MvccLazyCursor<Clock> {
         };
         let rowid = self.db.seek_rowid(bound, lower_bound);
         if let Some(rowid) = rowid {
-            let eq_only = matches!(
-                op,
-                SeekOp::GE { eq_only: true } | SeekOp::LE { eq_only: true }
-            );
             self.current_pos = CursorPosition::Loaded(rowid);
-            if eq_only {
+            if op.eq_only() {
                 if rowid.row_id == row_id {
                     Ok(IOResult::Done(SeekResult::Found))
                 } else {
@@ -192,7 +188,7 @@ impl<Clock: LogicalClock> MvccLazyCursor<Clock> {
                 Ok(IOResult::Done(SeekResult::Found))
             }
         } else {
-            let forwards = matches!(op, SeekOp::GE { eq_only: false } | SeekOp::GT);
+            let forwards = matches!(op, SeekOp::GE { eq_only: _ } | SeekOp::GT);
             if forwards {
                 self.last();
             } else {
