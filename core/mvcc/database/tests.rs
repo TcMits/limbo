@@ -1,11 +1,12 @@
-use tempfile::TempPath;
-
 use super::*;
+use crate::io::PlatformIO;
 use crate::mvcc::clock::LocalClock;
 
 pub(crate) struct MvccTestDbNoConn {
     pub(crate) db: Option<Arc<Database>>,
     path: Option<String>,
+    // Stored mainly to not drop the temp dir before the test is done.
+    _temp_dir: Option<tempfile::TempDir>,
 }
 pub(crate) struct MvccTestDb {
     pub(crate) mvcc_store: Arc<MvStore<LocalClock>>,
@@ -34,6 +35,7 @@ impl MvccTestDbNoConn {
         Self {
             db: Some(db),
             path: None,
+            _temp_dir: None,
         }
     }
 
@@ -43,25 +45,37 @@ impl MvccTestDbNoConn {
         let path = temp_dir
             .path()
             .join(format!("test_{}", rand::random::<u64>()));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let io = Arc::new(PlatformIO::new().unwrap());
+        println!("path: {}", path.as_os_str().to_str().unwrap());
         let db = Database::open_file(io.clone(), path.as_os_str().to_str().unwrap(), true, true)
             .unwrap();
         Self {
             db: Some(db),
             path: Some(path.to_str().unwrap().to_string()),
+            _temp_dir: Some(temp_dir),
         }
     }
 
     /// Restarts the database, make sure there is no connection to the database open before calling this!
     pub fn restart(&mut self) {
         let io = Arc::new(PlatformIO::new().unwrap());
-        let db = Database::open_file(io.clone(), &self.path.unwrap(), true, true).unwrap();
+        let path = self.path.as_ref().unwrap();
+        let db = Database::open_file(io.clone(), path, true, true).unwrap();
         self.db.replace(db);
     }
 
     /// Asumes there is a database open
     pub fn get_db(&self) -> Arc<Database> {
         self.db.as_ref().unwrap().clone()
+    }
+
+    pub fn connect(&self) -> Arc<Connection> {
+        self.get_db().connect().unwrap()
+    }
+
+    pub fn get_mvcc_store(&self) -> Arc<MvStore<LocalClock>> {
+        self.get_db().mv_store.as_ref().unwrap().clone()
     }
 }
 
@@ -640,10 +654,10 @@ fn test_future_row() {
 use crate::mvcc::cursor::MvccLazyCursor;
 use crate::mvcc::database::{MvStore, Row, RowID};
 use crate::types::Text;
+use crate::Database;
 use crate::MemoryIO;
 use crate::RefValue;
 use crate::Value;
-use crate::{Database, UnixIO};
 
 // Simple atomic clock implementation for testing
 
@@ -719,7 +733,7 @@ pub(crate) fn commit_tx_no_conn(
         .unwrap()
         .commit_tx(tx_id, conn.pager.borrow().clone(), conn)
         .unwrap();
-    let result = sm.step(db.db.mv_store.as_ref().unwrap())?;
+    let result = sm.step(&db.get_mvcc_store())?;
     assert!(sm.is_finalized());
     match result {
         TransitionResult::Done(()) => Ok(()),
@@ -1061,8 +1075,45 @@ fn test_snapshot_isolation_tx_visible1() {
     ));
 }
 
-fn setup_random_db() -> (MvccTestDb, u64) {
-    let db = MvccTestDb::new();
-    let tx_id = db.mvcc_store.begin_tx(db.conn.pager.borrow().clone());
-    (db, tx_id)
+#[test]
+fn test_restart() {
+    let mut db = MvccTestDbNoConn::new_with_random_db();
+    {
+        let conn = db.connect();
+        let mvcc_store = db.get_mvcc_store();
+        let tx_id = mvcc_store.begin_tx(conn.pager.borrow().clone());
+        let row = generate_simple_string_row(1, 1, "foo");
+
+        mvcc_store.insert(tx_id, row).unwrap();
+        commit_tx(mvcc_store.clone(), &conn, tx_id).unwrap();
+        conn.close().unwrap();
+    }
+    db.restart();
+
+    {
+        let conn = db.connect();
+        let mvcc_store = db.get_mvcc_store();
+        let tx_id = mvcc_store.begin_tx(conn.pager.borrow().clone());
+        let row = generate_simple_string_row(1, 2, "bar");
+
+        mvcc_store.insert(tx_id, row).unwrap();
+        commit_tx(mvcc_store.clone(), &conn, tx_id).unwrap();
+
+        let tx_id = mvcc_store.begin_tx(conn.pager.borrow().clone());
+        let row = mvcc_store.read(tx_id, RowID::new(1, 2)).unwrap().unwrap();
+        let record = get_record_value(&row);
+        match record.get_value(0).unwrap() {
+            RefValue::Text(text) => {
+                assert_eq!(text.as_str(), "bar");
+            }
+            _ => panic!("Expected Text value"),
+        }
+        conn.close().unwrap();
+    }
+}
+
+fn get_record_value(row: &Row) -> ImmutableRecord {
+    let mut record = ImmutableRecord::new(1024);
+    record.start_serialization(&row.data);
+    record
 }
