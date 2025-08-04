@@ -5496,6 +5496,10 @@ impl BTreeCursor {
         self.pager
             .do_allocate_page(page_type, offset, BtreePageAllocMode::Any)
     }
+
+    pub fn get_mvcc_cursor(&self) -> Rc<RefCell<MvCursor>> {
+        self.mv_cursor.as_ref().unwrap().clone()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

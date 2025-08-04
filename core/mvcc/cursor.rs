@@ -130,4 +130,25 @@ impl<Clock: LogicalClock> MvccLazyCursor<Clock> {
     pub fn rewind(&mut self) {
         self.current_pos = CursorPosition::BeforeFirst;
     }
+
+    pub fn last(&mut self) {
+        let last_rowid = self.db.get_last_rowid(self.table_id);
+        if let Some(last_rowid) = last_rowid {
+            self.current_pos = CursorPosition::Loaded(RowID {
+                table_id: self.table_id,
+                row_id: last_rowid,
+            });
+        } else {
+            self.current_pos = CursorPosition::BeforeFirst;
+        }
+    }
+
+    pub fn get_next_rowid(&mut self) -> i64 {
+        self.last();
+        match self.current_pos {
+            CursorPosition::Loaded(id) => id.row_id + 1,
+            CursorPosition::BeforeFirst => i64::MIN,
+            CursorPosition::End => i64::MAX,
+        }
+    }
 }

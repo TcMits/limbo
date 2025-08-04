@@ -15,6 +15,7 @@ use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -1221,6 +1222,18 @@ impl<Clock: LogicalClock> MvStore<Clock> {
             }
         }
         Ok(())
+    }
+
+    pub fn get_last_rowid(&self, table_id: u64) -> Option<i64> {
+        let last_rowid = self
+            .rows
+            .upper_bound(Bound::Included(&RowID {
+                table_id,
+                row_id: i64::MAX,
+            }))
+            .map(|entry| Some(entry.key().row_id))
+            .unwrap_or(None);
+        last_rowid
     }
 }
 

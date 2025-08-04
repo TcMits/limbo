@@ -15,6 +15,7 @@ use crate::util::{normalize_ident, IOExt as _};
 use crate::vdbe::insn::InsertFlags;
 use crate::vdbe::registers_to_ref_values;
 use crate::vector::{vector_concat, vector_slice};
+use crate::MvCursor;
 use crate::{
     error::{
         LimboError, SQLITE_CONSTRAINT, SQLITE_CONSTRAINT_NOTNULL, SQLITE_CONSTRAINT_PRIMARYKEY,
@@ -61,8 +62,7 @@ use crate::{
 };
 
 use crate::{
-    info, turso_assert, BufferPool, MvCursor, OpenFlags, RefValue, Row, StepResult,
-    TransactionState,
+    info, turso_assert, BufferPool, OpenFlags, RefValue, Row, StepResult, TransactionState,
 };
 
 use super::{
@@ -5481,7 +5481,13 @@ pub fn op_new_rowid(
     };
 
     if let Some(mv_store) = mv_store {
-        let rowid = mv_store.get_next_rowid();
+        let rowid = {
+            let mut cursor = state.get_cursor(*cursor);
+            let cursor = cursor.as_btree_mut();
+            let mvcc_cursor = cursor.get_mvcc_cursor();
+            let mut mvcc_cursor = RefCell::borrow_mut(&mvcc_cursor);
+            mvcc_cursor.get_next_rowid()
+        };
         state.registers[*rowid_reg] = Register::Value(Value::Integer(rowid));
         state.pc += 1;
         return Ok(InsnFunctionStepResult::Step);
