@@ -6646,6 +6646,10 @@ fn defragment_page_fast(
         // Effectively moves everything in between the two freeblocks rightwards by the length of the 2nd freeblock,
         // so that the first freeblock size becomes `freeblocks_total_size` (merging the two freeblocks)
         // and the second freeblock gets overwritten by non-free cell data.
+        // Illustrative doodle:
+        // | content area start |--cell content A--| 1st free |--cell content B--| 2nd free |--cell content C--|
+        // ->
+        // | content area start |--cell content A--|      merged free    |--cell content B--|--cell content C--|
         let after_first_freeblock = freeblock_1st + freeblock_1st_size;
         let copy_amount = freeblock_2nd - after_first_freeblock;
         buf.copy_within(
