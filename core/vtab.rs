@@ -22,10 +22,15 @@ pub struct VirtualTable {
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,
     pub(crate) kind: VTabKind,
+    pub(crate) module_name: Option<String>,
     vtab_type: VirtualTableType,
 }
 
 impl VirtualTable {
+    pub fn module_name(&self) -> Option<&str> {
+        self.module_name.as_deref()
+    }
+
     pub(crate) fn readonly(self: &Arc<VirtualTable>) -> bool {
         match &self.vtab_type {
             VirtualTableType::Pragma(_) => true,
@@ -43,6 +48,7 @@ impl VirtualTable {
                     columns: Self::resolve_columns(schema)
                         .expect("built-in function schema resolution should not fail"),
                     kind: VTabKind::TableValuedFunction,
+                    module_name: Some("pragma".to_string()),
                     vtab_type: VirtualTableType::Pragma(tab),
                 };
                 Arc::new(vtab)
@@ -65,6 +71,7 @@ impl VirtualTable {
             name: name.to_owned(),
             columns: Self::resolve_columns(schema)?,
             kind: VTabKind::TableValuedFunction,
+            module_name: Some(name.to_string()),
             vtab_type,
         };
         Ok(Arc::new(vtab))
@@ -83,6 +90,7 @@ impl VirtualTable {
             name: tbl_name.unwrap_or(module_name).to_owned(),
             columns: Self::resolve_columns(schema)?,
             kind: VTabKind::VirtualTable,
+            module_name: Some(module_name.to_string()),
             vtab_type: VirtualTableType::External(table),
         };
         Ok(Arc::new(vtab))
