@@ -312,29 +312,45 @@ impl WrappedIOUring {
             )
         });
         let mut iov_count = 0;
-        for (idx, buffer) in st
-            .bufs
-            .iter()
-            .enumerate()
-            .skip(st.current_buffer_idx)
-            .take(MAX_IOVEC_ENTRIES)
-        {
+        let mut last_end: Option<(*const u8, usize)> = None;
+        for buffer in st.bufs.iter().skip(st.current_buffer_idx) {
             let buf = buffer.borrow();
-            let buf_slice = buf.as_slice();
-            // ensure we are providing a pointer to the proper offset in the buffer
-            let slice = if idx == st.current_buffer_idx {
-                &buf_slice[st.current_buffer_offset..]
-            } else {
-                buf_slice
-            };
-            if slice.is_empty() {
-                continue;
+            let ptr = buf.as_ptr();
+            let len = buf.len();
+            if let Some((last_ptr, last_len)) = last_end {
+                // Check if this buffer is adjacent to the last
+                if unsafe { last_ptr.add(last_len) } == ptr {
+                    // Extend the last iovec instead of adding new
+                    iov_allocation[iov_count - 1].iov_len += len;
+                    last_end = Some((last_ptr, last_len + len));
+                    continue;
+                }
             }
+            // Add new iovec
             iov_allocation[iov_count] = libc::iovec {
-                iov_base: slice.as_ptr() as *mut _,
-                iov_len: slice.len(),
+                iov_base: ptr as *mut _,
+                iov_len: len,
             };
+            last_end = Some((ptr, len));
             iov_count += 1;
+            if iov_count >= MAX_IOVEC_ENTRIES {
+                break;
+            }
+        }
+        if iov_count == 1 {
+            // If we have coalesced everything into a single iovec, submit as a single`pwrite`
+            let entry = with_fd!(st.file_id, |fd| {
+                io_uring::opcode::Write::new(
+                    fd,
+                    iov_allocation[0].iov_base as *const u8,
+                    iov_allocation[0].iov_len as u32,
+                )
+                .offset(st.file_pos as u64)
+                .build()
+                .user_data(key)
+            });
+            self.submit_entry(&entry);
+            return;
         }
         // Store the pointers and get the pointer to the iovec array that we pass
         // to the writev operation, and keep the array itself alive
