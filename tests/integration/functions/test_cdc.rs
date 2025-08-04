@@ -18,9 +18,9 @@ fn replace_column_with_null(rows: Vec<Vec<Value>>, column: usize) -> Vec<Vec<Val
 fn test_cdc_simple_id() {
     let db = TempDatabase::new_empty(false);
     let conn = db.connect_limbo();
-    conn.execute("PRAGMA unstable_capture_data_changes_conn('id')")
-        .unwrap();
     conn.execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    conn.execute("PRAGMA unstable_capture_data_changes_conn('id')")
         .unwrap();
     conn.execute("INSERT INTO t VALUES (10, 10), (5, 1)")
         .unwrap();
@@ -78,9 +78,9 @@ fn record<const N: usize>(values: [Value; N]) -> Vec<u8> {
 fn test_cdc_simple_before() {
     let db = TempDatabase::new_empty(false);
     let conn = db.connect_limbo();
-    conn.execute("PRAGMA unstable_capture_data_changes_conn('before')")
-        .unwrap();
     conn.execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    conn.execute("PRAGMA unstable_capture_data_changes_conn('before')")
         .unwrap();
     conn.execute("INSERT INTO t VALUES (1, 2), (3, 4)").unwrap();
     conn.execute("UPDATE t SET y = 3 WHERE x = 1").unwrap();
@@ -144,9 +144,9 @@ fn test_cdc_simple_before() {
 fn test_cdc_simple_after() {
     let db = TempDatabase::new_empty(false);
     let conn = db.connect_limbo();
-    conn.execute("PRAGMA unstable_capture_data_changes_conn('after')")
-        .unwrap();
     conn.execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    conn.execute("PRAGMA unstable_capture_data_changes_conn('after')")
         .unwrap();
     conn.execute("INSERT INTO t VALUES (1, 2), (3, 4)").unwrap();
     conn.execute("UPDATE t SET y = 3 WHERE x = 1").unwrap();
@@ -210,9 +210,9 @@ fn test_cdc_simple_after() {
 fn test_cdc_simple_full() {
     let db = TempDatabase::new_empty(false);
     let conn = db.connect_limbo();
-    conn.execute("PRAGMA unstable_capture_data_changes_conn('full')")
-        .unwrap();
     conn.execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    conn.execute("PRAGMA unstable_capture_data_changes_conn('full')")
         .unwrap();
     conn.execute("INSERT INTO t VALUES (1, 2), (3, 4)").unwrap();
     conn.execute("UPDATE t SET y = 3 WHERE x = 1").unwrap();
@@ -276,9 +276,9 @@ fn test_cdc_simple_full() {
 fn test_cdc_crud() {
     let db = TempDatabase::new_empty(false);
     let conn = db.connect_limbo();
-    conn.execute("PRAGMA unstable_capture_data_changes_conn('id')")
-        .unwrap();
     conn.execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    conn.execute("PRAGMA unstable_capture_data_changes_conn('id')")
         .unwrap();
     conn.execute("INSERT INTO t VALUES (20, 20), (10, 10), (5, 1)")
         .unwrap();
@@ -388,9 +388,9 @@ fn test_cdc_crud() {
 fn test_cdc_failed_op() {
     let db = TempDatabase::new_empty(true);
     let conn = db.connect_limbo();
-    conn.execute("PRAGMA unstable_capture_data_changes_conn('id')")
-        .unwrap();
     conn.execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y UNIQUE)")
+        .unwrap();
+    conn.execute("PRAGMA unstable_capture_data_changes_conn('id')")
         .unwrap();
     conn.execute("INSERT INTO t VALUES (1, 10), (2, 20)")
         .unwrap();
@@ -701,13 +701,13 @@ fn test_cdc_independent_connections() {
     let conn1 = db.connect_limbo();
     let conn2 = db.connect_limbo();
     conn1
+        .execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y UNIQUE)")
+        .unwrap();
+    conn1
         .execute("PRAGMA unstable_capture_data_changes_conn('id,custom_cdc1')")
         .unwrap();
     conn2
         .execute("PRAGMA unstable_capture_data_changes_conn('id,custom_cdc2')")
-        .unwrap();
-    conn1
-        .execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y UNIQUE)")
         .unwrap();
     conn1.execute("INSERT INTO t VALUES (1, 10)").unwrap();
     conn2.execute("INSERT INTO t VALUES (2, 20)").unwrap();
@@ -755,13 +755,13 @@ fn test_cdc_independent_connections_different_cdc_not_ignore() {
     let conn1 = db.connect_limbo();
     let conn2 = db.connect_limbo();
     conn1
+        .execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y UNIQUE)")
+        .unwrap();
+    conn1
         .execute("PRAGMA unstable_capture_data_changes_conn('id,custom_cdc1')")
         .unwrap();
     conn2
         .execute("PRAGMA unstable_capture_data_changes_conn('id,custom_cdc2')")
-        .unwrap();
-    conn1
-        .execute("CREATE TABLE t (x INTEGER PRIMARY KEY, y UNIQUE)")
         .unwrap();
     conn1.execute("INSERT INTO t VALUES (1, 10)").unwrap();
     conn1.execute("INSERT INTO t VALUES (2, 20)").unwrap();

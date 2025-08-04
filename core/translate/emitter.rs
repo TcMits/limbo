@@ -586,7 +586,7 @@ fn emit_delete_insns(
             let before_record_reg = if cdc_has_before {
                 Some(emit_cdc_full_record(
                     program,
-                    &table_reference.table.columns(),
+                    table_reference.table.columns(),
                     main_table_cursor_id,
                     rowid_reg,
                 ))
@@ -1163,7 +1163,7 @@ fn emit_update_insns(
         let cdc_before_reg = if program.capture_data_changes_mode().has_before() {
             Some(emit_cdc_full_record(
                 program,
-                &table_ref.table.columns(),
+                table_ref.table.columns(),
                 cursor_id,
                 cdc_rowid_before_reg.expect("cdc_rowid_before_reg must be set"),
             ))
@@ -1302,7 +1302,7 @@ pub fn prepare_cdc_if_necessary(
     };
     let cursor_id = program.alloc_cursor_id(CursorType::BTreeTable(cdc_btree.clone()));
     program.emit_insn(Insn::OpenWrite {
-        cursor_id: cursor_id,
+        cursor_id,
         root_page: cdc_btree.root_page.into(),
         db: 0, // todo(sivukhin): fix DB number when write will be supported for ATTACH
     });

@@ -194,6 +194,7 @@ impl SchemaEntryType {
 }
 pub const SQLITE_TABLEID: &str = "sqlite_schema";
 
+#[allow(clippy::too_many_arguments)]
 pub fn emit_schema_entry(
     program: &mut ProgramBuilder,
     resolver: &Resolver,
