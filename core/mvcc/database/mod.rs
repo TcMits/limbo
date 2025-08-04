@@ -917,6 +917,16 @@ impl<Clock: LogicalClock> MvStore<Clock> {
             .map(|entry| *entry.key())
     }
 
+    pub fn seek_rowid(&self, bound: Bound<&RowID>, lower_bound: bool) -> Option<RowID> {
+        tracing::trace!("seek_rowid(bound={:?}, lower_bound={})", bound, lower_bound,);
+
+        if lower_bound {
+            self.rows.lower_bound(bound).map(|entry| *entry.key())
+        } else {
+            self.rows.upper_bound(bound).map(|entry| *entry.key())
+        }
+    }
+
     /// Begins a new transaction in the database.
     ///
     /// This function starts a new transaction in the database and returns a `TxID` value

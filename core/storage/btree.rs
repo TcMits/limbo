@@ -4367,7 +4367,10 @@ impl BTreeCursor {
 
     #[instrument(skip(self), level = Level::DEBUG)]
     pub fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<IOResult<SeekResult>> {
-        assert!(self.mv_cursor.is_none());
+        if let Some(mv_cursor) = &self.mv_cursor {
+            let mut mv_cursor = mv_cursor.borrow_mut();
+            return mv_cursor.seek(key, op);
+        }
         // Empty trace to capture the span information
         tracing::trace!("");
         // We need to clear the null flag for the table cursor before seeking,

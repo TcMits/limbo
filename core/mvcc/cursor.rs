@@ -1,8 +1,10 @@
 use crate::mvcc::clock::LogicalClock;
 use crate::mvcc::database::{MvStore, Row, RowID};
+use crate::types::{IOResult, SeekKey, SeekOp, SeekResult};
 use crate::Pager;
 use crate::Result;
 use std::fmt::Debug;
+use std::ops::Bound;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -149,6 +151,54 @@ impl<Clock: LogicalClock> MvccLazyCursor<Clock> {
             CursorPosition::Loaded(id) => id.row_id + 1,
             CursorPosition::BeforeFirst => i64::MIN,
             CursorPosition::End => i64::MAX,
+        }
+    }
+
+    pub fn seek(&mut self, seek_key: SeekKey<'_>, op: SeekOp) -> Result<IOResult<SeekResult>> {
+        let row_id = match seek_key {
+            SeekKey::TableRowId(row_id) => row_id,
+            SeekKey::IndexKey(_) => {
+                todo!();
+            }
+        };
+        // gt -> lower_bound bound excluded, we want first row after row_id
+        // ge -> lower_bound bound included, we want first row equal to row_id or first row after row_id
+        // lt -> upper_bound bound excluded, we want last row before row_id
+        // le -> upper_bound bound included, we want last row equal to row_id or first row before row_id
+        let rowid = RowID {
+            table_id: self.table_id,
+            row_id,
+        };
+        let (bound, lower_bound) = match op {
+            SeekOp::GT => (Bound::Excluded(&rowid), true),
+            SeekOp::GE { eq_only: _ } => (Bound::Included(&rowid), true),
+            SeekOp::LT => (Bound::Excluded(&rowid), false),
+            SeekOp::LE { eq_only: _ } => (Bound::Included(&rowid), false),
+        };
+        let rowid = self.db.seek_rowid(bound, lower_bound);
+        if let Some(rowid) = rowid {
+            let eq_only = matches!(
+                op,
+                SeekOp::GE { eq_only: true } | SeekOp::LE { eq_only: true }
+            );
+            self.current_pos = CursorPosition::Loaded(rowid);
+            if eq_only {
+                if rowid.row_id == row_id {
+                    Ok(IOResult::Done(SeekResult::Found))
+                } else {
+                    Ok(IOResult::Done(SeekResult::NotFound))
+                }
+            } else {
+                Ok(IOResult::Done(SeekResult::Found))
+            }
+        } else {
+            let forwards = matches!(op, SeekOp::GE { eq_only: false } | SeekOp::GT);
+            if forwards {
+                self.last();
+            } else {
+                self.rewind();
+            }
+            Ok(IOResult::Done(SeekResult::NotFound))
         }
     }
 }
