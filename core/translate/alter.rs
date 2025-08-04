@@ -139,12 +139,6 @@ pub fn translate_alter_table(
                             dest_reg: record,
                             index_name: None,
                         });
-                        program.emit_insn(Insn::SetCookie {
-                            db: 0,
-                            cookie: Cookie::SchemaVersion,
-                            value: schema.schema_version as i32 + 1,
-                            p5: 0,
-                        });
 
                         program.emit_insn(Insn::Insert {
                             cursor: cursor_id,
@@ -153,6 +147,13 @@ pub fn translate_alter_table(
                             flag: crate::vdbe::insn::InsertFlags(0),
                             table_name: table_name.clone(),
                         });
+                    });
+
+                    program.emit_insn(Insn::SetCookie {
+                        db: 0,
+                        cookie: Cookie::SchemaVersion,
+                        value: schema.schema_version as i32 + 1,
+                        p5: 0,
                     });
 
                     program.emit_insn(Insn::ParseSchema {
