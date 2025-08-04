@@ -1,15 +1,17 @@
 use super::{Buffer, Clock, Completion, File, OpenFlags, IO};
-use crate::Result;
+use crate::{LimboError, Result};
 
 use crate::io::clock::Instant;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
-    collections::BTreeMap,
-    sync::Arc,
+    collections::{BTreeMap, HashMap},
+    sync::{Arc, Mutex},
 };
 use tracing::debug;
 
-pub struct MemoryIO {}
+pub struct MemoryIO {
+    files: Arc<Mutex<HashMap<String, Arc<MemoryFile>>>>,
+}
 unsafe impl Send for MemoryIO {}
 
 // TODO: page size flag
@@ -20,7 +22,9 @@ impl MemoryIO {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Self {
         debug!("Using IO backend 'memory'");
-        Self {}
+        Self {
+            files: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -41,11 +45,24 @@ impl Clock for MemoryIO {
 }
 
 impl IO for MemoryIO {
-    fn open_file(&self, _path: &str, _flags: OpenFlags, _direct: bool) -> Result<Arc<dyn File>> {
-        Ok(Arc::new(MemoryFile {
-            pages: BTreeMap::new().into(),
-            size: 0.into(),
-        }))
+    fn open_file(&self, path: &str, flags: OpenFlags, _direct: bool) -> Result<Arc<dyn File>> {
+        let mut files = self.files.lock().unwrap();
+        if !files.contains_key(path) && !flags.contains(OpenFlags::Create) {
+            return Err(LimboError::IOError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "file not found",
+            )));
+        }
+        if !files.contains_key(path) {
+            files.insert(
+                path.to_string(),
+                Arc::new(MemoryFile {
+                    pages: BTreeMap::new().into(),
+                    size: 0.into(),
+                }),
+            );
+        }
+        Ok(files.get(path).unwrap().clone())
     }
 
     fn run_once(&self) -> Result<()> {
