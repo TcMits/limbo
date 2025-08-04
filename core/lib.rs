@@ -1151,16 +1151,18 @@ impl Connection {
         frame_watermark: Option<u64>,
     ) -> Result<bool> {
         let pager = self.pager.borrow();
-        let (page_ref, c) = pager.read_page_no_cache(page_idx as usize, frame_watermark, true)?;
-
-        match pager.io.wait_for_completion(c) {
-            Ok(()) => {}
+        let (page_ref, c) = match pager.read_page_no_cache(page_idx as usize, frame_watermark, true)
+        {
+            Ok(result) => result,
             // on windows, zero read will trigger UnexpectedEof
+            #[cfg(target_os = "windows")]
             Err(LimboError::IOError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 return Ok(false)
             }
             Err(err) => return Err(err),
-        }
+        };
+
+        pager.io.wait_for_completion(c)?;
 
         let content = page_ref.get_contents();
         // empty read - attempt to read absent page
