@@ -124,7 +124,8 @@ pub fn init_loop(
     ) {
         assert!(tables.joined_tables().len() == 1);
         let changed_table = &tables.joined_tables()[0].table;
-        let prepared = prepare_cdc_if_necessary(program, t_ctx.resolver.schema, &changed_table)?;
+        let prepared =
+            prepare_cdc_if_necessary(program, t_ctx.resolver.schema, changed_table.get_name())?;
         if let Some((cdc_cursor_id, _)) = prepared {
             t_ctx.cdc_cursor_id = Some(cdc_cursor_id);
         }

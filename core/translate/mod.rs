@@ -91,6 +91,7 @@ pub fn translate(
         // There can be no nesting with pragma, so lift it up here
         ast::Stmt::Pragma(name, body) => pragma::translate_pragma(
             schema,
+            syms,
             &name,
             body.map(|b| *b),
             pager,
@@ -162,6 +163,7 @@ pub fn translate_inner(
             tbl_name.as_str(),
             &columns,
             schema,
+            syms,
             program,
         )?,
         ast::Stmt::CreateTable {
@@ -169,7 +171,15 @@ pub fn translate_inner(
             if_not_exists,
             tbl_name,
             body,
-        } => translate_create_table(tbl_name, temporary, *body, if_not_exists, schema, program)?,
+        } => translate_create_table(
+            tbl_name,
+            temporary,
+            *body,
+            if_not_exists,
+            schema,
+            syms,
+            program,
+        )?,
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
         ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
         ast::Stmt::CreateVirtualTable(vtab) => {
@@ -198,11 +208,11 @@ pub fn translate_inner(
         ast::Stmt::DropIndex {
             if_exists,
             idx_name,
-        } => translate_drop_index(idx_name.name.as_str(), if_exists, schema, program)?,
+        } => translate_drop_index(idx_name.name.as_str(), if_exists, schema, syms, program)?,
         ast::Stmt::DropTable {
             if_exists,
             tbl_name,
-        } => translate_drop_table(tbl_name, if_exists, schema, program)?,
+        } => translate_drop_table(tbl_name, if_exists, schema, syms, program)?,
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
         ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
         ast::Stmt::Pragma(..) => {

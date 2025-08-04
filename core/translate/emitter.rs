@@ -22,7 +22,7 @@ use super::select::emit_simple_count;
 use super::subquery::emit_subqueries;
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::function::Func;
-use crate::schema::{BTreeTable, Schema, Table};
+use crate::schema::{BTreeTable, Column, Schema, Table};
 use crate::translate::compound_select::emit_program_for_compound_select;
 use crate::translate::expr::{emit_returning_results, ReturningValueRegisters};
 use crate::translate::plan::{DeletePlan, Plan, QueryDestination, Search};
@@ -32,7 +32,7 @@ use crate::vdbe::builder::{CursorKey, CursorType, ProgramBuilder};
 use crate::vdbe::insn::{CmpInsFlags, IdxInsertFlags, InsertFlags, RegisterOrLiteral};
 use crate::vdbe::CursorID;
 use crate::vdbe::{insn::Insn, BranchOffset};
-use crate::{bail_parse_error, CaptureDataChangesMode, Result, SymbolTable};
+use crate::{bail_parse_error, Result, SymbolTable};
 
 pub struct Resolver<'a> {
     pub schema: &'a Schema,
@@ -586,7 +586,7 @@ fn emit_delete_insns(
             let before_record_reg = if cdc_has_before {
                 Some(emit_cdc_full_record(
                     program,
-                    &table_reference.table,
+                    &table_reference.table.columns(),
                     main_table_cursor_id,
                     rowid_reg,
                 ))
@@ -1163,7 +1163,7 @@ fn emit_update_insns(
         let cdc_before_reg = if program.capture_data_changes_mode().has_before() {
             Some(emit_cdc_full_record(
                 program,
-                &table_ref.table,
+                &table_ref.table.columns(),
                 cursor_id,
                 cdc_rowid_before_reg.expect("cdc_rowid_before_reg must be set"),
             ))
@@ -1284,14 +1284,14 @@ fn emit_update_insns(
 pub fn prepare_cdc_if_necessary(
     program: &mut ProgramBuilder,
     schema: &Schema,
-    table: &Table,
+    changed_table_name: &str,
 ) -> Result<Option<(usize, Arc<BTreeTable>)>> {
     let mode = program.capture_data_changes_mode();
     let cdc_table = mode.table();
     let Some(cdc_table) = cdc_table else {
         return Ok(None);
     };
-    if table.get_name() == cdc_table {
+    if changed_table_name == cdc_table {
         return Ok(None);
     }
     let Some(turso_cdc_table) = schema.get_table(cdc_table) else {
@@ -1300,10 +1300,13 @@ pub fn prepare_cdc_if_necessary(
     let Some(cdc_btree) = turso_cdc_table.btree().clone() else {
         crate::bail_parse_error!("no such table: {}", cdc_table);
     };
-    Ok(Some((
-        program.alloc_cursor_id(CursorType::BTreeTable(cdc_btree.clone())),
-        cdc_btree,
-    )))
+    let cursor_id = program.alloc_cursor_id(CursorType::BTreeTable(cdc_btree.clone()));
+    program.emit_insn(Insn::OpenWrite {
+        cursor_id: cursor_id,
+        root_page: cdc_btree.root_page.into(),
+        db: 0, // todo(sivukhin): fix DB number when write will be supported for ATTACH
+    });
+    Ok(Some((cursor_id, cdc_btree)))
 }
 
 pub fn emit_cdc_patch_record(
@@ -1336,11 +1339,10 @@ pub fn emit_cdc_patch_record(
 
 pub fn emit_cdc_full_record(
     program: &mut ProgramBuilder,
-    table: &Table,
+    columns: &[Column],
     table_cursor_id: usize,
     rowid_reg: usize,
 ) -> usize {
-    let columns = table.columns();
     let columns_reg = program.alloc_registers(columns.len() + 1);
     for (i, column) in columns.iter().enumerate() {
         if column.is_rowid_alias {

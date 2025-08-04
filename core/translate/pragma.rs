@@ -16,7 +16,7 @@ use crate::translate::schema::translate_create_table;
 use crate::util::{normalize_ident, parse_signed_number, parse_string, IOExt as _};
 use crate::vdbe::builder::{ProgramBuilder, ProgramBuilderOpts};
 use crate::vdbe::insn::{Cookie, Insn};
-use crate::{bail_parse_error, CaptureDataChangesMode, LimboError, Value};
+use crate::{bail_parse_error, CaptureDataChangesMode, LimboError, SymbolTable, Value};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 
@@ -35,6 +35,7 @@ fn list_pragmas(program: &mut ProgramBuilder) {
 #[allow(clippy::too_many_arguments)]
 pub fn translate_pragma(
     schema: &Schema,
+    syms: &SymbolTable,
     name: &ast::QualifiedName,
     body: Option<ast::PragmaBody>,
     pager: Rc<Pager>,
@@ -64,7 +65,7 @@ pub fn translate_pragma(
             PragmaName::TableInfo => {
                 query_pragma(pragma, schema, Some(value), pager, connection, program)?
             }
-            _ => update_pragma(pragma, schema, value, pager, connection, program)?,
+            _ => update_pragma(pragma, schema, syms, value, pager, connection, program)?,
         },
     };
     match mode {
@@ -83,6 +84,7 @@ pub fn translate_pragma(
 fn update_pragma(
     pragma: PragmaName,
     schema: &Schema,
+    syms: &SymbolTable,
     value: ast::Expr,
     pager: Rc<Pager>,
     connection: Arc<crate::Connection>,
@@ -255,6 +257,7 @@ fn update_pragma(
                     .unwrap(),
                     true,
                     schema,
+                    syms,
                     program,
                 )?;
             }

@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
+use crate::translate::emitter::{
+    emit_cdc_full_record, emit_cdc_insns, prepare_cdc_if_necessary, OperationMode, Resolver,
+};
 use crate::vdbe::insn::{CmpInsFlags, Cookie};
+use crate::SymbolTable;
 use crate::{
     schema::{BTreeTable, Column, Index, IndexColumn, PseudoCursorType, Schema},
     storage::pager::CreateBTreeFlags,
@@ -20,6 +24,7 @@ pub fn translate_create_index(
     tbl_name: &str,
     columns: &[SortedColumn],
     schema: &Schema,
+    syms: &SymbolTable,
     mut program: ProgramBuilder,
 ) -> crate::Result<ProgramBuilder> {
     if !schema.indexes_enabled() {
@@ -100,15 +105,19 @@ pub fn translate_create_index(
         db: 0,
     });
     let sql = create_idx_stmt_to_sql(&tbl_name, &idx_name, unique_if_not_exists, &columns);
+    let resolver = Resolver::new(schema, syms);
+    let cdc_table = prepare_cdc_if_necessary(&mut program, schema, SQLITE_TABLEID)?;
     emit_schema_entry(
         &mut program,
+        &resolver,
         sqlite_schema_cursor_id,
+        cdc_table.map(|x| x.0),
         SchemaEntryType::Index,
         &idx_name,
         &tbl_name,
         root_page_reg,
         Some(sql),
-    );
+    )?;
 
     // determine the order of the columns in the index for the sorter
     let order = idx.columns.iter().map(|c| c.order).collect();
@@ -302,6 +311,7 @@ pub fn translate_drop_index(
     idx_name: &str,
     if_exists: bool,
     schema: &Schema,
+    syms: &SymbolTable,
     mut program: ProgramBuilder,
 ) -> crate::Result<ProgramBuilder> {
     if !schema.indexes_enabled() {
@@ -343,6 +353,8 @@ pub fn translate_drop_index(
             )));
         }
     }
+
+    let cdc_table = prepare_cdc_if_necessary(&mut program, schema, SQLITE_TABLEID)?;
 
     // According to sqlite should emit Null instruction
     // but why?
@@ -414,6 +426,30 @@ pub fn translate_drop_index(
         target_pc_when_reentered: label_once_end,
     });
     program.resolve_label(label_once_end, program.offset());
+
+    if let Some((cdc_cursor_id, _)) = cdc_table {
+        let before_record_reg = if program.capture_data_changes_mode().has_before() {
+            Some(emit_cdc_full_record(
+                &mut program,
+                &sqlite_table.columns,
+                sqlite_schema_cursor_id,
+                row_id_reg,
+            ))
+        } else {
+            None
+        };
+        let resolver = Resolver::new(schema, syms);
+        emit_cdc_insns(
+            &mut program,
+            &resolver,
+            OperationMode::DELETE,
+            cdc_cursor_id,
+            row_id_reg,
+            before_record_reg,
+            None,
+            SQLITE_TABLEID,
+        )?;
+    }
 
     program.emit_insn(Insn::Delete {
         cursor_id: sqlite_schema_cursor_id,
