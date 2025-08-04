@@ -38,7 +38,8 @@ pub mod transaction;
 pub mod value;
 
 use transaction::TransactionBehavior;
-use turso_core::types::WalInsertInfo;
+#[cfg(feature = "conn_raw_api")]
+use turso_core::types::WalFrameInfo;
 pub use value::Value;
 
 pub use params::params_from_iter;
@@ -181,6 +182,7 @@ impl Connection {
         stmt.execute(params).await
     }
 
+    #[cfg(feature = "conn_raw_api")]
     pub fn wal_frame_count(&self) -> Result<u64> {
         let conn = self
             .inner
@@ -190,6 +192,7 @@ impl Connection {
             .map_err(|e| Error::WalOperationError(format!("wal_insert_begin failed: {e}")))
     }
 
+    #[cfg(feature = "conn_raw_api")]
     pub fn wal_insert_begin(&self) -> Result<()> {
         let conn = self
             .inner
@@ -199,6 +202,7 @@ impl Connection {
             .map_err(|e| Error::WalOperationError(format!("wal_insert_begin failed: {e}")))
     }
 
+    #[cfg(feature = "conn_raw_api")]
     pub fn wal_insert_end(&self) -> Result<()> {
         let conn = self
             .inner
@@ -208,7 +212,8 @@ impl Connection {
             .map_err(|e| Error::WalOperationError(format!("wal_insert_end failed: {e}")))
     }
 
-    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalInsertInfo> {
+    #[cfg(feature = "conn_raw_api")]
+    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalFrameInfo> {
         let conn = self
             .inner
             .lock()
@@ -217,6 +222,7 @@ impl Connection {
             .map_err(|e| Error::WalOperationError(format!("wal_insert_frame failed: {e}")))
     }
 
+    #[cfg(feature = "conn_raw_api")]
     pub fn wal_get_frame(&self, frame_no: u32, frame: &mut [u8]) -> Result<()> {
         let conn = self
             .inner

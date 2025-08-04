@@ -6,7 +6,7 @@ use crate::storage::sqlite3_ondisk::{
     self, parse_wal_frame_header, DatabaseHeader, PageContent, PageSize, PageType,
 };
 use crate::storage::wal::{CheckpointResult, Wal};
-use crate::types::{IOResult, WalInsertInfo};
+use crate::types::{IOResult, WalFrameInfo};
 use crate::util::IOExt as _;
 use crate::{return_if_io, Completion, TransactionState};
 use crate::{turso_assert, Buffer, Connection, LimboError, Result};
@@ -1290,7 +1290,7 @@ impl Pager {
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
-    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalInsertInfo> {
+    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalFrameInfo> {
         let Some(wal) = self.wal.as_ref() else {
             return Err(LimboError::InternalError(
                 "wal_insert_frame() called on database without WAL".to_string(),
@@ -1323,9 +1323,9 @@ impl Pager {
             }
             self.dirty_pages.borrow_mut().clear();
         }
-        Ok(WalInsertInfo {
-            page_no: header.page_number as usize,
-            is_commit: header.is_commit_frame(),
+        Ok(WalFrameInfo {
+            page_no: header.page_number,
+            db_size: header.db_size,
         })
     }
 

@@ -24,7 +24,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 env_logger = { version = "0.11.3", default-features = false }
 libc = "0.2.169"
-turso_core = { path = "../core" }
+turso_core = { path = "../core", features = ["conn_raw_api"] }
 tracing = "0.1.41"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

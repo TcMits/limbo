@@ -44,8 +44,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::pragma::TURSO_CDC_DEFAULT_TABLE_NAME;
-#[cfg(feature = "fs")]
-use crate::types::WalInsertInfo;
+#[cfg(all(feature = "fs", feature = "conn_raw_api"))]
+use crate::types::WalFrameInfo;
 #[cfg(feature = "fs")]
 use crate::util::{OpenMode, OpenOptions};
 use crate::vtab::VirtualTable;
@@ -813,6 +813,7 @@ impl Connection {
 
     /// Parse schema from scratch if version of schema for the connection differs from the schema cookie in the root page
     /// This function must be called outside of any transaction because internally it will start transaction session by itself
+    #[allow(dead_code)]
     fn maybe_reparse_schema(self: &Arc<Connection>) -> Result<()> {
         let pager = self.pager.borrow().clone();
 
@@ -1140,12 +1141,12 @@ impl Connection {
         Ok(())
     }
 
-    #[cfg(feature = "fs")]
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_frame_count(&self) -> Result<u64> {
         self.pager.borrow().wal_frame_count()
     }
 
-    #[cfg(feature = "fs")]
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_get_frame(&self, frame_no: u32, frame: &mut [u8]) -> Result<()> {
         let c = self.pager.borrow().wal_get_frame(frame_no, frame)?;
         self._db.io.wait_for_completion(c)
@@ -1154,13 +1155,13 @@ impl Connection {
     /// Insert `frame` (header included) at the position `frame_no` in the WAL
     /// If WAL already has frame at that position - turso-db will compare content of the page and either report conflict or return OK
     /// If attempt to write frame at the position `frame_no` will create gap in the WAL - method will return error
-    #[cfg(feature = "fs")]
-    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalInsertInfo> {
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
+    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalFrameInfo> {
         self.pager.borrow().wal_insert_frame(frame_no, frame)
     }
 
     /// Start WAL session by initiating read+write transaction for this connection
-    #[cfg(feature = "fs")]
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_insert_begin(&self) -> Result<()> {
         let pager = self.pager.borrow();
         match pager.begin_read_tx()? {
@@ -1181,7 +1182,7 @@ impl Connection {
 
     /// Finish WAL session by ending read+write transaction taken in the [Self::wal_insert_begin] method
     /// All frames written after last commit frame (db_size > 0) within the session will be rolled back
-    #[cfg(feature = "fs")]
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_insert_end(self: &Arc<Connection>) -> Result<()> {
         {
             let pager = self.pager.borrow();

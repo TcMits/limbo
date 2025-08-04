@@ -369,8 +369,8 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
                     if !wal_session.in_txn() {
                         wal_session.begin()?;
                     }
-                    let wal_insert_info = clean_conn.wal_insert_frame(frame_no as u32, &buffer)?;
-                    if wal_insert_info.is_commit {
+                    let wal_frame_info = clean_conn.wal_insert_frame(frame_no as u32, &buffer)?;
+                    if wal_frame_info.is_commit_frame() {
                         wal_session.end()?;
                         // transaction boundary reached - it's safe to commit progress
                         self.meta = Some(self.write_meta(|m| m.synced_frame_no = frame_no).await?);
