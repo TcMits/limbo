@@ -154,20 +154,17 @@ impl PageBitmap {
         if need == 0 || need > self.n_pages {
             return None;
         }
-
         // Two-pass search with scan_hint optimization
         let mut search_start = self.scan_run_low;
         for pass in 0..2 {
             if pass == 1 {
                 search_start = 0;
             }
-
             if let Some(found) = self.find_free_run(search_start, need) {
                 self.mark_run(found, need, false);
                 self.scan_run_low = found + need;
                 return Some(found);
             }
-
             if search_start == 0 {
                 // Already searched from beginning
                 break;
@@ -203,9 +200,7 @@ impl PageBitmap {
         if count == 0 {
             return;
         }
-
-        debug_assert!(start + count <= self.n_pages, "free_run out of bounds");
-
+        turso_assert!(start + count <= self.n_pages, "free_run out of bounds");
         self.mark_run(start, count, true);
         // Update scan hint to potentially reuse this space
         if start < self.scan_run_low {
@@ -235,7 +230,7 @@ impl PageBitmap {
 
     /// Marks a contiguous run of pages as either free or allocated.
     pub fn mark_run(&mut self, start: u32, len: u32, free: bool) {
-        debug_assert!(start + len <= self.n_pages, "mark_run out of bounds");
+        turso_assert!(start + len <= self.n_pages, "mark_run out of bounds");
 
         let (mut word_idx, bit_offset) = Self::page_to_word_and_bit(start);
         let mut remaining = len as usize;
@@ -250,7 +245,6 @@ impl PageBitmap {
             } else {
                 (1u64 << bits_to_process).saturating_sub(1) << pos_in_word
             };
-
             if free {
                 self.words[word_idx] |= mask;
             } else {
@@ -299,7 +293,6 @@ impl PageBitmap {
         if from >= self.n_pages {
             return None;
         }
-
         let (mut word_idx, bit_offset) = Self::page_to_word_and_bit(from);
 
         // Check current word from bit_offset onward
@@ -309,7 +302,6 @@ impl PageBitmap {
             let bit = current.trailing_zeros();
             return Some(Self::word_and_bit_to_page(word_idx, bit));
         }
-
         // Check remaining words
         word_idx += 1;
         while word_idx < self.words.len() {
