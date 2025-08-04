@@ -207,19 +207,44 @@ fn try_pwritev_raw(
 ) -> std::io::Result<usize> {
     const MAX_IOV: usize = 1024;
     let iov_len = std::cmp::min(bufs.len() - start_idx, MAX_IOV);
-    let mut iov = Vec::with_capacity(iov_len);
+    let mut iov: Vec<libc::iovec> = Vec::with_capacity(iov_len);
 
+    let mut last_end: Option<(*const u8, usize)> = None;
+    let mut iov_count = 0;
     for (i, b) in bufs.iter().enumerate().skip(start_idx).take(iov_len) {
         let r = b.borrow(); // borrow just to get pointer/len
         let s = r.as_slice();
-        let s = if i == start_idx { &s[start_off..] } else { s };
+        let ptr = if i == start_idx { &s[start_off..] } else { s }.as_ptr();
+        let len = r.len();
+
+        if let Some((last_ptr, last_len)) = last_end {
+            // Check if this buffer is adjacent to the last
+            if unsafe { last_ptr.add(last_len) } == ptr {
+                // Extend the last iovec instead of adding new
+                iov[iov_count - 1].iov_len += len;
+                last_end = Some((last_ptr, last_len + len));
+                continue;
+            }
+        }
+        last_end = Some((ptr, len));
+        iov_count += 1;
         iov.push(libc::iovec {
-            iov_base: s.as_ptr() as *mut _,
-            iov_len: s.len(),
+            iov_base: ptr as *mut libc::c_void,
+            iov_len: len,
         });
     }
-
-    let n = unsafe { libc::pwritev(fd, iov.as_ptr(), iov.len() as i32, off as i64) };
+    let n = if iov.len().eq(&1) {
+        unsafe {
+            libc::pwrite(
+                fd,
+                iov[0].iov_base as *const libc::c_void,
+                iov[0].iov_len,
+                off as i64,
+            )
+        }
+    } else {
+        unsafe { libc::pwritev(fd, iov.as_ptr(), iov.len() as i32, off as i64) }
+    };
     if n < 0 {
         Err(std::io::Error::last_os_error())
     } else {
