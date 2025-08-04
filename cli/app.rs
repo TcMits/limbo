@@ -713,6 +713,11 @@ impl Limbo {
                         HeadersMode::Off => false,
                     };
                 }
+                Command::Copy(args) => {
+                    if let Err(e) = self.conn.copy_db(&args.output_file) {
+                        let _ = self.writeln(e.to_string());
+                    }
+                }
             },
         }
     }

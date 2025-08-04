@@ -143,6 +143,11 @@ pub struct HeadersArgs {
     pub mode: HeadersMode,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct CopyArgs {
+    pub output_file: String,
+}
+
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HeadersMode {
     On,
