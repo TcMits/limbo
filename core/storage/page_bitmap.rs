@@ -25,13 +25,16 @@ pub(super) struct PageBitmap {
 /// at the low end of the arena, which is beneficial for allocating many contiguous
 /// buffers that can be coalesced into fewer I/O operations.
 ///
-/// The high end will be plucking individual pages
-/// so we just subtract one from the last page index to get the next hint.
-/// scanning begins for larger sequential runs from the 'low' end, so a separate
-/// hint is maintained there.
+/// Single-page allocations (`alloc_one`) start searching from `scan_one_high` and work
+/// downward, preserving large contiguous runs at the low end. When the hint area is
+/// exhausted, the search wraps around to check from the top of the bitmap.
 ///
-/// After 'freeing' a run, we update the appropriate hint depending on which end
-/// of which pointer it falls into.
+/// Run allocations (`alloc_run`) scan upward from `scan_run_low`, making it likely
+/// that sequential allocations will be physically contiguous.
+///
+/// After freeing pages, we update hints to encourage reuse:
+/// - If freed pages are below `scan_run_low`, we move it down to include them
+/// - If freed pages are above `scan_one_high`, we move it up to include them
 impl PageBitmap {
     /// 64 bits per word, so shift by 6 to get page index
     const WORD_SHIFT: u32 = 6;
@@ -94,20 +97,48 @@ impl PageBitmap {
         if self.n_pages == 0 {
             return None;
         }
+        // Try to find the highest free bit at or below scan_one_high
+        let mut search_from = self.scan_one_high;
+        loop {
+            if let Some(page_idx) = self.find_highest_free_at_or_below(search_from) {
+                let (word_idx, bit) = Self::page_to_word_and_bit(page_idx);
+                self.words[word_idx] &= !(1u64 << bit);
+                self.scan_one_high = page_idx.saturating_sub(1);
+                return Some(page_idx);
+            }
 
-        // Scan from high to low to preserve contiguous runs at the front
-        for (word_idx, word) in self.words.iter_mut().enumerate().rev() {
-            if *word != Self::ALL_ALLOCATED {
-                // Find the highest set bit (rightmost free page in this word)
-                let bit = 63 - word.leading_zeros();
-                let page_idx = Self::word_and_bit_to_page(word_idx, bit);
+            // If nothing found below hint and we haven't searched from the top yet
+            if search_from < self.n_pages - 1 {
+                search_from = self.n_pages - 1;
+            } else {
+                return None;
+            }
+        }
+    }
 
-                if page_idx < self.n_pages {
-                    *word &= !(1u64 << bit);
-                    // store hint for next single allocation
-                    self.scan_one_high = page_idx.saturating_sub(1);
-                    return Some(page_idx);
-                }
+    /// Find the highest free bit at or below `max_idx`
+    fn find_highest_free_at_or_below(&self, max_idx: u32) -> Option<u32> {
+        let (max_word, max_bit) = Self::page_to_word_and_bit(max_idx);
+        // Check the word containing max_idx with appropriate mask
+        let word = self.words[max_word];
+        if word != Self::ALL_ALLOCATED {
+            // Create mask for bits 0..=max_bit
+            let mask = if max_bit == 63 {
+                u64::MAX
+            } else {
+                (1u64 << (max_bit + 1)) - 1
+            };
+            let masked = word & mask;
+            if masked != 0 {
+                let bit = 63 - masked.leading_zeros();
+                return Some(Self::word_and_bit_to_page(max_word, bit));
+            }
+        }
+        // Check all words below max_word
+        for word_idx in (0..max_word).rev() {
+            if self.words[word_idx] != Self::ALL_ALLOCATED {
+                let bit = 63 - self.words[word_idx].leading_zeros();
+                return Some(Self::word_and_bit_to_page(word_idx, bit));
             }
         }
         None
@@ -172,13 +203,18 @@ impl PageBitmap {
         if count == 0 {
             return;
         }
+
+        debug_assert!(start + count <= self.n_pages, "free_run out of bounds");
+
         self.mark_run(start, count, true);
         // Update scan hint to potentially reuse this space
         if start < self.scan_run_low {
             self.scan_run_low = start;
-        } else if start > self.scan_one_high {
+        }
+        if start > self.scan_one_high {
             // If we freed a run beyond the current scan hint, adjust it
-            self.scan_one_high = start.saturating_add(count).saturating_sub(1);
+            let end = start.saturating_add(count).min(self.n_pages);
+            self.scan_one_high = end.saturating_sub(1);
         }
     }
 
@@ -187,11 +223,20 @@ impl PageBitmap {
         if start.saturating_add(len) > self.n_pages {
             return false;
         }
-        self.inspect_run(start, len, |word, mask| (word & mask) == mask)
+        self.inspect_run(start, len, |word, mask| {
+            // Optimize for full-word checks
+            if mask == Self::ALL_FREE {
+                word == Self::ALL_FREE
+            } else {
+                (word & mask) == mask
+            }
+        })
     }
 
     /// Marks a contiguous run of pages as either free or allocated.
     pub fn mark_run(&mut self, start: u32, len: u32, free: bool) {
+        debug_assert!(start + len <= self.n_pages, "mark_run out of bounds");
+
         let (mut word_idx, bit_offset) = Self::page_to_word_and_bit(start);
         let mut remaining = len as usize;
         let mut pos_in_word = bit_offset as usize;
@@ -270,7 +315,12 @@ impl PageBitmap {
         while word_idx < self.words.len() {
             if self.words[word_idx] != Self::ALL_ALLOCATED {
                 let bit = self.words[word_idx].trailing_zeros();
-                return Some(Self::word_and_bit_to_page(word_idx, bit));
+                let page_idx = Self::word_and_bit_to_page(word_idx, bit);
+                // Ensure we don't return a page beyond n_pages
+                if page_idx < self.n_pages {
+                    return Some(page_idx);
+                }
+                break;
             }
             word_idx += 1;
         }
@@ -563,5 +613,54 @@ pub mod tests {
                 assert_equivalent(&pb, &model);
             }
         }
+    }
+
+    #[test]
+    fn test_run_crossing_word_boundaries_and_edge_cases() {
+        let mut pb = PageBitmap::new(256);
+        // Test runs that cross word boundaries at various positions
+        let test_cases = [
+            (60, 8),   // Crosses from word 0 to word 1
+            (62, 4),   // Crosses at the 64-bit boundary
+            (120, 16), // Crosses from word 1 to word 2
+            (0, 128),  // Spans exactly 2 words
+            (32, 64),  // Aligned start, crosses one boundary
+        ];
+
+        for (start, len) in test_cases {
+            // Ensure it's free
+            assert!(
+                pb.check_run_free(start, len),
+                "Run at {start} len {len} should be free",
+            );
+            pb.mark_run(start, len, false);
+            assert!(
+                !pb.check_run_free(start, len),
+                "Run at {start} len {len} should be allocated",
+            );
+            pb.mark_run(start, len, true);
+            assert!(
+                pb.check_run_free(start, len),
+                "Run at {start} len {len} should be free again",
+            );
+        }
+
+        let mut pb = PageBitmap::new(100);
+        // Test allocating runs at the exact end
+        assert_eq!(pb.alloc_run(100), Some(0));
+        pb.free_run(0, 100);
+        // Test run that would exceed n_pages
+        assert_eq!(pb.alloc_run(101), None);
+        // Fragment the bitmap in a specific pattern
+        // Free: 0-9, Allocated: 10-19, Free: 20-29, etc.
+        for i in (10..100).step_by(20) {
+            pb.mark_run(i, 10, false);
+        }
+        // Should be able to allocate 10-page runs
+        assert_eq!(pb.alloc_run(10), Some(0));
+        assert_eq!(pb.alloc_run(10), Some(20));
+        assert_eq!(pb.alloc_run(10), Some(40));
+        // But not 11-page runs
+        assert_eq!(pb.alloc_run(11), None);
     }
 }
