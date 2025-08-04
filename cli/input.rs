@@ -239,6 +239,9 @@ pub const AFTER_HELP_MSG: &str = r#"Usage Examples:
 17. To turn off column headers in list mode:
    .headers off
 
+18. To copy the open database to another file:
+   .copy output_file.db
+
 Note:
 - All SQL commands must end with a semicolon (;).
 - Special commands start with a dot (.) and are not required to end with a semicolon."#;
