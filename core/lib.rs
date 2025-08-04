@@ -1142,21 +1142,53 @@ impl Connection {
     }
 
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
+    pub fn try_wal_watermark_read_page(
+        &self,
+        page_idx: u32,
+        page: &mut [u8],
+        frame_watermark: Option<u64>,
+    ) -> Result<bool> {
+        let pager = self.pager.borrow();
+        let (page_ref, c) = pager.read_page_no_cache(page_idx as usize, frame_watermark, true)?;
+        pager.io.wait_for_completion(c)?;
+
+        let content = page_ref.get_contents();
+        // empty read - attempt to read absent page
+        if content.buffer.borrow().is_empty() {
+            return Ok(false);
+        }
+        page.copy_from_slice(content.as_ptr());
+        Ok(true)
+    }
+
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
+    pub fn wal_changed_pages_after(&self, frame_watermark: u64) -> Result<Vec<u32>> {
+        self.pager.borrow().wal_changed_pages_after(frame_watermark)
+    }
+
+    #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn wal_frame_count(&self) -> Result<u64> {
         self.pager.borrow().wal_frame_count()
     }
 
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
-    pub fn wal_get_frame(&self, frame_no: u32, frame: &mut [u8]) -> Result<()> {
+    pub fn wal_get_frame(&self, frame_no: u64, frame: &mut [u8]) -> Result<WalFrameInfo> {
+        use crate::storage::sqlite3_ondisk::parse_wal_frame_header;
+
         let c = self.pager.borrow().wal_get_frame(frame_no, frame)?;
-        self._db.io.wait_for_completion(c)
+        self._db.io.wait_for_completion(c)?;
+        let (header, _) = parse_wal_frame_header(frame);
+        Ok(WalFrameInfo {
+            page_no: header.page_number,
+            db_size: header.db_size,
+        })
     }
 
     /// Insert `frame` (header included) at the position `frame_no` in the WAL
     /// If WAL already has frame at that position - turso-db will compare content of the page and either report conflict or return OK
     /// If attempt to write frame at the position `frame_no` will create gap in the WAL - method will return error
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
-    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalFrameInfo> {
+    pub fn wal_insert_frame(&self, frame_no: u64, frame: &[u8]) -> Result<WalFrameInfo> {
         self.pager.borrow().wal_insert_frame(frame_no, frame)
     }
 

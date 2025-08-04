@@ -3,7 +3,7 @@
 
 use std::array;
 use std::cell::UnsafeCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use strum::EnumString;
 use tracing::{instrument, Level};
 
@@ -223,7 +223,7 @@ pub trait Wal {
     fn end_write_tx(&self);
 
     /// Find the latest frame containing a page.
-    fn find_frame(&self, page_id: u64) -> Result<Option<u64>>;
+    fn find_frame(&self, page_id: u64, frame_watermark: Option<u64>) -> Result<Option<u64>>;
 
     /// Read a frame from the WAL.
     fn read_frame(
@@ -275,6 +275,9 @@ pub trait Wal {
     fn get_max_frame(&self) -> u64;
     fn get_min_frame(&self) -> u64;
     fn rollback(&mut self) -> Result<()>;
+
+    /// Return unique set of pages changed **after** frame_watermark position and until current WAL session max_frame_no
+    fn changed_pages_after(&self, frame_watermark: u64) -> Result<Vec<u32>>;
 
     #[cfg(debug_assertions)]
     fn as_any(&self) -> &dyn std::any::Any;
@@ -845,14 +848,22 @@ impl Wal for WalFile {
 
     /// Find the latest frame containing a page.
     #[instrument(skip_all, level = Level::DEBUG)]
-    fn find_frame(&self, page_id: u64) -> Result<Option<u64>> {
+    fn find_frame(&self, page_id: u64, frame_watermark: Option<u64>) -> Result<Option<u64>> {
+        #[cfg(not(feature = "conn_raw_api"))]
+        turso_assert!(
+            frame_watermark.is_none(),
+            "unexpected use of frame_watermark optional argument"
+        );
+
         // if we are holding read_lock 0, skip and read right from db file.
         if self.max_frame_read_lock_index.get() == 0 {
             return Ok(None);
         }
         let shared = self.get_shared();
         let frames = shared.frame_cache.lock();
-        let range = self.min_frame..=self.max_frame;
+        let range = frame_watermark
+            .map(|x| 0..=x)
+            .unwrap_or(self.min_frame..=self.max_frame);
         if let Some(list) = frames.get(&page_id) {
             if let Some(f) = list.iter().rfind(|&&f| range.contains(&f)) {
                 return Ok(Some(*f));
@@ -1161,6 +1172,24 @@ impl Wal for WalFile {
         shared.last_checksum = self.last_checksum;
         Ok(())
     }
+
+    fn changed_pages_after(&self, frame_watermark: u64) -> Result<Vec<u32>> {
+        let frame_count = self.get_max_frame();
+        let page_size = self.page_size();
+        let mut frame = vec![0u8; page_size as usize + WAL_FRAME_HEADER_SIZE];
+        let mut seen = HashSet::new();
+        let mut pages = Vec::with_capacity((frame_count - frame_watermark) as usize);
+        for frame_no in frame_watermark + 1..=frame_count {
+            let c = self.read_frame_raw(frame_no, &mut frame)?;
+            self.io.wait_for_completion(c)?;
+            let (header, _) = sqlite3_ondisk::parse_wal_frame_header(&frame);
+            if seen.insert(header.page_number) {
+                pages.push(header.page_number);
+            }
+        }
+        Ok(pages)
+    }
+
     #[cfg(debug_assertions)]
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -2758,7 +2787,7 @@ pub mod test {
         {
             let pager = conn1.pager.borrow();
             let wal = pager.wal.as_ref().unwrap().borrow();
-            let frame = wal.find_frame(5);
+            let frame = wal.find_frame(5, None);
             // since we hold readlock0, we should ignore the db file and find_frame should return none
             assert!(frame.is_ok_and(|f| f.is_none()));
         }

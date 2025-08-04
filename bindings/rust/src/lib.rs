@@ -193,6 +193,33 @@ impl Connection {
     }
 
     #[cfg(feature = "conn_raw_api")]
+    pub fn try_wal_watermark_read_page(
+        &self,
+        page_idx: u32,
+        page: &mut [u8],
+        frame_watermark: Option<u64>,
+    ) -> Result<bool> {
+        let conn = self
+            .inner
+            .lock()
+            .map_err(|e| Error::MutexError(e.to_string()))?;
+        conn.try_wal_watermark_read_page(page_idx, page, frame_watermark)
+            .map_err(|e| {
+                Error::WalOperationError(format!("try_wal_watermark_read_page failed: {e}"))
+            })
+    }
+
+    #[cfg(feature = "conn_raw_api")]
+    pub fn wal_changed_pages_after(&self, frame_watermark: u64) -> Result<Vec<u32>> {
+        let conn = self
+            .inner
+            .lock()
+            .map_err(|e| Error::MutexError(e.to_string()))?;
+        conn.wal_changed_pages_after(frame_watermark)
+            .map_err(|e| Error::WalOperationError(format!("wal_changed_pages_after failed: {e}")))
+    }
+
+    #[cfg(feature = "conn_raw_api")]
     pub fn wal_insert_begin(&self) -> Result<()> {
         let conn = self
             .inner
@@ -213,7 +240,7 @@ impl Connection {
     }
 
     #[cfg(feature = "conn_raw_api")]
-    pub fn wal_insert_frame(&self, frame_no: u32, frame: &[u8]) -> Result<WalFrameInfo> {
+    pub fn wal_insert_frame(&self, frame_no: u64, frame: &[u8]) -> Result<WalFrameInfo> {
         let conn = self
             .inner
             .lock()
@@ -223,7 +250,7 @@ impl Connection {
     }
 
     #[cfg(feature = "conn_raw_api")]
-    pub fn wal_get_frame(&self, frame_no: u32, frame: &mut [u8]) -> Result<()> {
+    pub fn wal_get_frame(&self, frame_no: u64, frame: &mut [u8]) -> Result<WalFrameInfo> {
         let conn = self
             .inner
             .lock()

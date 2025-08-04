@@ -185,7 +185,7 @@ impl SyncServer for TestSyncServer {
                 session.in_txn = true;
             }
             let frame = &frames[offset..offset + FRAME_SIZE];
-            match session.conn.wal_insert_frame(frame_no as u32, frame) {
+            match session.conn.wal_insert_frame(frame_no as u64, frame) {
                 Ok(info) => {
                     if info.is_commit_frame() {
                         if session.in_txn {
@@ -276,7 +276,7 @@ impl TestSyncServer {
         let wal_frame_count = conn.wal_frame_count()?;
         tracing::debug!("conn frames count: {}", wal_frame_count);
         for frame_no in last_frame..=wal_frame_count as usize {
-            conn.wal_get_frame(frame_no as u32, &mut frame)?;
+            conn.wal_get_frame(frame_no as u64, &mut frame)?;
             tracing::debug!("push local frame {}", frame_no);
             generation.frames.push(frame.to_vec());
         }

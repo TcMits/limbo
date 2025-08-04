@@ -1,6 +1,9 @@
+use std::{collections::HashSet, sync::Arc};
+
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rusqlite::types::Value;
+use turso_core::types::WalFrameInfo;
 
 use crate::common::{limbo_exec_rows, rng_from_time, TempDatabase};
 
@@ -41,7 +44,7 @@ fn test_wal_frame_transfer_no_schema_changes() {
     assert_eq!(conn1.wal_frame_count().unwrap(), 15);
     let mut frame = [0u8; 24 + 4096];
     conn2.wal_insert_begin().unwrap();
-    let frames_count = conn1.wal_frame_count().unwrap() as u32;
+    let frames_count = conn1.wal_frame_count().unwrap();
     for frame_id in 1..=frames_count {
         conn1.wal_get_frame(frame_id, &mut frame).unwrap();
         conn2.wal_insert_frame(frame_id, &frame).unwrap();
@@ -72,7 +75,7 @@ fn test_wal_frame_transfer_various_schema_changes() {
     let mut frame = [0u8; 24 + 4096];
     let mut synced_frame = 0;
     let mut sync = || {
-        let last_frame = conn1.wal_frame_count().unwrap() as u32;
+        let last_frame = conn1.wal_frame_count().unwrap();
         conn2.wal_insert_begin().unwrap();
         for frame_id in (synced_frame + 1)..=last_frame {
             conn1.wal_get_frame(frame_id, &mut frame).unwrap();
@@ -137,7 +140,7 @@ fn test_wal_frame_transfer_schema_changes() {
     let mut frame = [0u8; 24 + 4096];
     let mut commits = 0;
     conn2.wal_insert_begin().unwrap();
-    for frame_id in 1..=conn1.wal_frame_count().unwrap() as u32 {
+    for frame_id in 1..=conn1.wal_frame_count().unwrap() {
         conn1.wal_get_frame(frame_id, &mut frame).unwrap();
         let info = conn2.wal_insert_frame(frame_id, &frame).unwrap();
         if info.is_commit_frame() {
@@ -176,7 +179,7 @@ fn test_wal_frame_transfer_no_schema_changes_rollback() {
     let mut frame = [0u8; 24 + 4096];
     conn2.wal_insert_begin().unwrap();
     // Intentionally leave out the final commit frame, so the big randomblob is not committed and should not be visible to transactions.
-    for frame_id in 1..=(conn1.wal_frame_count().unwrap() as u32 - 1) {
+    for frame_id in 1..=(conn1.wal_frame_count().unwrap() - 1) {
         conn1.wal_get_frame(frame_id, &mut frame).unwrap();
         conn2.wal_insert_frame(frame_id, &frame).unwrap();
     }
@@ -211,7 +214,7 @@ fn test_wal_frame_transfer_schema_changes_rollback() {
     assert_eq!(conn1.wal_frame_count().unwrap(), 14);
     let mut frame = [0u8; 24 + 4096];
     conn2.wal_insert_begin().unwrap();
-    for frame_id in 1..=(conn1.wal_frame_count().unwrap() as u32 - 1) {
+    for frame_id in 1..=(conn1.wal_frame_count().unwrap() - 1) {
         conn1.wal_get_frame(frame_id, &mut frame).unwrap();
         conn2.wal_insert_frame(frame_id, &frame).unwrap();
     }
@@ -311,8 +314,8 @@ fn test_wal_frame_api_no_schema_changes_fuzz() {
                 let mut frame = [0u8; 24 + 4096];
                 conn2.wal_insert_begin().unwrap();
                 for frame_no in (synced_frame + 1)..=next_frame {
-                    conn1.wal_get_frame(frame_no as u32, &mut frame).unwrap();
-                    conn2.wal_insert_frame(frame_no as u32, &frame[..]).unwrap();
+                    conn1.wal_get_frame(frame_no, &mut frame).unwrap();
+                    conn2.wal_insert_frame(frame_no, &frame[..]).unwrap();
                 }
                 conn2.wal_insert_end().unwrap();
                 for (i, committed) in commit_frames.iter().enumerate() {
@@ -331,4 +334,127 @@ fn test_wal_frame_api_no_schema_changes_fuzz() {
             }
         }
     }
+}
+
+#[test]
+fn test_wal_api_changed_pages() {
+    let db1 = TempDatabase::new_empty(false);
+    let conn1 = db1.connect_limbo();
+    conn1
+        .execute("CREATE TABLE t(x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    conn1
+        .execute("CREATE TABLE q(x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    assert_eq!(
+        conn1
+            .wal_changed_pages_after(0)
+            .unwrap()
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        HashSet::from([1, 2, 3])
+    );
+    let frames = conn1.wal_frame_count().unwrap();
+    conn1.execute("INSERT INTO t VALUES (1, 2)").unwrap();
+    conn1.execute("INSERT INTO t VALUES (3, 4)").unwrap();
+    assert_eq!(
+        conn1
+            .wal_changed_pages_after(frames)
+            .unwrap()
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        HashSet::from([2])
+    );
+    let frames = conn1.wal_frame_count().unwrap();
+    conn1
+        .execute("INSERT INTO t VALUES (1024, randomblob(4096 * 2))")
+        .unwrap();
+    assert_eq!(
+        conn1
+            .wal_changed_pages_after(frames)
+            .unwrap()
+            .into_iter()
+            .collect::<HashSet<_>>(),
+        HashSet::from([1, 2, 4, 5])
+    );
+}
+
+fn revert_to(conn: &Arc<turso_core::Connection>, frame_watermark: u64) -> turso_core::Result<()> {
+    let mut frame = [0u8; 4096 + 24];
+    let frame_watermark_info = conn.wal_get_frame(frame_watermark, &mut frame)?;
+
+    let changed_pages = conn.wal_changed_pages_after(frame_watermark)?;
+
+    conn.wal_insert_begin()?;
+    let mut frames = Vec::new();
+    for page_id in changed_pages {
+        let has_page =
+            conn.try_wal_watermark_read_page(page_id, &mut frame[24..], Some(frame_watermark))?;
+        if !has_page {
+            continue;
+        }
+        frames.push((page_id, frame.clone()));
+    }
+
+    let mut frame_no = conn.wal_frame_count().unwrap();
+    for (i, (page_id, mut frame)) in frames.iter().enumerate() {
+        let info = WalFrameInfo {
+            db_size: if i == frames.len() - 1 {
+                frame_watermark_info.db_size
+            } else {
+                0
+            },
+            page_no: *page_id,
+        };
+        info.put_to_frame_header(&mut frame);
+        frame_no += 1;
+        conn.wal_insert_frame(frame_no, &frame)?;
+    }
+    conn.wal_insert_end()?;
+
+    Ok(())
+}
+
+#[test]
+fn test_wal_api_revert_pages() {
+    let db1 = TempDatabase::new_empty(false);
+    let conn1 = db1.connect_limbo();
+    conn1
+        .execute("CREATE TABLE t(x INTEGER PRIMARY KEY, y)")
+        .unwrap();
+    let watermark1 = conn1.wal_frame_count().unwrap();
+    conn1
+        .execute("INSERT INTO t VALUES (1, randomblob(10))")
+        .unwrap();
+    let watermark2 = conn1.wal_frame_count().unwrap();
+
+    conn1
+        .execute("INSERT INTO t VALUES (3, randomblob(20))")
+        .unwrap();
+    conn1
+        .execute("INSERT INTO t VALUES (1024, randomblob(4096 * 2))")
+        .unwrap();
+
+    assert_eq!(
+        limbo_exec_rows(&db1, &conn1, "SELECT x, length(y) FROM t"),
+        vec![
+            vec![Value::Integer(1), Value::Integer(10)],
+            vec![Value::Integer(3), Value::Integer(20)],
+            vec![Value::Integer(1024), Value::Integer(4096 * 2)],
+        ]
+    );
+
+    revert_to(&conn1, watermark2).unwrap();
+
+    assert_eq!(
+        limbo_exec_rows(&db1, &conn1, "SELECT x, length(y) FROM t"),
+        vec![vec![Value::Integer(1), Value::Integer(10)],]
+    );
+
+    revert_to(&conn1, watermark1).unwrap();
+
+    assert_eq!(
+        limbo_exec_rows(&db1, &conn1, "SELECT x, length(y) FROM t"),
+        vec![] as Vec<Vec<Value>>,
+    );
 }

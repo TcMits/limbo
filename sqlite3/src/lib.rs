@@ -1213,8 +1213,8 @@ pub unsafe extern "C" fn libsql_wal_get_frame(
     let db: &mut sqlite3 = &mut *db;
     let db = db.inner.lock().unwrap();
     let frame = std::slice::from_raw_parts_mut(p_frame, frame_len as usize);
-    match db.conn.wal_get_frame(frame_no, frame) {
-        Ok(()) => SQLITE_OK,
+    match db.conn.wal_get_frame(frame_no as u64, frame) {
+        Ok(..) => SQLITE_OK,
         Err(_) => SQLITE_ERROR,
     }
 }
@@ -1250,7 +1250,7 @@ pub unsafe extern "C" fn libsql_wal_insert_frame(
     let db: &mut sqlite3 = &mut *db;
     let db = db.inner.lock().unwrap();
     let frame = std::slice::from_raw_parts(p_frame, frame_len as usize);
-    match db.conn.wal_insert_frame(frame_no, frame) {
+    match db.conn.wal_insert_frame(frame_no as u64, frame) {
         Ok(_) => SQLITE_OK,
         Err(LimboError::Conflict(..)) => {
             if !p_conflict.is_null() {

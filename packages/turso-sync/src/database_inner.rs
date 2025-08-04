@@ -369,7 +369,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
                     if !wal_session.in_txn() {
                         wal_session.begin()?;
                     }
-                    let wal_frame_info = clean_conn.wal_insert_frame(frame_no as u32, &buffer)?;
+                    let wal_frame_info = clean_conn.wal_insert_frame(frame_no as u64, &buffer)?;
                     if wal_frame_info.is_commit_frame() {
                         wal_session.end()?;
                         // transaction boundary reached - it's safe to commit progress
@@ -437,7 +437,7 @@ impl<S: SyncServer, F: Filesystem> DatabaseInner<S, F> {
 
             let mut buffer = [0u8; FRAME_SIZE];
             for frame_no in (frame_no + 1)..=clean_frames {
-                clean_conn.wal_get_frame(frame_no as u32, &mut buffer)?;
+                clean_conn.wal_get_frame(frame_no as u64, &mut buffer)?;
                 frames.extend_from_slice(&buffer);
                 frames_cnt += 1;
             }

@@ -777,12 +777,15 @@ impl PageContent {
     }
 }
 
+/// Send read request for DB page read to the IO
+/// if allow_empty_read is set, than empty read will be raise error for the page, but will not panic
 #[instrument(skip_all, level = Level::DEBUG)]
 pub fn begin_read_page(
     db_file: Arc<dyn DatabaseStorage>,
     buffer_pool: Arc<BufferPool>,
     page: PageRef,
     page_idx: usize,
+    allow_empty_read: bool,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_btree_page(page_idx = {})", page_idx);
     let buf = buffer_pool.get();
@@ -792,13 +795,16 @@ pub fn begin_read_page(
     });
     #[allow(clippy::arc_with_non_send_sync)]
     let buf = Arc::new(RefCell::new(Buffer::new(buf, drop_fn)));
-    let complete = Box::new(move |buf: Arc<RefCell<Buffer>>, bytes_read: i32| {
+    let complete = Box::new(move |mut buf: Arc<RefCell<Buffer>>, bytes_read: i32| {
         let buf_len = buf.borrow().len();
         turso_assert!(
-            bytes_read == buf_len as i32,
+            (allow_empty_read && bytes_read == 0) || bytes_read == buf_len as i32,
             "read({bytes_read}) != expected({buf_len})"
         );
         let page = page.clone();
+        if bytes_read == 0 {
+            buf = Arc::new(RefCell::new(Buffer::allocate(0, Rc::new(|_| {}))));
+        }
         if finish_read_page(page_idx, buf, page.clone()).is_err() {
             page.set_error();
         }
