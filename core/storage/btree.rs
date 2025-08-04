@@ -5085,6 +5085,7 @@ impl BTreeCursor {
             self.state = CursorState::Destroy(DestroyInfo {
                 state: DestroyState::Start,
             });
+            return Ok(IOResult::IO);
         }
 
         loop {
@@ -5116,8 +5117,8 @@ impl BTreeCursor {
                 }
                 DestroyState::ProcessPage => {
                     let page = self.stack.top();
-                    self.stack.advance();
                     assert!(page.get().is_loaded()); //  page should be loaded at this time
+                    self.stack.advance();
                     let page = page.get();
                     let contents = page.get().contents.as_ref().unwrap();
                     let cell_idx = self.stack.current_cell_index();
@@ -5143,6 +5144,7 @@ impl BTreeCursor {
                                         "unable to get a mut reference to destroy state in cursor",
                                     );
                                     destroy_info.state = DestroyState::LoadPage;
+                                    return Ok(IOResult::IO);
                                 } else {
                                     let destroy_info = self.state.mut_destroy_info().expect(
                                         "unable to get a mut reference to destroy state in cursor",
@@ -5200,7 +5202,7 @@ impl BTreeCursor {
                                     "unable to get a mut reference to destroy state in cursor",
                                 );
                                 destroy_info.state = DestroyState::LoadPage;
-                                continue;
+                                return Ok(IOResult::IO);
                             }
                         },
                     }
@@ -5217,7 +5219,7 @@ impl BTreeCursor {
                                     "unable to get a mut reference to destroy state in cursor",
                                 );
                                 destroy_info.state = DestroyState::LoadPage;
-                                continue;
+                                return Ok(IOResult::IO);
                             }
                             //  For any leaf cell, advance the index now that overflow pages have been cleared
                             BTreeCell::TableLeafCell(_) | BTreeCell::IndexLeafCell(_) => {
