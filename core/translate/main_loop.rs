@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::{
     schema::{Affinity, Index, IndexColumn, Table},
     translate::{
+        emitter::prepare_cdc_if_necessary,
         plan::{DistinctCtx, Distinctness, Scan},
         result_row::emit_select_result,
     },
@@ -117,28 +118,14 @@ pub fn init_loop(
         "meta_left_joins length does not match tables length"
     );
 
-    let cdc_table = program.capture_data_changes_mode().table();
-    if cdc_table.is_some()
-        && matches!(
-            mode,
-            OperationMode::INSERT | OperationMode::UPDATE | OperationMode::DELETE
-        )
-    {
+    if matches!(
+        mode,
+        OperationMode::INSERT | OperationMode::UPDATE | OperationMode::DELETE
+    ) {
         assert!(tables.joined_tables().len() == 1);
-        let cdc_table_name = cdc_table.unwrap();
-        if tables.joined_tables()[0].table.get_name() != cdc_table_name {
-            let Some(cdc_table) = t_ctx.resolver.schema.get_table(cdc_table_name) else {
-                crate::bail_parse_error!("no such table: {}", cdc_table_name);
-            };
-            let Some(cdc_btree) = cdc_table.btree().clone() else {
-                crate::bail_parse_error!("no such table: {}", cdc_table_name);
-            };
-            let cdc_cursor_id = program.alloc_cursor_id(CursorType::BTreeTable(cdc_btree.clone()));
-            program.emit_insn(Insn::OpenWrite {
-                cursor_id: cdc_cursor_id,
-                root_page: cdc_btree.root_page.into(),
-                db: 0,
-            });
+        let changed_table = &tables.joined_tables()[0].table;
+        let prepared = prepare_cdc_if_necessary(program, t_ctx.resolver.schema, &changed_table)?;
+        if let Some((cdc_cursor_id, _)) = prepared {
             t_ctx.cdc_cursor_id = Some(cdc_cursor_id);
         }
     }

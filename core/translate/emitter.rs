@@ -22,7 +22,7 @@ use super::select::emit_simple_count;
 use super::subquery::emit_subqueries;
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::function::Func;
-use crate::schema::{Schema, Table};
+use crate::schema::{BTreeTable, Schema, Table};
 use crate::translate::compound_select::emit_program_for_compound_select;
 use crate::translate::expr::{emit_returning_results, ReturningValueRegisters};
 use crate::translate::plan::{DeletePlan, Plan, QueryDestination, Search};
@@ -32,7 +32,7 @@ use crate::vdbe::builder::{CursorKey, CursorType, ProgramBuilder};
 use crate::vdbe::insn::{CmpInsFlags, IdxInsertFlags, InsertFlags, RegisterOrLiteral};
 use crate::vdbe::CursorID;
 use crate::vdbe::{insn::Insn, BranchOffset};
-use crate::{bail_parse_error, Result, SymbolTable};
+use crate::{bail_parse_error, CaptureDataChangesMode, Result, SymbolTable};
 
 pub struct Resolver<'a> {
     pub schema: &'a Schema,
@@ -1279,6 +1279,31 @@ fn emit_update_insns(
     }
 
     Ok(())
+}
+
+pub fn prepare_cdc_if_necessary(
+    program: &mut ProgramBuilder,
+    schema: &Schema,
+    table: &Table,
+) -> Result<Option<(usize, Arc<BTreeTable>)>> {
+    let mode = program.capture_data_changes_mode();
+    let cdc_table = mode.table();
+    let Some(cdc_table) = cdc_table else {
+        return Ok(None);
+    };
+    if table.get_name() == cdc_table {
+        return Ok(None);
+    }
+    let Some(turso_cdc_table) = schema.get_table(cdc_table) else {
+        crate::bail_parse_error!("no such table: {}", cdc_table);
+    };
+    let Some(cdc_btree) = turso_cdc_table.btree().clone() else {
+        crate::bail_parse_error!("no such table: {}", cdc_table);
+    };
+    Ok(Some((
+        program.alloc_cursor_id(CursorType::BTreeTable(cdc_btree.clone())),
+        cdc_btree,
+    )))
 }
 
 pub fn emit_cdc_patch_record(
