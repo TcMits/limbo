@@ -275,22 +275,6 @@ impl Debug for Buffer {
     }
 }
 
-impl Clone for Buffer {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Heap(buf) => {
-                let len = buf.len();
-                Self::Heap(Vec::from(&buf[..len]).into_boxed_slice().into())
-            }
-            Self::Pooled(buf) => {
-                // Clone pooled buffers as heap buffers
-                let data = Vec::from(buf.as_slice());
-                Self::Heap(Pin::new(data.into_boxed_slice()))
-            }
-        }
-    }
-}
-
 impl Drop for Buffer {
     fn drop(&mut self) {
         let len = self.len();
