@@ -933,7 +933,7 @@ impl Wal for WalFile {
             }
         });
         let c =
-            begin_read_wal_frame_raw(&self.get_shared().file, offset, self.page_size(), complete)?;
+            begin_read_wal_frame_raw(&self.buffer_pool, &self.get_shared().file, offset, complete)?;
         Ok(c)
     }
 
@@ -1003,6 +1003,7 @@ impl Wal for WalFile {
         let header = header.lock();
         let checksums = self.last_checksum;
         let (checksums, frame_bytes) = prepare_wal_frame(
+            &self.buffer_pool,
             &header,
             checksums,
             header.page_size,
@@ -1044,6 +1045,7 @@ impl Wal for WalFile {
             let page_content = page.get_contents();
             let page_buf = page_content.as_ptr();
             let (frame_checksums, frame_bytes) = prepare_wal_frame(
+                &self.buffer_pool,
                 &header,
                 checksums,
                 header.page_size,

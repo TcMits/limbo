@@ -269,6 +269,18 @@ impl InnerUringIO {
         self.free_files.push_back(id);
         Ok(())
     }
+
+    #[cfg(debug_assertions)]
+    fn debug_check_fixed(&self, idx: u32, ptr: *const u8, len: usize) {
+        let (base, blen) = self.free_arenas[idx as usize].expect("slot not registered");
+        let start = base.as_ptr() as usize;
+        let end = start + blen;
+        let p = ptr as usize;
+        assert!(
+            p >= start && p + len <= end,
+            "Fixed operation, pointer out of registered range"
+        );
+    }
 }
 
 impl WrappedIOUring {
@@ -564,7 +576,6 @@ impl UringFile {
         self.id
     }
 }
-
 unsafe impl Send for UringFile {}
 unsafe impl Sync for UringFile {}
 
@@ -641,26 +652,27 @@ impl File for UringFile {
     fn pwrite(&self, pos: usize, buffer: Arc<crate::Buffer>, c: Completion) -> Result<Completion> {
         let mut io = self.io.borrow_mut();
         let write = {
+            let ptr = buf.as_ptr();
+            let len = buf.len();
             with_fd!(self, |fd| {
                 if let Some(idx) = buf.fixed_id() {
                     trace!(
                         "pwrite_fixed(pos = {}, length = {}, idx= {})",
                         pos,
-                        buffer.len(),
+                        len,
                         idx
                     );
-                    io_uring::opcode::WriteFixed::new(
-                        fd,
-                        buffer.as_ptr(),
-                        buffer.len() as u32,
-                        idx as u16,
-                    )
-                    .offset(pos as u64)
-                    .build()
-                    .user_data(get_key(c.clone()))
+                    #[cfg(debug_assertions)]
+                    {
+                        io.debug_check_fixed(idx, ptr, len);
+                    }
+                    io_uring::opcode::WriteFixed::new(fd, ptr, len as u32, idx as u16)
+                        .offset(pos as u64)
+                        .build()
+                        .user_data(get_key(c.clone()))
                 } else {
                     trace!("pwrite(pos = {}, length = {})", pos, buffer.len());
-                    io_uring::opcode::Write::new(fd, buffer.as_ptr(), buffer.len() as u32)
+                    io_uring::opcode::Write::new(fd, ptr, len as u32)
                         .offset(pos as u64)
                         .build()
                         .user_data(get_key(c.clone()))

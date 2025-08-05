@@ -1760,15 +1760,13 @@ pub fn read_entire_wal_dumb(file: &Arc<dyn File>) -> Result<Arc<UnsafeCell<WalFi
 }
 
 pub fn begin_read_wal_frame_raw(
+    buffer_pool: &Arc<BufferPool>,
     io: &Arc<dyn File>,
     offset: usize,
-    page_size: u32,
     complete: Box<Complete>,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_wal_frame_raw(offset={})", offset);
-    let buf = Arc::new(BufferPool::allocate(
-        page_size as usize + WAL_FRAME_HEADER_SIZE,
-    ));
+    let buf = Arc::new(buffer_pool.get_wal_frame());
     #[allow(clippy::arc_with_non_send_sync)]
     let c = Completion::new_read(buf, complete);
     let c = io.pread(offset, c)?;
@@ -1810,6 +1808,7 @@ pub fn parse_wal_frame_header(frame: &[u8]) -> (WalFrameHeader, &[u8]) {
 }
 
 pub fn prepare_wal_frame(
+    buffer_pool: &Arc<BufferPool>,
     wal_header: &WalHeader,
     prev_checksums: (u32, u32),
     page_size: u32,
@@ -1819,7 +1818,7 @@ pub fn prepare_wal_frame(
 ) -> ((u32, u32), Arc<Buffer>) {
     tracing::trace!(page_number);
 
-    let buffer = BufferPool::allocate(page_size as usize + WAL_FRAME_HEADER_SIZE);
+    let buffer = buffer_pool.get_wal_frame();
     let frame = buffer.as_mut_slice();
     frame[WAL_FRAME_HEADER_SIZE..].copy_from_slice(page);
 
