@@ -59,28 +59,26 @@ fn regexp_substr(&self, args: &[Value]) -> Value {
 
 #[scalar(name = "regexp_replace")]
 fn regexp_replace(&self, args: &[Value]) -> Value {
-    let replacement = match args.get(2) {
-        Some(repl) => repl.to_text().unwrap_or_default(),
-        None => "", // If args[2] does not exist, use an empty string
+    if args.len() < 2 {
+        return Value::from_text("".to_string());
+    }
+
+    let Some(source_text) = args[0].to_text() else {
+        return Value::from_text("".to_string());
     };
 
-    match (args.first(), args.get(1)) {
-        (Some(haystack), Some(pattern)) => {
-            let Some(haystack_text) = haystack.to_text() else {
-                return Value::from_text("".to_string()); // Return an empty string if haystack is not valid
-            };
-            let Some(pattern_text) = pattern.to_text() else {
-                return Value::from_text("".to_string()); // Return an empty string if pattern is not valid
-            };
+    let Some(pattern_text) = args[1].to_text() else {
+        return Value::from_text("".to_string());
+    };
 
-            let re = match Regex::new(pattern_text) {
-                Ok(re) => re,
-                Err(_) => return Value::from_text("".to_string()), // Return an empty string if regex compilation fails
-            };
-            Value::from_text(re.replace(haystack_text, replacement).to_string())
-        }
-        _ => Value::from_text("".to_string()), // Return an empty string for invalid value types
-    }
+    let replacement = args.get(2).and_then(|v| v.to_text()).unwrap_or("");
+
+    let re = match Regex::new(pattern_text) {
+        Ok(re) => re,
+        Err(_) => return Value::from_text("".to_string()),
+    };
+
+    Value::from_text(re.replace(source_text, replacement).to_string())
 }
 
 #[scalar(name = "regexp_capture")]
