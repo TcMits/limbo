@@ -135,9 +135,9 @@ INSERT INTO t VALUES (zeroblob(1024 - 1), zeroblob(1024 - 2), zeroblob(1024 - 3)
     def run_test(self, name: str, sql: str, expected: str) -> None:
         console.test(f"Running test: {name}", _stack_offset=2)
         actual = self.shell.execute(sql)
-        assert (
-            actual == expected
-        ), f"Test failed: {name}\nSQL: {sql}\nExpected:\n{repr(expected)}\nActual:\n{repr(actual)}"
+        assert actual == expected, (
+            f"Test failed: {name}\nSQL: {sql}\nExpected:\n{repr(expected)}\nActual:\n{repr(actual)}"
+        )
 
     def run_debug(self, sql: str):
         console.debug(f"debugging: {sql}", _stack_offset=2)
@@ -160,9 +160,10 @@ INSERT INTO t VALUES (zeroblob(1024 - 1), zeroblob(1024 - 2), zeroblob(1024 - 3)
         path = os.path.join("testing", "testing_clone.db")
         if os.path.exists(path):
             os.remove(path)
-        time.sleep(0.1)  # Ensure the file is removed before cloning
+        time.sleep(0.2)  # Ensure the file is removed before cloning
         cmd = "sqlite3 testing/testing.db '.clone testing/testing_clone.db'"
         subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        time.sleep(0.2)  # Ensure lock releaesd
         if not os.path.exists("testing/testing_clone.db"):
             raise RuntimeError("Failed to clone testing.db to testing/testing_clone.db")
 

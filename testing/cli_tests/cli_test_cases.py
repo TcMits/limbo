@@ -312,6 +312,49 @@ def test_uri_readonly():
     turso.quit()
 
 
+def test_copy_db_file():
+    testpath = "testing/test_copy.db"
+    if Path(testpath).exists():
+        os.unlink(Path(testpath))
+        time.sleep(0.2)  # make sure closed
+    time.sleep(0.3)
+    turso = TestTursoShell(init_commands="", flags=f" {testpath}")
+    turso.execute_dot("create table testing(a,b,c);")
+    turso.run_test_fn(".schema", lambda x: "CREATE TABLE testing (a, b, c)" in x, "test-database-has-expected-schema")
+    for i in range(100):
+        turso.execute_dot(f"insert into testing (a,b,c) values ({i},{i + 1}, {i + 2});")
+    turso.run_test_fn("SELECT COUNT(*) FROM testing;", lambda x: "100" == x, "test-database-has-expected-count")
+    turso.execute_dot(f".clone {testpath}")
+
+    turso.execute_dot(f".open {testpath}")
+    turso.run_test_fn(".schema", lambda x: "CREATE TABLE testing" in x, "test-copied-database-has-expected-schema")
+    turso.run_test_fn("SELECT COUNT(*) FROM testing;", lambda x: "100" == x, "test-copied-database-has-expected-count")
+    turso.quit()
+
+
+def test_copy_memory_db_to_file():
+    testpath = "testing/memory.db"
+    if Path(testpath).exists():
+        os.unlink(Path(testpath))
+        time.sleep(0.2)  # make sure closed
+
+    turso = TestTursoShell(init_commands="")
+    turso.execute_dot("create table testing(a,b,c);")
+    for i in range(100):
+        turso.execute_dot(f"insert into testing (a, b, c) values ({i},{i + 1}, {i + 2});")
+    turso.execute_dot(f".clone {testpath}")
+    turso.quit()
+    time.sleep(0.3)
+    sqlite = TestTursoShell(exec_name="sqlite3", flags=f" {testpath}")
+    sqlite.run_test_fn(
+        ".schema", lambda x: "CREATE TABLE testing (a, b, c)" in x, "test-copied-database-has-expected-schema"
+    )
+    sqlite.run_test_fn(
+        "SELECT COUNT(*) FROM testing;", lambda x: "100" == x, "test-copied-database-has-expected-user-count"
+    )
+    sqlite.quit()
+
+
 def main():
     console.info("Running all turso CLI tests...")
     test_basic_queries()
@@ -333,6 +376,8 @@ def main():
     test_update_with_limit()
     test_update_with_limit_and_offset()
     test_uri_readonly()
+    test_copy_db_file()
+    test_copy_memory_db_to_file()
     console.info("All tests have passed")
 
 
