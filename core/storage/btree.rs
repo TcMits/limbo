@@ -8521,7 +8521,7 @@ mod tests {
                     .get() as usize,
             ));
             let _buf = buf.clone();
-            let c = Completion::new_write(|_| {
+            let c = Completion::new_write(move |_| {
                 let _ = _buf.clone();
             });
             let _c = pager

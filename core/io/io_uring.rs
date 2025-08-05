@@ -276,7 +276,7 @@ impl InnerUringIO {
         let start = base.as_ptr() as usize;
         let end = start + blen;
         let p = ptr as usize;
-        assert!(
+        turso_assert!(
             p >= start && p + len <= end,
             "Fixed operation, pointer out of registered range"
         );
@@ -622,6 +622,7 @@ impl File for UringFile {
         let mut io = self.io.borrow_mut();
         let read_e = {
             let buf = r.buf();
+            let ptr = buf.as_mut_ptr();
             let len = buf.len();
             with_fd!(self, |fd| {
                 if let Some(idx) = buf.fixed_id() {
@@ -631,7 +632,11 @@ impl File for UringFile {
                         len,
                         idx
                     );
-                    io_uring::opcode::ReadFixed::new(fd, buf.as_mut_ptr(), len as u32, idx as u16)
+                    #[cfg(debug_assertions)]
+                    {
+                        io.debug_check_fixed(idx, ptr, len);
+                    }
+                    io_uring::opcode::ReadFixed::new(fd, ptr, len as u32, idx as u16)
                         .offset(pos as u64)
                         .build()
                         .user_data(get_key(c.clone()))

@@ -3,6 +3,7 @@ use crate::storage::sqlite3_ondisk::WAL_FRAME_HEADER_SIZE;
 use crate::{BufferPool, Result};
 use bitflags::bitflags;
 use cfg_block::cfg_block;
+use std::cell::RefCell;
 use std::fmt;
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -364,10 +365,10 @@ impl Buffer {
             },
         }
     }
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+    pub fn as_mut_ptr(&self) -> *mut u8 {
         match self {
-            Self::Heap(buf) => buf.as_mut_ptr(),
-            Self::Pooled(buf) => buf.as_mut_ptr(),
+            Self::Heap(buf) => buf.as_ptr() as *mut u8,
+            Self::Pooled(buf) => buf.as_ptr() as *mut u8,
         }
     }
 }
