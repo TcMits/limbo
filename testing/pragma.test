@@ -296,3 +296,32 @@ products|id
 products|name
 products|price
 }
+
+do_execsql_test_on_specific_db ":memory:" pragma-max-page-count-default {
+  PRAGMA max_page_count
+} {4294967294}
+
+do_execsql_test_on_specific_db ":memory:" pragma-max-page-count-set-large {
+  PRAGMA max_page_count = 1000;
+  PRAGMA max_page_count
+} {1000
+1000}
+
+do_execsql_test_on_specific_db ":memory:" pragma-max-page-count-set-zero-ignored {
+  PRAGMA max_page_count = 0;
+  PRAGMA max_page_count
+} {4294967294
+4294967294
+}
+
+do_execsql_test_on_specific_db ":memory:" pragma-max-page-count-clamping-with-data {
+  CREATE TABLE test (id INTEGER);
+  PRAGMA page_count;
+  PRAGMA max_page_count = 1;
+} {2
+2}
+
+do_execsql_test_in_memory_any_error pragma-max-page-count-enforcement-error {
+  PRAGMA max_page_count = 1;
+  CREATE TABLE test (id INTEGER)
+}

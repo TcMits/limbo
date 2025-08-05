@@ -1645,6 +1645,15 @@ pub fn insn_to_str(
                 0,
                 format!("drop_column({table}, {column_index})"),
             ),
+            Insn::MaxPgcnt { db, dest, new_max } => (
+                "MaxPgcnt",
+                *db as i32,
+                *dest as i32,
+                *new_max as i32,
+                Value::build_text(""),
+                0,
+                format!("r[{dest}]=max_page_count(db[{db}],{new_max})"),
+            ),
             Insn::CollSeq { reg, collation } => (
                 "CollSeq",
                 reg.unwrap_or(0) as i32,

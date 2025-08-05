@@ -66,6 +66,13 @@ pub fn pragma_for(pragma: &PragmaName) -> Pragma {
             PragmaFlags::Result0 | PragmaFlags::SchemaReq | PragmaFlags::NoColumns1,
             &["page_size"],
         ),
+        MaxPageCount => Pragma::new(
+            PragmaFlags::NeedSchema
+                | PragmaFlags::Result0
+                | PragmaFlags::SchemaReq
+                | PragmaFlags::NoColumns1,
+            &["max_page_count"],
+        ),
         SchemaVersion => Pragma::new(
             PragmaFlags::NoColumns1 | PragmaFlags::Result0,
             &["schema_version"],

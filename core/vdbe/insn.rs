@@ -1034,6 +1034,15 @@ pub enum Insn {
         table: String,
         column_index: usize,
     },
+    /// Try to set the maximum page count for database P1 to the value in P3.
+    /// Do not let the maximum page count fall below the current page count and
+    /// do not change the maximum page count value if P3==0.
+    /// Store the maximum page count after the change in register P2.
+    MaxPgcnt {
+        db: usize,      // P1: database index
+        dest: usize,    // P2: output register
+        new_max: usize, // P3: new maximum page count (0 = just return current)
+    },
 }
 
 impl Insn {
@@ -1165,6 +1174,7 @@ impl Insn {
             Insn::IntegrityCk { .. } => execute::op_integrity_check,
             Insn::RenameTable { .. } => execute::op_rename_table,
             Insn::DropColumn { .. } => execute::op_drop_column,
+            Insn::MaxPgcnt { .. } => execute::op_max_pgcnt,
         }
     }
 }

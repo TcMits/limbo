@@ -142,7 +142,7 @@ Turso aims to be fully compatible with SQLite, with opt-in features not supporte
 | PRAGMA legacy_alter_table        | No         |                                              |
 | PRAGMA legacy_file_format         | Yes        |                                              |
 | PRAGMA locking_mode              | No         |                                              |
-| PRAGMA max_page_count            | No         |                                              |
+| PRAGMA max_page_count            | Yes        |                                              |
 | PRAGMA mmap_size                 | No         |                                              |
 | PRAGMA module_list               | No         |                                              |
 | PRAGMA optimize                  | No         |                                              |
@@ -486,7 +486,7 @@ Modifiers:
 | LoadAnalysis   | No     |         |
 | Lt             | Yes    |         |
 | MakeRecord     | Yes    |         |
-| MaxPgcnt       | No     |         |
+| MaxPgcnt       | Yes    |         |
 | MemMax         | No     |         |
 | Move           | Yes    |         |
 | Multiply       | Yes    |         |

@@ -1810,6 +1810,8 @@ pub enum PragmaName {
     JournalMode,
     /// Noop as per SQLite docs
     LegacyFileFormat,
+    /// Set or get the maximum number of pages in the database file.
+    MaxPageCount,
     /// Return the total number of pages in the database file.
     PageCount,
     /// Return the page size of the database in bytes.

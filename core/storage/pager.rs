@@ -24,6 +24,9 @@ use super::page_cache::{CacheError, CacheResizeResult, DumbLruPageCache, PageCac
 use super::sqlite3_ondisk::begin_write_btree_page;
 use super::wal::CheckpointMode;
 
+/// SQLite's default maximum page count
+const DEFAULT_MAX_PAGE_COUNT: u32 = 0xfffffffe;
+
 #[cfg(not(feature = "omit_autovacuum"))]
 use ptrmap::*;
 
@@ -450,6 +453,8 @@ pub struct Pager {
     pub(crate) page_size: Cell<Option<u32>>,
     reserved_space: OnceCell<u8>,
     free_page_state: RefCell<FreePageState>,
+    /// Maximum number of pages allowed in the database. Default is 1073741823 (SQLite default).
+    max_page_count: Cell<u32>,
     #[cfg(not(feature = "omit_autovacuum"))]
     /// State machine for [Pager::ptrmap_get]
     ptrmap_get_state: RefCell<PtrMapGetState>,
@@ -562,6 +567,7 @@ impl Pager {
             }),
             free_page_state: RefCell::new(FreePageState::Start),
             allocate_page_state: RefCell::new(AllocatePageState::Start),
+            max_page_count: Cell::new(DEFAULT_MAX_PAGE_COUNT),
             #[cfg(not(feature = "omit_autovacuum"))]
             ptrmap_get_state: RefCell::new(PtrMapGetState::Start),
             #[cfg(not(feature = "omit_autovacuum"))]
@@ -570,6 +576,26 @@ impl Pager {
             #[cfg(not(feature = "omit_autovacuum"))]
             btree_create_vacuum_full_state: Cell::new(BtreeCreateVacuumFullState::Start),
         })
+    }
+
+    /// Get the maximum page count for this database
+    pub fn get_max_page_count(&self) -> u32 {
+        self.max_page_count.get()
+    }
+
+    /// Set the maximum page count for this database
+    /// Returns the new maximum page count (may be clamped to current database size)
+    pub fn set_max_page_count(&self, new_max: u32) -> crate::Result<IOResult<u32>> {
+        // Get current database size
+        let current_page_count = match self.with_header(|header| header.database_size.get())? {
+            IOResult::Done(size) => size,
+            IOResult::IO => return Ok(IOResult::IO),
+        };
+
+        // Clamp new_max to be at least the current database size
+        let clamped_max = std::cmp::max(new_max, current_page_count);
+        self.max_page_count.set(clamped_max);
+        Ok(IOResult::Done(clamped_max))
     }
 
     pub fn set_wal(&mut self, wal: Rc<RefCell<dyn Wal>>) {
@@ -1993,6 +2019,15 @@ impl Pager {
                 }
                 AllocatePageState::AllocateNewPage { current_db_size } => {
                     let new_db_size = *current_db_size + 1;
+
+                    // Check if allocating a new page would exceed the maximum page count
+                    let max_page_count = self.get_max_page_count();
+                    if new_db_size > max_page_count {
+                        return Err(LimboError::DatabaseFull(
+                            "database or disk is full".to_string(),
+                        ));
+                    }
+
                     // FIXME: should reserve page cache entry before modifying the database
                     let page = allocate_new_page(new_db_size as usize, &self.buffer_pool, 0);
                     {

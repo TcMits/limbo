@@ -145,6 +145,24 @@ fn update_pragma(
             connection,
             program,
         ),
+        PragmaName::MaxPageCount => {
+            let data = parse_signed_number(&value)?;
+            let max_page_count_value = match data {
+                Value::Integer(i) => i as usize,
+                Value::Float(f) => f as usize,
+                _ => unreachable!(),
+            };
+
+            let result_reg = program.alloc_register();
+            program.emit_insn(Insn::MaxPgcnt {
+                db: 0,
+                dest: result_reg,
+                new_max: max_page_count_value,
+            });
+            program.emit_result_row(result_reg, 1);
+            program.add_pragma_result_column("max_page_count".into());
+            Ok((program, TransactionMode::Write))
+        }
         PragmaName::UserVersion => {
             let data = parse_signed_number(&value)?;
             let version_value = match data {
@@ -371,6 +389,16 @@ fn query_pragma(
             program.emit_insn(Insn::PageCount {
                 db: 0,
                 dest: register,
+            });
+            program.emit_result_row(register, 1);
+            program.add_pragma_result_column(pragma.to_string());
+            Ok((program, TransactionMode::Read))
+        }
+        PragmaName::MaxPageCount => {
+            program.emit_insn(Insn::MaxPgcnt {
+                db: 0,
+                dest: register,
+                new_max: 0, // 0 means just return current max
             });
             program.emit_result_row(register, 1);
             program.add_pragma_result_column(pragma.to_string());

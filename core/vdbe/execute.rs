@@ -8315,6 +8315,37 @@ fn stringify_register(reg: &mut Register) -> bool {
     }
 }
 
+pub fn op_max_pgcnt(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::MaxPgcnt { db, dest, new_max } = insn else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    if *db > 0 {
+        todo!("temp/attached databases not implemented yet");
+    }
+
+    let result_value = if *new_max == 0 {
+        // If new_max is 0, just return current maximum without changing it
+        pager.get_max_page_count()
+    } else {
+        // Set new maximum page count (will be clamped to current database size)
+        match pager.set_max_page_count(*new_max as u32)? {
+            IOResult::Done(new_max_count) => new_max_count,
+            IOResult::IO => return Ok(InsnFunctionStepResult::IO),
+        }
+    };
+
+    state.registers[*dest] = Register::Value(Value::Integer(result_value.into()));
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
