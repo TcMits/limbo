@@ -1,7 +1,6 @@
 use super::MemoryIO;
 use crate::{Clock, Completion, File, Instant, LimboError, OpenFlags, Result, IO};
 use parking_lot::RwLock;
-use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace, Level};
@@ -89,7 +88,7 @@ impl File for WindowsFile {
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         let nr = {
             let r = c.as_read();
-            let mut buf = r.buf_mut();
+            let buf = r.buf();
             let buf = buf.as_mut_slice();
             file.read_exact(buf)?;
             buf.len() as i32
@@ -99,16 +98,10 @@ impl File for WindowsFile {
     }
 
     #[instrument(skip(self, c, buffer), level = Level::TRACE)]
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Arc<RefCell<crate::Buffer>>,
-        c: Completion,
-    ) -> Result<Completion> {
+    fn pwrite(&self, pos: usize, buffer: Arc<crate::Buffer>, c: Completion) -> Result<Completion> {
         let mut file = self.file.write();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
-        let buf = buffer.borrow();
-        let buf = buf.as_slice();
+        let buf = buffer.as_slice();
         file.write_all(buf)?;
         c.complete(buffer.borrow().len() as i32);
         Ok(c)

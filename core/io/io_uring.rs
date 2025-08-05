@@ -183,18 +183,18 @@ struct WritevState {
     /// cache the sum of all buffer lengths for the total expected write
     total_len: usize,
     /// buffers to write
-    bufs: Vec<Arc<RefCell<crate::Buffer>>>,
+    bufs: Vec<Arc<crate::Buffer>>,
     /// we keep the last iovec allocation alive until final CQE
     last_iov_allocation: Option<Box<[libc::iovec; MAX_IOVEC_ENTRIES]>>,
 }
 
 impl WritevState {
-    fn new(file: &UringFile, pos: usize, bufs: Vec<Arc<RefCell<crate::Buffer>>>) -> Self {
+    fn new(file: &UringFile, pos: usize, bufs: Vec<Arc<crate::Buffer>>) -> Self {
         let file_id = file
             .id()
             .map(Fd::Fixed)
             .unwrap_or_else(|| Fd::RawFd(file.as_raw_fd()));
-        let total_len = bufs.iter().map(|b| b.borrow().len()).sum();
+        let total_len = bufs.iter().map(|b| b.len()).sum();
         Self {
             file_id,
             file_pos: pos,
@@ -217,10 +217,7 @@ impl WritevState {
     fn advance(&mut self, written: usize) {
         let mut remaining = written;
         while remaining > 0 {
-            let current_buf_len = {
-                let r = self.bufs[self.current_buffer_idx].borrow();
-                r.len()
-            };
+            let current_buf_len = self.bufs[self.current_buffer_idx].len();
             let left = current_buf_len - self.current_buffer_offset;
             if remaining < left {
                 self.current_buffer_offset += remaining;
@@ -314,9 +311,8 @@ impl WrappedIOUring {
         let mut iov_count = 0;
         let mut last_end: Option<(*const u8, usize)> = None;
         for buffer in st.bufs.iter().skip(st.current_buffer_idx) {
-            let buf = buffer.borrow();
-            let ptr = buf.as_ptr();
-            let len = buf.len();
+            let ptr = buffer.as_ptr();
+            let len = buffer.len();
             if let Some((last_ptr, last_len)) = last_end {
                 // Check if this buffer is adjacent to the last
                 if unsafe { last_ptr.add(last_len) } == ptr {
@@ -591,7 +587,7 @@ impl File for UringFile {
         trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let mut io = self.io.borrow_mut();
         let read_e = {
-            let mut buf = r.buf_mut();
+            let buf = r.buf();
             let len = buf.len();
             let buf = buf.as_mut_ptr();
             with_fd!(self, |fd| {
@@ -605,18 +601,12 @@ impl File for UringFile {
         Ok(c)
     }
 
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Arc<RefCell<crate::Buffer>>,
-        c: Completion,
-    ) -> Result<Completion> {
+    fn pwrite(&self, pos: usize, buffer: Arc<crate::Buffer>, c: Completion) -> Result<Completion> {
         let mut io = self.io.borrow_mut();
         let write = {
-            let buf = buffer.borrow();
-            trace!("pwrite(pos = {}, length = {})", pos, buf.len());
+            trace!("pwrite(pos = {}, length = {})", pos, buffer.len());
             with_fd!(self, |fd| {
-                io_uring::opcode::Write::new(fd, buf.as_ptr(), buf.len() as u32)
+                io_uring::opcode::Write::new(fd, buffer.as_ptr(), buffer.len() as u32)
                     .offset(pos as u64)
                     .build()
                     .user_data(get_key(c.clone()))
@@ -641,7 +631,7 @@ impl File for UringFile {
     fn pwritev(
         &self,
         pos: usize,
-        bufs: Vec<Arc<RefCell<crate::Buffer>>>,
+        bufs: Vec<Arc<crate::Buffer>>,
         c: Completion,
     ) -> Result<Completion> {
         // for a single buffer use pwrite directly

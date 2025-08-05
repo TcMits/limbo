@@ -3,7 +3,7 @@ use crate::{LimboError, Result};
 
 use crate::io::clock::Instant;
 use std::{
-    cell::{Cell, RefCell, UnsafeCell},
+    cell::{Cell, UnsafeCell},
     collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex},
 };
@@ -119,7 +119,7 @@ impl File for MemoryFile {
 
         let read_len = buf_len.min(file_size - pos);
         {
-            let mut read_buf = r.buf_mut();
+            let read_buf = r.buf();
             let mut offset = pos;
             let mut remaining = read_len;
             let mut buf_offset = 0;
@@ -144,14 +144,8 @@ impl File for MemoryFile {
         Ok(c)
     }
 
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Arc<RefCell<Buffer>>,
-        c: Completion,
-    ) -> Result<Completion> {
-        let buf = buffer.borrow();
-        let buf_len = buf.len();
+    fn pwrite(&self, pos: usize, buffer: Arc<Buffer>, c: Completion) -> Result<Completion> {
+        let buf_len = buffer.len();
         if buf_len == 0 {
             c.complete(0);
             return Ok(c);
@@ -160,7 +154,7 @@ impl File for MemoryFile {
         let mut offset = pos;
         let mut remaining = buf_len;
         let mut buf_offset = 0;
-        let data = &buf.as_slice();
+        let data = &buffer.as_slice();
 
         while remaining > 0 {
             let page_no = offset / PAGE_SIZE;
@@ -204,25 +198,19 @@ impl File for MemoryFile {
         Ok(c)
     }
 
-    fn pwritev(
-        &self,
-        pos: usize,
-        buffers: Vec<Arc<RefCell<Buffer>>>,
-        c: Completion,
-    ) -> Result<Completion> {
+    fn pwritev(&self, pos: usize, buffers: Vec<Arc<Buffer>>, c: Completion) -> Result<Completion> {
         let mut offset = pos;
         let mut total_written = 0;
 
         for buffer in buffers {
-            let buf = buffer.borrow();
-            let buf_len = buf.len();
+            let buf_len = buffer.len();
             if buf_len == 0 {
                 continue;
             }
 
             let mut remaining = buf_len;
             let mut buf_offset = 0;
-            let data = &buf.as_slice();
+            let data = &buffer.as_slice();
 
             while remaining > 0 {
                 let page_no = offset / PAGE_SIZE;
@@ -249,12 +237,6 @@ impl File for MemoryFile {
 
     fn size(&self) -> Result<u64> {
         Ok(self.size.get() as u64)
-    }
-}
-
-impl Drop for MemoryFile {
-    fn drop(&mut self) {
-        // no-op
     }
 }
 

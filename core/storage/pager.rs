@@ -12,7 +12,6 @@ use crate::{return_if_io, Completion, TransactionState};
 use crate::{turso_assert, Buffer, Connection, LimboError, Result};
 use parking_lot::RwLock;
 use std::cell::{Cell, OnceCell, RefCell, UnsafeCell};
-use std::cell::{Ref, RefMut};
 use std::collections::HashSet;
 use std::hash;
 use std::rc::Rc;
@@ -26,7 +25,7 @@ use super::sqlite3_ondisk::begin_write_btree_page;
 use super::wal::CheckpointMode;
 
 #[cfg(not(feature = "omit_autovacuum"))]
-use {crate::io::Buffer as IoBuffer, ptrmap::*};
+use ptrmap::*;
 
 pub struct HeaderRef(PageRef);
 
@@ -49,12 +48,10 @@ impl HeaderRef {
         Ok(IOResult::Done(Self(page)))
     }
 
-    pub fn borrow(&self) -> Ref<'_, DatabaseHeader> {
+    pub fn borrow(&self) -> &DatabaseHeader {
         // TODO: Instead of erasing mutability, implement `get_mut_contents` and return a shared reference.
         let content: &PageContent = self.0.get_contents();
-        Ref::map(content.buffer.borrow(), |buffer| {
-            bytemuck::from_bytes::<DatabaseHeader>(&buffer.as_slice()[0..DatabaseHeader::SIZE])
-        })
+        bytemuck::from_bytes::<DatabaseHeader>(&content.buffer.as_slice()[0..DatabaseHeader::SIZE])
     }
 }
 
@@ -81,13 +78,11 @@ impl HeaderRefMut {
         Ok(IOResult::Done(Self(page)))
     }
 
-    pub fn borrow_mut(&self) -> RefMut<'_, DatabaseHeader> {
+    pub fn borrow_mut(&self) -> &mut DatabaseHeader {
         let content = self.0.get_contents();
-        RefMut::map(content.buffer.borrow_mut(), |buffer| {
-            bytemuck::from_bytes_mut::<DatabaseHeader>(
-                &mut buffer.as_mut_slice()[0..DatabaseHeader::SIZE],
-            )
-        })
+        bytemuck::from_bytes_mut::<DatabaseHeader>(
+            &mut content.buffer.as_mut_slice()[0..DatabaseHeader::SIZE],
+        )
     }
 }
 
@@ -603,8 +598,7 @@ impl Pager {
                         }
                     };
 
-                    let page_buffer_guard: std::cell::Ref<IoBuffer> = page_content.buffer.borrow();
-                    let full_buffer_slice: &[u8] = page_buffer_guard.as_slice();
+                    let full_buffer_slice: &[u8] = page_content.buffer.as_slice();
 
                     // Ptrmap pages are not page 1, so their internal offset within their buffer should be 0.
                     // The actual page data starts at page_content.offset within the full_buffer_slice.
@@ -695,8 +689,7 @@ impl Pager {
             }
         };
 
-        let mut page_buffer_guard = page_content.buffer.borrow_mut();
-        let full_buffer_slice = page_buffer_guard.as_mut_slice();
+        let full_buffer_slice = page_content.buffer.as_mut_slice();
 
         if offset_in_ptrmap_page + PTRMAP_ENTRY_SIZE > full_buffer_slice.len() {
             return Err(LimboError::InternalError(format!(
@@ -1542,7 +1535,7 @@ impl Pager {
         const TRUNK_PAGE_LEAF_COUNT_OFFSET: usize = 4; // Offset to leaf count
 
         let header_ref = self.io.block(|| HeaderRefMut::from_pager(self))?;
-        let mut header = header_ref.borrow_mut();
+        let header = header_ref.borrow_mut();
 
         let mut state = self.free_page_state.borrow_mut();
         tracing::debug!(?state);
@@ -1742,7 +1735,7 @@ impl Pager {
         const FREELIST_TRUNK_OFFSET_FIRST_LEAF: usize = 8;
 
         let header_ref = self.io.block(|| HeaderRefMut::from_pager(self))?;
-        let mut header = header_ref.borrow_mut();
+        let header = header_ref.borrow_mut();
 
         loop {
             let mut state = self.allocate_page_state.borrow_mut();
@@ -2032,15 +2025,15 @@ impl Pager {
             return Ok(IOResult::IO);
         };
         let header = header_ref.borrow();
-        Ok(IOResult::Done(f(&header)))
+        Ok(IOResult::Done(f(header)))
     }
 
     pub fn with_header_mut<T>(&self, f: impl Fn(&mut DatabaseHeader) -> T) -> Result<IOResult<T>> {
         let IOResult::Done(header_ref) = HeaderRefMut::from_pager(self)? else {
             return Ok(IOResult::IO);
         };
-        let mut header = header_ref.borrow_mut();
-        Ok(IOResult::Done(f(&mut header)))
+        let header = header_ref.borrow_mut();
+        Ok(IOResult::Done(f(header)))
     }
 }
 
@@ -2052,7 +2045,7 @@ pub fn allocate_new_page(page_id: usize, buffer_pool: &Arc<BufferPool>, offset: 
         let drop_fn = Rc::new(move |buf| {
             bp.put(buf);
         });
-        let buffer = Arc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
+        let buffer = Arc::new(Buffer::new(buffer, drop_fn));
         page.set_loaded();
         page.get().contents = Some(PageContent::new(offset, buffer));
     }

@@ -469,10 +469,10 @@ impl turso_core::DatabaseStorage for DatabaseFile {
     fn write_page(
         &self,
         page_idx: usize,
-        buffer: Arc<RefCell<turso_core::Buffer>>,
+        buffer: Arc<turso_core::Buffer>,
         c: turso_core::Completion,
     ) -> turso_core::Result<turso_core::Completion> {
-        let size = buffer.borrow().len();
+        let size = buffer.len();
         let pos = (page_idx - 1) * size;
         self.file.pwrite(pos, buffer, c)
     }
@@ -481,7 +481,7 @@ impl turso_core::DatabaseStorage for DatabaseFile {
         &self,
         page_idx: usize,
         page_size: usize,
-        buffers: Vec<Arc<RefCell<turso_core::Buffer>>>,
+        buffers: Vec<Arc<turso_core::Buffer>>,
         c: turso_core::Completion,
     ) -> turso_core::Result<turso_core::Completion> {
         let pos = page_idx.saturating_sub(1) * page_size;

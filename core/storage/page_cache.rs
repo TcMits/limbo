@@ -626,7 +626,7 @@ mod tests {
     use crate::storage::pager::{Page, PageRef};
     use crate::storage::sqlite3_ondisk::PageContent;
     use std::ptr::NonNull;
-    use std::{cell::RefCell, num::NonZeroUsize, pin::Pin, rc::Rc, sync::Arc};
+    use std::{num::NonZeroUsize, pin::Pin, rc::Rc, sync::Arc};
 
     use lru::LruCache;
     use rand_chacha::{
@@ -646,7 +646,7 @@ mod tests {
             let buffer = Buffer::new(Pin::new(vec![0; 4096]), buffer_drop_fn);
             let page_content = PageContent {
                 offset: 0,
-                buffer: Arc::new(RefCell::new(buffer)),
+                buffer: Arc::new(buffer),
                 overflow_cells: Vec::new(),
             };
             page.get().contents = Some(page_content);

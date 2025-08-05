@@ -9,10 +9,7 @@ use tempfile;
 
 use crate::{
     error::LimboError,
-    io::{
-        Buffer, BufferData, Completion, CompletionType, File, OpenFlags, ReadCompletion,
-        WriteCompletion, IO,
-    },
+    io::{Buffer, BufferData, Completion, File, OpenFlags, IO},
     storage::sqlite3_ondisk::{read_varint, varint_len, write_varint},
     translate::collate::CollationSeq,
     turso_assert,
@@ -369,14 +366,14 @@ impl SortedChunk {
 
         let drop_fn = Rc::new(|_buffer: BufferData| {});
         let read_buffer = Buffer::allocate(read_buffer_size, drop_fn);
-        let read_buffer_ref = Arc::new(RefCell::new(read_buffer));
+        let read_buffer_ref = Arc::new(read_buffer);
 
         let chunk_io_state_copy = self.io_state.clone();
         let stored_buffer_copy = self.buffer.clone();
         let stored_buffer_len_copy = self.buffer_len.clone();
         let total_bytes_read_copy = self.total_bytes_read.clone();
-        let read_complete = Box::new(move |buf: Arc<RefCell<Buffer>>, bytes_read: i32| {
-            let read_buf_ref = buf.borrow();
+        let read_complete = Box::new(move |buf: Arc<Buffer>, bytes_read: i32| {
+            let read_buf_ref = buf.clone();
             let read_buf = read_buf_ref.as_slice();
 
             let bytes_read = bytes_read as usize;
@@ -398,10 +395,7 @@ impl SortedChunk {
             total_bytes_read_copy.set(total_bytes_read_copy.get() + bytes_read);
         });
 
-        let c = Completion::new(CompletionType::Read(ReadCompletion::new(
-            read_buffer_ref,
-            read_complete,
-        )));
+        let c = Completion::new_read(read_buffer_ref, read_complete);
         let _c = self.file.pread(self.total_bytes_read.get(), c)?;
         Ok(())
     }
@@ -421,7 +415,7 @@ impl SortedChunk {
         }
 
         let drop_fn = Rc::new(|_buffer: BufferData| {});
-        let mut buffer = Buffer::allocate(self.chunk_size, drop_fn);
+        let buffer = Buffer::allocate(self.chunk_size, drop_fn);
 
         let mut buf_pos = 0;
         let buf = buffer.as_mut_slice();
@@ -435,19 +429,19 @@ impl SortedChunk {
             buf_pos += payload.len();
         }
 
-        let buffer_ref = Arc::new(RefCell::new(buffer));
+        let buffer_ref = Arc::new(buffer);
 
         let buffer_ref_copy = buffer_ref.clone();
         let chunk_io_state_copy = self.io_state.clone();
         let write_complete = Box::new(move |bytes_written: i32| {
             chunk_io_state_copy.set(SortedChunkIOState::WriteComplete);
-            let buf_len = buffer_ref_copy.borrow().len();
+            let buf_len = buffer_ref_copy.len();
             if bytes_written < buf_len as i32 {
                 tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
         });
 
-        let c = Completion::new(CompletionType::Write(WriteCompletion::new(write_complete)));
+        let c = Completion::new_write(write_complete);
         let _c = self.file.pwrite(0, buffer_ref, c)?;
         Ok(())
     }

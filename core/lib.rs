@@ -1146,7 +1146,7 @@ impl Connection {
 
         let content = page_ref.get_contents();
         // empty read - attempt to read absent page
-        if content.buffer.borrow().is_empty() {
+        if content.buffer.is_empty() {
             return Ok(false);
         }
         page.copy_from_slice(content.as_ptr());

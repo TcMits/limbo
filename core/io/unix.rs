@@ -10,11 +10,7 @@ use rustix::{
     io::Errno,
 };
 use std::os::fd::RawFd;
-use std::{
-    cell::{RefCell, UnsafeCell},
-    mem::MaybeUninit,
-    sync::Mutex,
-};
+use std::{cell::UnsafeCell, mem::MaybeUninit, sync::Mutex};
 
 use std::{io::ErrorKind, sync::Arc};
 #[cfg(feature = "fs")]
@@ -201,7 +197,7 @@ impl Clock for UnixIO {
 fn try_pwritev_raw(
     fd: RawFd,
     off: u64,
-    bufs: &[Arc<RefCell<crate::Buffer>>],
+    bufs: &[Arc<crate::Buffer>],
     start_idx: usize,
     start_off: usize,
 ) -> std::io::Result<usize> {
@@ -212,10 +208,9 @@ fn try_pwritev_raw(
     let mut last_end: Option<(*const u8, usize)> = None;
     let mut iov_count = 0;
     for (i, b) in bufs.iter().enumerate().skip(start_idx).take(iov_len) {
-        let r = b.borrow(); // borrow just to get pointer/len
-        let s = r.as_slice();
+        let s = b.as_slice();
         let ptr = if i == start_idx { &s[start_off..] } else { s }.as_ptr();
-        let len = r.len();
+        let len = b.len();
 
         if let Some((last_ptr, last_len)) = last_end {
             // Check if this buffer is adjacent to the last
@@ -300,7 +295,7 @@ impl IO for UnixIO {
                         .lock()
                         .map_err(|e| LimboError::LockingError(e.to_string()))?;
                     let r = c.as_read();
-                    let mut buf = r.buf_mut();
+                    let buf = r.buf();
                     match rustix::io::pread(f.as_fd(), buf.as_mut_slice(), pos as u64) {
                         Ok(n) => c.complete(n as i32),
                         Err(Errno::AGAIN) => {
@@ -319,8 +314,7 @@ impl IO for UnixIO {
                     let f = file
                         .lock()
                         .map_err(|e| LimboError::LockingError(e.to_string()))?;
-                    let b = buf.borrow();
-                    match rustix::io::pwrite(f.as_fd(), b.as_slice(), pos as u64) {
+                    match rustix::io::pwrite(f.as_fd(), buf.as_slice(), pos as u64) {
                         Ok(n) => c.complete(n as i32),
                         Err(Errno::AGAIN) => {
                             unsafe { self.poller.as_mut().add(&f.as_fd(), Event::writable(key))? };
@@ -343,10 +337,7 @@ impl IO for UnixIO {
                             // advance through buffers
                             let mut rem = written;
                             while rem > 0 {
-                                let len = {
-                                    let r = bufs[idx].borrow();
-                                    r.len()
-                                };
+                                let len = bufs[idx].len();
                                 let left = len - off;
                                 if rem < left {
                                     off += rem;
@@ -431,13 +422,13 @@ enum CompletionCallback {
     Write(
         Arc<Mutex<std::fs::File>>,
         Completion,
-        Arc<RefCell<crate::Buffer>>,
+        Arc<crate::Buffer>,
         usize,
     ),
     Writev(
         Arc<Mutex<std::fs::File>>,
         Completion,
-        Vec<Arc<RefCell<crate::Buffer>>>,
+        Vec<Arc<crate::Buffer>>,
         usize, // absolute file offset
         usize, // buf index
         usize, // intra-buf offset
@@ -498,7 +489,7 @@ impl File for UnixFile<'_> {
         let file = self.file.lock().unwrap();
         let result = {
             let r = c.as_read();
-            let mut buf = r.buf_mut();
+            let buf = r.buf();
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
         };
         match result {
@@ -527,17 +518,9 @@ impl File for UnixFile<'_> {
     }
 
     #[instrument(err, skip_all, level = Level::TRACE)]
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Arc<RefCell<crate::Buffer>>,
-        c: Completion,
-    ) -> Result<Completion> {
+    fn pwrite(&self, pos: usize, buffer: Arc<crate::Buffer>, c: Completion) -> Result<Completion> {
         let file = self.file.lock().unwrap();
-        let result = {
-            let buf = buffer.borrow();
-            rustix::io::pwrite(file.as_fd(), buf.as_slice(), pos as u64)
-        };
+        let result = { rustix::io::pwrite(file.as_fd(), buffer.as_slice(), pos as u64) };
         match result {
             Ok(n) => {
                 trace!("pwrite n: {}", n);
@@ -565,7 +548,7 @@ impl File for UnixFile<'_> {
     fn pwritev(
         &self,
         pos: usize,
-        buffers: Vec<Arc<RefCell<crate::Buffer>>>,
+        buffers: Vec<Arc<crate::Buffer>>,
         c: Completion,
     ) -> Result<Completion> {
         if buffers.len().eq(&1) {

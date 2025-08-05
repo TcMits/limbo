@@ -173,7 +173,7 @@ impl File for SimulatorFile {
     fn pwrite(
         &self,
         pos: usize,
-        buffer: Arc<RefCell<turso_core::Buffer>>,
+        buffer: Arc<turso_core::Buffer>,
         c: turso_core::Completion,
     ) -> Result<turso_core::Completion> {
         self.nr_pwrite_calls.set(self.nr_pwrite_calls.get() + 1);
@@ -225,7 +225,7 @@ impl File for SimulatorFile {
     fn pwritev(
         &self,
         pos: usize,
-        buffers: Vec<Arc<RefCell<turso_core::Buffer>>>,
+        buffers: Vec<Arc<turso_core::Buffer>>,
         c: turso_core::Completion,
     ) -> Result<turso_core::Completion> {
         self.nr_pwrite_calls.set(self.nr_pwrite_calls.get() + 1);

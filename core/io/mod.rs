@@ -4,27 +4,15 @@ use cfg_block::cfg_block;
 use std::fmt;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::{
-    cell::{Cell, Ref, RefCell, RefMut},
-    fmt::Debug,
-    mem::ManuallyDrop,
-    pin::Pin,
-    rc::Rc,
-};
+use std::{cell::Cell, fmt::Debug, mem::ManuallyDrop, pin::Pin, rc::Rc};
 
 pub trait File: Send + Sync {
     fn lock_file(&self, exclusive: bool) -> Result<()>;
     fn unlock_file(&self) -> Result<()>;
     fn pread(&self, pos: usize, c: Completion) -> Result<Completion>;
-    fn pwrite(&self, pos: usize, buffer: Arc<RefCell<Buffer>>, c: Completion)
-        -> Result<Completion>;
+    fn pwrite(&self, pos: usize, buffer: Arc<Buffer>, c: Completion) -> Result<Completion>;
     fn sync(&self, c: Completion) -> Result<Completion>;
-    fn pwritev(
-        &self,
-        pos: usize,
-        buffers: Vec<Arc<RefCell<Buffer>>>,
-        c: Completion,
-    ) -> Result<Completion> {
+    fn pwritev(&self, pos: usize, buffers: Vec<Arc<Buffer>>, c: Completion) -> Result<Completion> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         if buffers.is_empty() {
             c.complete(0);
@@ -36,12 +24,15 @@ pub trait File: Send + Sync {
         let total_written = Arc::new(AtomicUsize::new(0));
 
         for buf in buffers {
-            let len = buf.borrow().len();
+            let len = buf.len();
             let child_c = {
                 let c_main = c.clone();
                 let outstanding = outstanding.clone();
                 let total_written = total_written.clone();
+                let _cloned = buf.clone();
                 Completion::new_write(move |n| {
+                    // reference buffer in callback to ensure alive for async io
+                    let _buf = _cloned.clone();
                     // accumulate bytes actually reported by the backend
                     total_written.fetch_add(n as usize, Ordering::Relaxed);
                     if outstanding.fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -98,7 +89,7 @@ pub trait IO: Clock + Send + Sync {
     }
 }
 
-pub type Complete = dyn Fn(Arc<RefCell<Buffer>>, i32);
+pub type Complete = dyn Fn(Arc<Buffer>, i32);
 pub type WriteComplete = dyn Fn(i32);
 pub type SyncComplete = dyn Fn(i32);
 pub type TruncateComplete = dyn Fn(i32);
@@ -122,7 +113,7 @@ pub enum CompletionType {
 }
 
 pub struct ReadCompletion {
-    pub buf: Arc<RefCell<Buffer>>,
+    pub buf: Arc<Buffer>,
     pub complete: Box<Complete>,
 }
 
@@ -145,9 +136,9 @@ impl Completion {
         ))))
     }
 
-    pub fn new_read<F>(buf: Arc<RefCell<Buffer>>, complete: F) -> Self
+    pub fn new_read<F>(buf: Arc<Buffer>, complete: F) -> Self
     where
-        F: Fn(Arc<RefCell<Buffer>>, i32) + 'static,
+        F: Fn(Arc<Buffer>, i32) + 'static,
     {
         Self::new(CompletionType::Read(ReadCompletion::new(
             buf,
@@ -215,16 +206,12 @@ pub struct SyncCompletion {
 }
 
 impl ReadCompletion {
-    pub fn new(buf: Arc<RefCell<Buffer>>, complete: Box<Complete>) -> Self {
+    pub fn new(buf: Arc<Buffer>, complete: Box<Complete>) -> Self {
         Self { buf, complete }
     }
 
-    pub fn buf(&self) -> Ref<'_, Buffer> {
-        self.buf.borrow()
-    }
-
-    pub fn buf_mut(&self) -> RefMut<'_, Buffer> {
-        self.buf.borrow_mut()
+    pub fn buf(&self) -> &Buffer {
+        &self.buf
     }
 
     pub fn complete(&self, bytes_read: i32) {
@@ -311,16 +298,16 @@ impl Buffer {
         &self.data
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        &mut self.data
+    pub fn as_mut_slice(&self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr(), self.data.len()) }
     }
 
     pub fn as_ptr(&self) -> *const u8 {
         self.data.as_ptr()
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.data.as_mut_ptr()
+    pub fn as_mut_ptr(&self) -> *mut u8 {
+        self.data.as_ptr() as *mut u8
     }
 }
 

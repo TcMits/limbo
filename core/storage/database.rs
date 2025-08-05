@@ -1,6 +1,6 @@
 use crate::error::LimboError;
 use crate::{io::Completion, Buffer, Result};
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 use tracing::{instrument, Level};
 
 /// DatabaseStorage is an interface a database file that consists of pages.
@@ -10,17 +10,13 @@ use tracing::{instrument, Level};
 /// or something like a remote page server service.
 pub trait DatabaseStorage: Send + Sync {
     fn read_page(&self, page_idx: usize, c: Completion) -> Result<Completion>;
-    fn write_page(
-        &self,
-        page_idx: usize,
-        buffer: Arc<RefCell<Buffer>>,
-        c: Completion,
-    ) -> Result<Completion>;
+    fn write_page(&self, page_idx: usize, buffer: Arc<Buffer>, c: Completion)
+        -> Result<Completion>;
     fn write_pages(
         &self,
         first_page_idx: usize,
         page_size: usize,
-        buffers: Vec<Arc<RefCell<Buffer>>>,
+        buffers: Vec<Arc<Buffer>>,
         c: Completion,
     ) -> Result<Completion>;
     fn sync(&self, c: Completion) -> Result<Completion>;
@@ -56,10 +52,10 @@ impl DatabaseStorage for DatabaseFile {
     fn write_page(
         &self,
         page_idx: usize,
-        buffer: Arc<RefCell<Buffer>>,
+        buffer: Arc<Buffer>,
         c: Completion,
     ) -> Result<Completion> {
-        let buffer_size = buffer.borrow().len();
+        let buffer_size = buffer.len();
         assert!(page_idx > 0);
         assert!(buffer_size >= 512);
         assert!(buffer_size <= 65536);
@@ -72,7 +68,7 @@ impl DatabaseStorage for DatabaseFile {
         &self,
         page_idx: usize,
         page_size: usize,
-        buffers: Vec<Arc<RefCell<Buffer>>>,
+        buffers: Vec<Arc<Buffer>>,
         c: Completion,
     ) -> Result<Completion> {
         assert!(page_idx > 0);

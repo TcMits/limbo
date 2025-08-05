@@ -7350,10 +7350,7 @@ mod tests {
         let drop_fn = Rc::new(|_| {});
         let inner = PageContent::new(
             0,
-            Arc::new(RefCell::new(Buffer::new(
-                BufferData::new(vec![0; 4096]),
-                drop_fn,
-            ))),
+            Arc::new(Buffer::new(BufferData::new(vec![0; 4096]), drop_fn)),
         );
         page.get().contents.replace(inner);
         let page = Arc::new(BTreePageInner {
@@ -8644,15 +8641,14 @@ mod tests {
         while current_page <= 4 {
             let drop_fn = Rc::new(|_buf| {});
             #[allow(clippy::arc_with_non_send_sync)]
-            let buf = Arc::new(RefCell::new(Buffer::allocate(
+            let buf = Arc::new(Buffer::allocate(
                 pager
                     .io
                     .block(|| pager.with_header(|header| header.page_size))?
                     .get() as usize,
                 drop_fn,
-            )));
+            ));
             let c = Completion::new_write(|_| {});
-            #[allow(clippy::arc_with_non_send_sync)]
             let _c = pager
                 .db_file
                 .write_page(current_page as usize, buf.clone(), c)?;
