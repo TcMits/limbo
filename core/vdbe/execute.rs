@@ -117,6 +117,25 @@ pub type InsnFunction = fn(
     Option<&Arc<MvStore>>,
 ) -> Result<InsnFunctionStepResult>;
 
+/// Compare two values using the specified collation for text values.
+/// Non-text values are compared using their natural ordering.
+fn compare_with_collation(
+    lhs: &Value,
+    rhs: &Value,
+    collation: Option<CollationSeq>,
+) -> std::cmp::Ordering {
+    match (lhs, rhs) {
+        (Value::Text(lhs_text), Value::Text(rhs_text)) => {
+            if let Some(coll) = collation {
+                coll.compare_strings(lhs_text.as_str(), rhs_text.as_str())
+            } else {
+                lhs.cmp(rhs)
+            }
+        }
+        _ => lhs.cmp(rhs),
+    }
+}
+
 pub enum InsnFunctionStepResult {
     Done,
     IO,
@@ -3364,7 +3383,13 @@ pub fn op_agg_step(
             };
 
             let new_value = col.get_owned_value();
-            if *new_value != Value::Null && acc.as_ref().is_none_or(|acc| new_value > acc) {
+            if *new_value != Value::Null
+                && acc.as_ref().is_none_or(|acc| {
+                    use std::cmp::Ordering;
+                    compare_with_collation(new_value, acc, state.current_collation)
+                        == Ordering::Greater
+                })
+            {
                 *acc = Some(new_value.clone());
             }
         }
@@ -3382,7 +3407,13 @@ pub fn op_agg_step(
 
             let new_value = col.get_owned_value();
 
-            if *new_value != Value::Null && acc.as_ref().is_none_or(|acc| new_value < acc) {
+            if *new_value != Value::Null
+                && acc.as_ref().is_none_or(|acc| {
+                    use std::cmp::Ordering;
+                    compare_with_collation(new_value, acc, state.current_collation)
+                        == Ordering::Less
+                })
+            {
                 *acc = Some(new_value.clone());
             }
         }
