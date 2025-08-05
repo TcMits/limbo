@@ -116,6 +116,142 @@ fn bench_alter(criterion: &mut Criterion) {
     }
 
     group.finish();
+
+    let mut group = criterion.benchmark_group("`ALTER TABLE _ RENAME COLUMN _ TO _`");
+
+    group.bench_function(BenchmarkId::new("limbo_rename_column", ""), |b| {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let io = Arc::new(PlatformIO::new().unwrap());
+        let db = Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
+        let conn = db.connect().unwrap();
+        b.iter_custom(|iters| {
+            (0..iters)
+                .map(|_| {
+                    conn.execute("CREATE TABLE x(a)").unwrap();
+                    let elapsed = {
+                        let start = Instant::now();
+                        conn.execute("ALTER TABLE x RENAME COLUMN a TO b").unwrap();
+                        start.elapsed()
+                    };
+                    conn.execute("DROP TABLE x").unwrap();
+                    elapsed
+                })
+                .sum()
+        });
+    });
+
+    if enable_rusqlite {
+        group.bench_function(BenchmarkId::new("sqlite_rename_column", ""), |b| {
+            let conn = rusqlite::Connection::open("../testing/schema_5k.db").unwrap();
+            b.iter_custom(|iters| {
+                (0..iters)
+                    .map(|_| {
+                        conn.execute("CREATE TABLE x(a)", ()).unwrap();
+                        let elapsed = {
+                            let start = Instant::now();
+                            conn.execute("ALTER TABLE x RENAME COLUMN a TO b", ())
+                                .unwrap();
+                            start.elapsed()
+                        };
+                        conn.execute("DROP TABLE x", ()).unwrap();
+                        elapsed
+                    })
+                    .sum()
+            });
+        });
+    }
+
+    group.finish();
+
+    let mut group = criterion.benchmark_group("`ALTER TABLE _ ADD COLUMN _`");
+
+    group.bench_function(BenchmarkId::new("limbo_add_column", ""), |b| {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let io = Arc::new(PlatformIO::new().unwrap());
+        let db = Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
+        let conn = db.connect().unwrap();
+        b.iter_custom(|iters| {
+            (0..iters)
+                .map(|_| {
+                    conn.execute("CREATE TABLE x(a)").unwrap();
+                    let elapsed = {
+                        let start = Instant::now();
+                        conn.execute("ALTER TABLE x ADD COLUMN b").unwrap();
+                        start.elapsed()
+                    };
+                    conn.execute("DROP TABLE x").unwrap();
+                    elapsed
+                })
+                .sum()
+        });
+    });
+
+    if enable_rusqlite {
+        group.bench_function(BenchmarkId::new("sqlite_add_column", ""), |b| {
+            let conn = rusqlite::Connection::open("../testing/schema_5k.db").unwrap();
+            b.iter_custom(|iters| {
+                (0..iters)
+                    .map(|_| {
+                        conn.execute("CREATE TABLE x(a)", ()).unwrap();
+                        let elapsed = {
+                            let start = Instant::now();
+                            conn.execute("ALTER TABLE x ADD COLUMN b", ()).unwrap();
+                            start.elapsed()
+                        };
+                        conn.execute("DROP TABLE x", ()).unwrap();
+                        elapsed
+                    })
+                    .sum()
+            });
+        });
+    }
+
+    group.finish();
+
+    let mut group = criterion.benchmark_group("`ALTER TABLE _ DROP COLUMN _`");
+
+    group.bench_function(BenchmarkId::new("limbo_drop_column", ""), |b| {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let io = Arc::new(PlatformIO::new().unwrap());
+        let db = Database::open_file(io.clone(), "../testing/schema_5k.db", false, false).unwrap();
+        let conn = db.connect().unwrap();
+        b.iter_custom(|iters| {
+            (0..iters)
+                .map(|_| {
+                    conn.execute("CREATE TABLE x(a, b)").unwrap();
+                    let elapsed = {
+                        let start = Instant::now();
+                        conn.execute("ALTER TABLE x DROP COLUMN b").unwrap();
+                        start.elapsed()
+                    };
+                    conn.execute("DROP TABLE x").unwrap();
+                    elapsed
+                })
+                .sum()
+        });
+    });
+
+    if enable_rusqlite {
+        group.bench_function(BenchmarkId::new("sqlite_drop_column", ""), |b| {
+            let conn = rusqlite::Connection::open("../testing/schema_5k.db").unwrap();
+            b.iter_custom(|iters| {
+                (0..iters)
+                    .map(|_| {
+                        conn.execute("CREATE TABLE x(a, b)", ()).unwrap();
+                        let elapsed = {
+                            let start = Instant::now();
+                            conn.execute("ALTER TABLE x DROP COLUMN b", ()).unwrap();
+                            start.elapsed()
+                        };
+                        conn.execute("DROP TABLE x", ()).unwrap();
+                        elapsed
+                    })
+                    .sum()
+            });
+        });
+    }
+
+    group.finish();
 }
 
 fn bench_prepare_query(criterion: &mut Criterion) {
