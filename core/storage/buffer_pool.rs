@@ -103,7 +103,7 @@ impl Default for BufferPool {
 
 impl BufferPool {
     pub const DEFAULT_ARENA_SIZE: usize = 4 * 1024 * 1024; // 4MB arena
-    pub const TEST_AREA_SIZE: usize = 512 * 1024; // 512KB arena for testing
+    pub const TEST_AREA_SIZE: usize = 1 * 1024 * 1024; // 1MB arena for testing
     pub const DEFAULT_PAGE_SIZE: usize = 4096; // 4KB default page size
     const MAX_ARENA_SIZE: usize = 32 * 1024 * 1024; // 32MB max arena
 
