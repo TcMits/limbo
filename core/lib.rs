@@ -1744,16 +1744,22 @@ pub struct Statement {
     state: vdbe::ProgramState,
     mv_store: Option<Arc<MvStore>>,
     pager: Rc<Pager>,
+    /// Whether the statement accesses the database.
+    /// Used to determine whether we need to check for schema changes when
+    /// starting a transaction.
+    accesses_db: bool,
 }
 
 impl Statement {
     pub fn new(program: vdbe::Program, mv_store: Option<Arc<MvStore>>, pager: Rc<Pager>) -> Self {
+        let accesses_db = program.accesses_db;
         let state = vdbe::ProgramState::new(program.max_registers, program.cursor_ref.len());
         Self {
             program,
             state,
             mv_store,
             pager,
+            accesses_db,
         }
     }
 
@@ -1770,6 +1776,12 @@ impl Statement {
     }
 
     pub fn step(&mut self) -> Result<StepResult> {
+        if !self.accesses_db {
+            return self
+                .program
+                .step(&mut self.state, self.mv_store.clone(), self.pager.clone());
+        }
+
         const MAX_SCHEMA_RETRY: usize = 50;
         let mut res = self
             .program

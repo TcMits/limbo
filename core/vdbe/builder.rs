@@ -904,6 +904,7 @@ impl ProgramBuilder {
             result_columns: self.result_columns,
             table_references: self.table_references,
             sql: sql.to_string(),
+            accesses_db: !matches!(self.txn_mode, TransactionMode::None),
         }
     }
 }
