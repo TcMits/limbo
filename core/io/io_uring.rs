@@ -5,6 +5,7 @@ use crate::io::clock::{Clock, Instant};
 use crate::storage::wal::CKPT_BATCH_PAGES;
 use crate::{turso_assert, LimboError, MemoryIO, Result};
 use rustix::fs::{self, FlockOperation, OFlags};
+use std::ptr::NonNull;
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -40,6 +41,9 @@ const MAX_IOVEC_ENTRIES: usize = CKPT_BATCH_PAGES;
 /// make, but can increase single operation latency.
 const MAX_WAIT: usize = 4;
 
+/// One memory arena for DB pages and another for WAL frames
+const ARENAS: usize = 2;
+
 pub struct UringIO {
     inner: Rc<RefCell<InnerUringIO>>,
 }
@@ -57,7 +61,7 @@ struct WrappedIOUring {
 struct InnerUringIO {
     ring: WrappedIOUring,
     free_files: VecDeque<u32>,
-    free_arenas: [u32; 2],
+    free_arenas: [Option<(NonNull<u8>, usize)>; 2],
 }
 
 /// preallocated vec of iovec arrays to avoid allocations during writev operations
@@ -109,7 +113,7 @@ impl UringIO {
         // RL_MEMLOCK cap is typically 8MB, the current design is to have one large arena
         // registered at startup and therefore we can simply use the zero index, falling back
         // to similar logic as the existing buffer pool for cases where it is over capacity.
-        ring.submitter().register_buffers_sparse(1)?;
+        ring.submitter().register_buffers_sparse(ARENAS as u32)?;
         let inner = InnerUringIO {
             ring: WrappedIOUring {
                 ring,
@@ -118,7 +122,7 @@ impl UringIO {
                 iov_pool: IovecPool::new(),
             },
             free_files: (0..FILES).collect(),
-            free_arenas: [u32::MAX; 2],
+            free_arenas: [const { None }; ARENAS],
         };
         debug!("Using IO backend 'io-uring'");
         Ok(Self {
@@ -497,15 +501,15 @@ impl IO for UringIO {
             len % 512 == 0,
             "fixed buffer length must be logical block aligned"
         );
-        let inner = self.inner.borrow_mut();
-        let Some(id) = inner.free_arenas.iter().position(|&x| x == u32::MAX) else {
-            return Err(LimboError::UringIOError(
-                "no free fixed buffer slots available".to_string(),
-            ));
-        };
+        let mut inner = self.inner.borrow_mut();
+        let slot = inner
+            .free_arenas
+            .iter()
+            .position(|e| e.is_none())
+            .ok_or_else(|| LimboError::UringIOError("no free fixed buffer slots".into()))?;
         unsafe {
             inner.ring.ring.submitter().register_buffers_update(
-                id as u32,
+                slot as u32,
                 &[libc::iovec {
                     iov_base: ptr.as_ptr() as *mut libc::c_void,
                     iov_len: len,
@@ -513,7 +517,8 @@ impl IO for UringIO {
                 None,
             )?
         };
-        Ok(id as u32)
+        inner.free_arenas[slot] = Some((ptr, len));
+        Ok(slot as u32)
     }
 }
 
