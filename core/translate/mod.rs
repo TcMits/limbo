@@ -112,11 +112,10 @@ pub fn translate_inner(
     schema: &Schema,
     stmt: ast::Stmt,
     syms: &SymbolTable,
-    mut program: ProgramBuilder,
+    program: ProgramBuilder,
     connection: &Arc<Connection>,
 ) -> Result<ProgramBuilder> {
-    // Indicate write operations so that in the epilogue we can emit the correct type of transaction
-    if matches!(
+    let is_write = matches!(
         stmt,
         ast::Stmt::AlterTable(..)
             | ast::Stmt::CreateIndex { .. }
@@ -130,15 +129,11 @@ pub fn translate_inner(
             | ast::Stmt::Reindex { .. }
             | ast::Stmt::Update(..)
             | ast::Stmt::Insert(..)
-    ) {
-        program.begin_write_operation();
-    }
-    // Indicate read operations so that in the epilogue we can emit the correct type of transaction
-    if matches!(stmt, ast::Stmt::Select { .. }) {
-        program.begin_read_operation();
-    }
+    );
 
-    let program = match stmt {
+    let is_select = matches!(stmt, ast::Stmt::Select { .. });
+
+    let mut program = match stmt {
         ast::Stmt::AlterTable(alter) => {
             translate_alter_table(*alter, syms, schema, program, connection)?
         }
@@ -254,6 +249,16 @@ pub fn translate_inner(
             )?
         }
     };
+
+    // Indicate write operations so that in the epilogue we can emit the correct type of transaction
+    if is_write {
+        program.begin_write_operation();
+    }
+
+    // Indicate read operations so that in the epilogue we can emit the correct type of transaction
+    if is_select && !program.table_references.is_empty() {
+        program.begin_read_operation();
+    }
 
     Ok(program)
 }

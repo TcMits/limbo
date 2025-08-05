@@ -549,6 +549,10 @@ impl TableReferences {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.joined_tables.is_empty() && self.outer_query_refs.is_empty()
+    }
+
     /// Add a new [JoinedTable] to the query plan.
     pub fn add_joined_table(&mut self, joined_table: JoinedTable) {
         self.joined_tables.push(joined_table);

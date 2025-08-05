@@ -2085,21 +2085,22 @@ pub fn op_transaction(
             }
         }
 
-        // Can only read header if page 1 has been allocated already
-        // begin_write_tx that happens, but not begin_read_tx
-        let res = pager
-            .io
-            .block(|| pager.with_header(|header| header.schema_cookie.get()));
-        match res {
-            Ok(header_schema_cookie) => {
-                if header_schema_cookie != *schema_cookie {
-                    return Err(LimboError::SchemaUpdated);
+        // Check whether schema has changed if we are actually going to access the database.
+        if !matches!(new_transaction_state, TransactionState::None) {
+            let res = pager
+                .io
+                .block(|| pager.with_header(|header| header.schema_cookie.get()));
+            match res {
+                Ok(header_schema_cookie) => {
+                    if header_schema_cookie != *schema_cookie {
+                        return Err(LimboError::SchemaUpdated);
+                    }
                 }
-            }
-            // This means we are starting a read_tx and we do not have a page 1 yet, so we just continue execution
-            Err(LimboError::Page1NotAlloc) => {}
-            Err(err) => {
-                return Err(err);
+                // This means we are starting a read transaction and page 1 is not allocated yet, so we just continue execution
+                Err(LimboError::Page1NotAlloc) => {}
+                Err(err) => {
+                    return Err(err);
+                }
             }
         }
 
