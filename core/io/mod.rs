@@ -298,6 +298,7 @@ impl Buffer {
         &self.data
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn as_mut_slice(&self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr(), self.data.len()) }
     }
