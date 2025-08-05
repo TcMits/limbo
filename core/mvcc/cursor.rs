@@ -1,8 +1,8 @@
 use crate::mvcc::clock::LogicalClock;
 use crate::mvcc::database::{MvStore, Row, RowID};
 use crate::types::{IOResult, SeekKey, SeekOp, SeekResult};
-use crate::Pager;
 use crate::Result;
+use crate::{Pager, Value};
 use std::fmt::Debug;
 use std::ops::Bound;
 use std::rc::Rc;
@@ -196,5 +196,29 @@ impl<Clock: LogicalClock> MvccLazyCursor<Clock> {
             }
             Ok(IOResult::Done(SeekResult::NotFound))
         }
+    }
+
+    pub fn exists(&mut self, key: &Value) -> Result<IOResult<bool>> {
+        let int_key = match key {
+            Value::Integer(i) => i,
+            _ => unreachable!("btree tables are indexed by integers!"),
+        };
+        let exists = self
+            .db
+            .seek_rowid(
+                Bound::Included(&RowID {
+                    table_id: self.table_id,
+                    row_id: *int_key,
+                }),
+                true,
+            )
+            .is_some();
+        if exists {
+            self.current_pos = CursorPosition::Loaded(RowID {
+                table_id: self.table_id,
+                row_id: *int_key,
+            });
+        }
+        Ok(IOResult::Done(exists))
     }
 }

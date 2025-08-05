@@ -5799,7 +5799,12 @@ pub fn op_not_exists(
     else {
         unreachable!("unexpected Insn {:?}", insn)
     };
-    let exists = {
+    let exists = if let Some(mv_store) = mv_store {
+        let mut cursor = must_be_btree_cursor!(*cursor, program.cursor_ref, state, "NotExists");
+        let cursor = cursor.as_btree_mut();
+        let mvcc_cursor = cursor.get_mvcc_cursor();
+        false
+    } else {
         let mut cursor = must_be_btree_cursor!(*cursor, program.cursor_ref, state, "NotExists");
         let cursor = cursor.as_btree_mut();
         return_if_io!(cursor.exists(state.registers[*rowid_reg].get_owned_value()))
