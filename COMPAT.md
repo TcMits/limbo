@@ -610,8 +610,8 @@ The `regexp` extension is compatible with [sqlean-regexp](https://github.com/nal
 | regexp(pattern, source)                        | Yes    |         |
 | regexp_like(source, pattern)                   | Yes    |         |
 | regexp_substr(source, pattern)                 | Yes    |         |
-| regexp_capture(source, pattern[, n])           | No     |         |
-| regexp_replace(source, pattern, replacement)   | No     |         |
+| regexp_capture(source, pattern[, n])           | Yes    |         |
+| regexp_replace(source, pattern, replacement)   | Yes    |         |
 
 ### Vector
 
