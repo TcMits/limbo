@@ -103,6 +103,18 @@ def test_regexp():
         "select regexp_replace('the year is 2021', '([0-9]+)', '$1 or 2050') = 'the year is 2021 or 2050';",
         true,
     )
+    limbo.run_test_fn(
+        "select regexp_capture('the year is 2021', '([0-9]+)') = '2021';",
+        true,
+    );
+    limbo.run_test_fn(
+        "select regexp_capture('abc 123 def', '([a-z]+) ([0-9]+) ([a-z]+)', 2) = '123';",
+        true,
+    );
+    limbo.run_test_fn(
+        "select regexp_capture('no digits here', '([0-9]+)');",
+        null,
+    );
     limbo.quit()
 
 
