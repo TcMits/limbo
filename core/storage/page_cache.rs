@@ -626,7 +626,7 @@ mod tests {
     use crate::storage::sqlite3_ondisk::PageContent;
     use crate::BufferPool;
     use std::ptr::NonNull;
-    use std::{num::NonZeroUsize, pin::Pin, rc::Rc, sync::Arc};
+    use std::{num::NonZeroUsize, sync::Arc};
 
     use lru::LruCache;
     use rand_chacha::{

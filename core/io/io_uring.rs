@@ -354,7 +354,7 @@ impl WrappedIOUring {
         // If we have coalesced everything into a single iovec, submit as a single`pwrite`
         if iov_count == 1 {
             let entry = with_fd!(st.file_id, |fd| {
-                if let Some(id) = st.bufs[st.current_buffer_idx].borrow().fixed_id() {
+                if let Some(id) = st.bufs[st.current_buffer_idx].fixed_id() {
                     io_uring::opcode::WriteFixed::new(
                         fd,
                         iov_allocation[0].iov_base as *const u8,
@@ -657,10 +657,10 @@ impl File for UringFile {
     fn pwrite(&self, pos: usize, buffer: Arc<crate::Buffer>, c: Completion) -> Result<Completion> {
         let mut io = self.io.borrow_mut();
         let write = {
-            let ptr = buf.as_ptr();
-            let len = buf.len();
+            let ptr = buffer.as_ptr();
+            let len = buffer.len();
             with_fd!(self, |fd| {
-                if let Some(idx) = buf.fixed_id() {
+                if let Some(idx) = buffer.fixed_id() {
                     trace!(
                         "pwrite_fixed(pos = {}, length = {}, idx= {})",
                         pos,

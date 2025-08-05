@@ -294,6 +294,9 @@ impl Buffer {
         tracing::trace!("buffer::new({:?})", data);
         Self::Heap(Pin::new(data.into_boxed_slice()))
     }
+
+    /// Returns the index of the underlying `Arena` if it was registered with
+    /// io_uring. Only for use with `UringIO` backend.
     pub fn fixed_id(&self) -> Option<u32> {
         match self {
             Self::Heap { .. } => None,
@@ -339,16 +342,16 @@ impl Buffer {
 
     #[allow(clippy::mut_from_ref)]
     pub fn as_mut_slice(&self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len()) }
+    }
+    #[inline]
+    pub fn as_ptr(&self) -> *const u8 {
         match self {
-            Self::Heap(buf) => {
-                // SAFETY: The buffer is guaranteed to be valid for the lifetime of the slice
-                unsafe { std::slice::from_raw_parts_mut(buf.as_ptr() as *mut u8, buf.len()) }
-            }
-            Self::Pooled(buf) => unsafe {
-                std::slice::from_raw_parts_mut(buf.as_ptr() as *mut u8, buf.len())
-            },
+            Self::Heap(buf) => buf.as_ptr(),
+            Self::Pooled(buf) => buf.as_ptr(),
         }
     }
+    #[inline]
     pub fn as_mut_ptr(&self) -> *mut u8 {
         match self {
             Self::Heap(buf) => buf.as_ptr() as *mut u8,
@@ -362,24 +365,34 @@ thread_local! {
     pub static TEMP_BUFFER_CACHE: RefCell<TempBufferCache> = RefCell::new(TempBufferCache::new());
 }
 
+/// A cache for temporary or any additional `Buffer` allocations beyond
+/// what the `BufferPool` has room for, or for use before the pool is
+/// fully initialized.
 pub(crate) struct TempBufferCache {
-    // Buffers indexed by size, we only cache common sizes
+    /// The `[Database::page_size]` at the time the cache is initiated.
     page_size: usize,
+    /// Cache of buffers of size `self.page_size`.
     page_buffers: Vec<BufferData>,
+    /// Cache of buffers of size `self.page_size` + WAL_FRAME_HEADER_SIZE.
     wal_frame_buffers: Vec<BufferData>,
+    /// Maximum number of buffers that will live in each cache.
     max_cached: usize,
 }
 
 impl TempBufferCache {
+    const DEFAULT_MAX_CACHE_SIZE: usize = 256;
+
     fn new() -> Self {
         Self {
             page_size: BufferPool::DEFAULT_PAGE_SIZE,
             page_buffers: Vec::with_capacity(8),
             wal_frame_buffers: Vec::with_capacity(8),
-            max_cached: 512,
+            max_cached: Self::DEFAULT_MAX_CACHE_SIZE,
         }
     }
 
+    /// If the `[Database::page_size]` is set, any temporary buffers that might
+    /// exist prior need to be cleared and new `page_size` needs to be saved.
     pub fn reinit_cache(&mut self, page_size: usize) {
         self.page_buffers.clear();
         self.wal_frame_buffers.clear();

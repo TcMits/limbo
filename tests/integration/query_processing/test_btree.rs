@@ -430,7 +430,7 @@ fn write_at(io: &impl IO, file: Arc<dyn File>, offset: usize, data: &[u8]) {
     #[allow(clippy::arc_with_non_send_sync)]
     let buffer = Arc::new(Buffer::new(data.to_vec()));
     let _buf = buffer.clone();
-    let completion = Completion::new_write(|_| {
+    let completion = Completion::new_write(move |_| {
         // reference the buffer to keep alive for async io
         let _buf = _buf.clone();
     });

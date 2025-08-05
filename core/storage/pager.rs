@@ -14,7 +14,7 @@ use crate::{
     Result, TransactionState,
 };
 use parking_lot::RwLock;
-use std::cell::{Cell, OnceCell, UnsafeCell};
+use std::cell::{Cell, OnceCell, RefCell, UnsafeCell};
 use std::collections::HashSet;
 use std::hash;
 use std::rc::Rc;
@@ -790,7 +790,7 @@ impl Pager {
                 )?;
 
                 turso_assert!(
-                    ptrmap_page.get().id == ptrmap_pg_no as usize,
+                    ptrmap_page.get().id == ptrmap_pg_no,
                     "ptrmap page has unexpected number"
                 );
                 self.add_dirty(&ptrmap_page);
