@@ -530,7 +530,7 @@ pub mod tests {
         assert_eq!(pool.get_page().len(), BufferPool::DEFAULT_PAGE_SIZE);
         assert_eq!(
             pool.get_wal_frame().len(),
-            BufferPool::DEFAULT_ARENA_SIZE + WAL_FRAME_HEADER_SIZE,
+            BufferPool::DEFAULT_PAGE_SIZE + WAL_FRAME_HEADER_SIZE,
             "get_wal_frame should return page_size + WAL_FRAME_HEADER_SIZE"
         );
         assert!(
