@@ -834,7 +834,6 @@ pub fn finish_read_page(
     let inner = PageContent::new(pos, buffer_ref.clone());
     {
         page.get().contents.replace(inner);
-        page.set_uptodate();
         page.clear_locked();
         page.set_loaded();
     }

@@ -107,8 +107,6 @@ pub struct Page {
 // because that is bad bad.
 pub type PageRef = Arc<Page>;
 
-/// Page is up-to-date.
-const PAGE_UPTODATE: usize = 0b001;
 /// Page is locked for I/O to prevent concurrent access.
 const PAGE_LOCKED: usize = 0b010;
 /// Page had an I/O error.
@@ -137,18 +135,6 @@ impl Page {
 
     pub fn get_contents(&self) -> &mut PageContent {
         self.get().contents.as_mut().unwrap()
-    }
-
-    pub fn is_uptodate(&self) -> bool {
-        self.get().flags.load(Ordering::SeqCst) & PAGE_UPTODATE != 0
-    }
-
-    pub fn set_uptodate(&self) {
-        self.get().flags.fetch_or(PAGE_UPTODATE, Ordering::SeqCst);
-    }
-
-    pub fn clear_uptodate(&self) {
-        self.get().flags.fetch_and(!PAGE_UPTODATE, Ordering::SeqCst);
     }
 
     pub fn is_locked(&self) -> bool {
@@ -950,9 +936,6 @@ impl Pager {
             let c = wal
                 .borrow()
                 .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
-            {
-                page.set_uptodate();
-            }
             // TODO(pere) should probably first insert to page cache, and if successful,
             // read frame or page
             return Ok((page, c));
@@ -1591,7 +1574,6 @@ impl Pager {
                                 + (number_of_leaf_pages as usize * LEAF_ENTRY_SIZE),
                             page_id as u32,
                         );
-                        page.clear_uptodate();
 
                         break;
                     }
@@ -1614,8 +1596,6 @@ impl Pager {
                     contents.write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, 0);
                     // Update page 1 to point to new trunk
                     header.freelist_trunk_page = (page_id as u32).into();
-                    // Clear flags
-                    page.clear_uptodate();
                     break;
                 }
             }
