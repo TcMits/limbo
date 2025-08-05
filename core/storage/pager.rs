@@ -1484,7 +1484,7 @@ impl Pager {
     // Providing a page is optional, if provided it will be used to avoid reading the page from disk.
     // This is implemented in accordance with sqlite freepage2() function.
     #[instrument(skip_all, level = Level::DEBUG)]
-    pub fn free_page(&self, page: Option<PageRef>, page_id: usize) -> Result<IOResult<()>> {
+    pub fn free_page(&self, mut page: Option<PageRef>, page_id: usize) -> Result<IOResult<()>> {
         tracing::trace!("free_page(page_id={})", page_id);
         const TRUNK_PAGE_HEADER_SIZE: usize = 8;
         const LEAF_ENTRY_SIZE: usize = 4;
@@ -1507,7 +1507,7 @@ impl Pager {
                         )));
                     }
 
-                    let (page, _c) = match page.clone() {
+                    let (page, _c) = match page.take() {
                         Some(page) => {
                             assert_eq!(
                                 page.get().id,
@@ -1546,6 +1546,7 @@ impl Pager {
                         // Add as leaf to current trunk
                         let (page, _c) = self.read_page(trunk_page_id as usize)?;
                         trunk_page.replace(page);
+                        return Ok(IOResult::IO);
                     }
                     let trunk_page = trunk_page.as_ref().unwrap();
                     if trunk_page.is_locked() || !trunk_page.is_loaded() {
@@ -1746,7 +1747,7 @@ impl Pager {
                         trunk_page,
                         current_db_size: new_db_size,
                     };
-                    continue;
+                    return Ok(IOResult::IO);
                 }
                 AllocatePageState::SearchAvailableFreeListLeaf {
                     trunk_page,
