@@ -85,38 +85,32 @@ fn regexp_replace(&self, args: &[Value]) -> Value {
 
 #[scalar(name = "regexp_capture")]
 fn regexp_capture(args: &[Value]) -> Value {
-    match (args.get(0), args.get(1)) {
-        (Some(source), Some(pattern))
-            if source.value_type() == ValueType::Text
-                && pattern.value_type() == ValueType::Text =>
-        {
-            let Some(source_text) = source.to_text() else {
-                return Value::null();
-            };
-
-            let Some(pattern_text) = pattern.to_text() else {
-                return Value::null();
-            };
-
-            let group_index: usize = args
-                .get(2)
-                .and_then(|v| v.to_integer())
-                .map(|n| n as usize)
-                .unwrap_or(1);
-
-            let re = match Regex::new(pattern_text) {
-                Ok(re) => re,
-                Err(_) => return Value::null(),
-            };
-
-            if let Some(caps) = re.captures(source_text) {
-                if let Some(m) = caps.get(group_index) {
-                    return Value::from_text(m.as_str().to_string());
-                }
-            }
-
-            Value::null()
-        }
-        _ => Value::null(),
+    if args.len() < 2 {
+        return Value::from_text("".to_string());
     }
+    let Some(source_text) = args[0].to_text() else {
+        return Value::null();
+    };
+    let Some(pattern_text) = args[1].to_text() else {
+        return Value::null();
+    };
+
+    let group_index: usize = args
+        .get(2)
+        .and_then(|v| v.to_integer())
+        .map(|n| n as usize)
+        .unwrap_or(1);
+
+    let re = match Regex::new(pattern_text) {
+        Ok(re) => re,
+        Err(_) => return Value::null(),
+    };
+
+    if let Some(caps) = re.captures(source_text) {
+        if let Some(m) = caps.get(group_index) {
+            return Value::from_text(m.as_str().to_string());
+        }
+    }
+
+    Value::null()
 }
