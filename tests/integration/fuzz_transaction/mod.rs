@@ -240,6 +240,17 @@ fn rng_from_time_or_env() -> (ChaCha8Rng, u64) {
 /// Verify translation isolation semantics with multiple concurrent connections.
 /// This test is ignored because it still fails sometimes; unsure if it fails due to a bug in the test or a bug in the implementation.
 async fn test_multiple_connections_fuzz() {
+    multiple_connections_fuzz(false).await
+}
+
+#[tokio::test]
+#[ignore = "MVCC is currently under development, it is expected to fail"]
+// Same as test_multiple_connections_fuzz, but with MVCC enabled.
+async fn test_multiple_connections_fuzz_mvcc() {
+    multiple_connections_fuzz(true).await
+}
+
+async fn multiple_connections_fuzz(mvcc_enabled: bool) {
     let (mut rng, seed) = rng_from_time_or_env();
     println!("Multiple connections fuzz test seed: {seed}");
 
@@ -251,6 +262,7 @@ async fn test_multiple_connections_fuzz() {
         // Create a fresh database for each iteration
         let tempfile = tempfile::NamedTempFile::new().unwrap();
         let db = Builder::new_local(tempfile.path().to_str().unwrap())
+            .with_mvcc(mvcc_enabled)
             .build()
             .await
             .unwrap();
