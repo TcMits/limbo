@@ -434,17 +434,6 @@ pub struct PageContent {
     pub overflow_cells: Vec<OverflowCell>,
 }
 
-impl Clone for PageContent {
-    fn clone(&self) -> Self {
-        #[allow(clippy::arc_with_non_send_sync)]
-        Self {
-            offset: self.offset,
-            buffer: Arc::new(RefCell::new((*self.buffer.borrow()).clone())),
-            overflow_cells: self.overflow_cells.clone(),
-        }
-    }
-}
-
 impl PageContent {
     pub fn new(offset: usize, buffer: Arc<RefCell<Buffer>>) -> Self {
         Self {

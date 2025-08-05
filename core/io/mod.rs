@@ -270,7 +270,6 @@ pub type BufferData = Pin<Vec<u8>>;
 
 pub type BufferDropFn = Rc<dyn Fn(BufferData)>;
 
-#[derive(Clone)]
 pub struct Buffer {
     data: ManuallyDrop<BufferData>,
     drop: BufferDropFn,
