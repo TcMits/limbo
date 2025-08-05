@@ -445,6 +445,11 @@ impl Program {
         mv_store: Option<&Arc<MvStore>>,
         rollback: bool,
     ) -> Result<StepResult> {
+        if self.connection.transaction_state.get() == TransactionState::None && mv_store.is_none() {
+            // No need to do any work here if not in tx. Current MVCC logic doesn't work with this assumption,
+            // hence the mv_store.is_none() check.
+            return Ok(StepResult::Done);
+        }
         if let Some(mv_store) = mv_store {
             let conn = self.connection.clone();
             let auto_commit = conn.auto_commit.get();
