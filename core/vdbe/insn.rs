@@ -1030,6 +1030,10 @@ pub enum Insn {
         from: String,
         to: String,
     },
+    DropColumn {
+        table: String,
+        column_index: usize,
+    },
 }
 
 impl Insn {
@@ -1160,6 +1164,7 @@ impl Insn {
             Insn::Count { .. } => execute::op_count,
             Insn::IntegrityCk { .. } => execute::op_integrity_check,
             Insn::RenameTable { .. } => execute::op_rename_table,
+            Insn::DropColumn { .. } => execute::op_drop_column,
         }
     }
 }

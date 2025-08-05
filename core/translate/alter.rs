@@ -153,9 +153,9 @@ pub fn translate_alter_table(
                         p5: 0,
                     });
 
-                    program.emit_insn(Insn::ParseSchema {
-                        db: usize::MAX, // TODO: This value is unused, change when we do something with it
-                        where_clause: None,
+                    program.emit_insn(Insn::DropColumn {
+                        table: table_name,
+                        column_index: dropped_index,
                     })
                 },
             )?

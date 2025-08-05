@@ -6864,6 +6864,45 @@ pub fn op_rename_table(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub fn op_drop_column(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::DropColumn {
+        table,
+        column_index,
+    } = insn
+    else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    let conn = program.connection.clone();
+
+    conn.with_schema_mut(|schema| {
+        let table = schema
+            .tables
+            .get_mut(table)
+            .expect("table being renamed should be in schema");
+
+        {
+            let table = Arc::make_mut(table);
+
+            let Table::BTree(btree) = table else {
+                panic!("only btree tables can be renamed");
+            };
+
+            let btree = Arc::make_mut(btree);
+            btree.columns.remove(*column_index)
+        }
+    });
+
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 impl Value {
     pub fn exec_lower(&self) -> Option<Self> {
         match self {

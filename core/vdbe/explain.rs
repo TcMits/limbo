@@ -1636,6 +1636,15 @@ pub fn insn_to_str(
                 0,
                 format!("rename_table({from}, {to})"),
             ),
+            Insn::DropColumn { table, column_index } => (
+                "DropColumn",
+                0,
+                0,
+                0,
+                Value::build_text(""),
+                0,
+                format!("drop_column({table}, {column_index})"),
+            ),
             Insn::CollSeq { reg, collation } => (
                 "CollSeq",
                 reg.unwrap_or(0) as i32,
