@@ -10,7 +10,7 @@ use clap::Parser;
 use import::ImportArgs;
 
 use crate::{
-    commands::args::CopyArgs,
+    commands::args::CloneArgs,
     input::{AFTER_HELP_MSG, BEFORE_HELP_MSG},
 };
 
@@ -89,8 +89,8 @@ pub enum Command {
     /// Toggle column headers on/off in list mode
     #[command(name = "headers", display_name = ".headers")]
     Headers(HeadersArgs),
-    #[command(name = "copy", display_name = ".copy")]
-    Copy(CopyArgs),
+    #[command(name = "clone", display_name = ".clone")]
+    Clone(CloneArgs),
 }
 
 const _HELP_TEMPLATE: &str = "{before-help}{name}

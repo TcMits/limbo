@@ -144,7 +144,7 @@ pub struct HeadersArgs {
 }
 
 #[derive(Debug, Clone, Args)]
-pub struct CopyArgs {
+pub struct CloneArgs {
     pub output_file: String,
 }
 
