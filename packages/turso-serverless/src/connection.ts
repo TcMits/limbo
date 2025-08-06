@@ -94,6 +94,9 @@ export class Connection {
    * @returns Promise resolving to the result of the pragma
    */
   async pragma(pragma: string): Promise<any> {
+    if (!this.isOpen) {
+      throw new TypeError("The database connection is not open");
+    }
     const sql = `PRAGMA ${pragma}`;
     return this.session.execute(sql);
   }
