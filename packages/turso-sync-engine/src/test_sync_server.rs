@@ -213,7 +213,7 @@ impl TestSyncServer {
                     session.in_txn = true;
                 }
                 let frame = &frames[offset..offset + FRAME_SIZE];
-                match session.conn.wal_insert_frame(frame_no as u64, frame) {
+                match session.conn.wal_insert_frame(frame_no, frame) {
                     Ok(info) => {
                         if info.is_commit_frame() {
                             if session.in_txn {

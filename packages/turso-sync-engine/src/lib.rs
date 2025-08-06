@@ -102,25 +102,25 @@ mod tests {
         }
         pub async fn connect(&self) -> Result<turso::Connection> {
             self.run_db_fn(self.db.as_ref().unwrap(), async move |coro, db| {
-                Ok(turso::Connection::create(db.connect(&coro).await?))
+                Ok(turso::Connection::create(db.connect(coro).await?))
             })
             .await
         }
         pub async fn pull(&self) -> Result<()> {
             self.run_db_fn(self.db.as_ref().unwrap(), async move |coro, db| {
-                db.pull(&coro).await
+                db.pull(coro).await
             })
             .await
         }
         pub async fn push(&self) -> Result<()> {
             self.run_db_fn(self.db.as_ref().unwrap(), async move |coro, db| {
-                db.push(&coro).await
+                db.push(coro).await
             })
             .await
         }
         pub async fn sync(&self) -> Result<()> {
             self.run_db_fn(self.db.as_ref().unwrap(), async move |coro, db| {
-                db.sync(&coro).await
+                db.sync(coro).await
             })
             .await
         }

@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct TestProtocolIo {
+    #[allow(clippy::type_complexity)]
     pub requests: Arc<std::sync::Mutex<Vec<Pin<Box<JoinHandle<()>>>>>>,
     pub server: TestSyncServer,
     ctx: Arc<TestContext>,
@@ -37,6 +38,12 @@ pub struct TestDataCompletion {
     chunks: Arc<std::sync::Mutex<VecDeque<Vec<u8>>>>,
     done: Arc<std::sync::Mutex<bool>>,
     poisoned: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl Default for TestDataCompletion {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestDataCompletion {
@@ -76,7 +83,7 @@ impl DataCompletion for TestDataCompletion {
                 "status error: {poison:?}"
             )));
         }
-        Ok(self.status.lock().unwrap().clone())
+        Ok(*self.status.lock().unwrap())
     }
 
     fn poll_data(&self) -> Result<Option<Self::HttpPollResult>> {
@@ -87,7 +94,7 @@ impl DataCompletion for TestDataCompletion {
             )));
         }
         let mut chunks = self.chunks.lock().unwrap();
-        Ok(chunks.pop_front().map(|x| TestDataPollResult(x)))
+        Ok(chunks.pop_front().map(TestDataPollResult))
     }
 
     fn is_done(&self) -> Result<bool> {
@@ -179,7 +186,7 @@ impl ProtocolIO for TestProtocolIo {
                             .await
                     });
                 }
-                _ => panic!("unexpected sync server request: {} {:?}", method, path),
+                _ => panic!("unexpected sync server request: {method} {path:?}"),
             };
         }
         Ok(completion)
