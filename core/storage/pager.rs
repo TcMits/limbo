@@ -396,6 +396,14 @@ enum HeaderRefState {
     CreateHeader { page: PageRef },
 }
 
+#[cfg(not(feature = "omit_autovacuum"))]
+#[derive(Debug, Clone, Copy)]
+enum BtreeCreateVacuumFullState {
+    Start,
+    AllocatePage { root_page_num: u32 },
+    PtrMapPut { allocated_page_id: u32 },
+}
+
 /// The pager interface implements the persistence layer by providing access
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
@@ -439,6 +447,8 @@ pub struct Pager {
     /// State machine for [Pager::ptrmap_get]
     ptrmap_get_state: RefCell<PtrMapGetState>,
     header_ref_state: RefCell<HeaderRefState>,
+    #[cfg(not(feature = "omit_autovacuum"))]
+    btree_create_vacuum_full_state: Cell<BtreeCreateVacuumFullState>,
 }
 
 #[derive(Debug, Clone)]
@@ -545,6 +555,8 @@ impl Pager {
             #[cfg(not(feature = "omit_autovacuum"))]
             ptrmap_get_state: RefCell::new(PtrMapGetState::Start),
             header_ref_state: RefCell::new(HeaderRefState::Start),
+            #[cfg(not(feature = "omit_autovacuum"))]
+            btree_create_vacuum_full_state: Cell::new(BtreeCreateVacuumFullState::Start),
         })
     }
 
@@ -774,40 +786,61 @@ impl Pager {
                     Ok(IOResult::Done(page.get().get().id as u32))
                 }
                 AutoVacuumMode::Full => {
-                    let (mut root_page_num, page_size) =
-                        return_if_io!(self.with_header(|header| {
-                            (
-                                header.vacuum_mode_largest_root_page.get(),
-                                header.page_size.get(),
-                            )
-                        }));
+                    loop {
+                        match self.btree_create_vacuum_full_state.get() {
+                            BtreeCreateVacuumFullState::Start => {
+                                let (mut root_page_num, page_size) = return_if_io!(self
+                                    .with_header(|header| {
+                                        (
+                                            header.vacuum_mode_largest_root_page.get(),
+                                            header.page_size.get(),
+                                        )
+                                    }));
 
-                    assert!(root_page_num > 0); //  Largest root page number cannot be 0 because that is set to 1 when creating the database with autovacuum enabled
-                    root_page_num += 1;
-                    assert!(root_page_num >= FIRST_PTRMAP_PAGE_NO); //  can never be less than 2 because we have already incremented
+                                assert!(root_page_num > 0); //  Largest root page number cannot be 0 because that is set to 1 when creating the database with autovacuum enabled
+                                root_page_num += 1;
+                                assert!(root_page_num >= FIRST_PTRMAP_PAGE_NO); //  can never be less than 2 because we have already incremented
 
-                    while is_ptrmap_page(root_page_num, page_size as usize) {
-                        root_page_num += 1;
-                    }
-                    assert!(root_page_num >= 3); //  the very first root page is page 3
+                                while is_ptrmap_page(root_page_num, page_size as usize) {
+                                    root_page_num += 1;
+                                }
+                                assert!(root_page_num >= 3); //  the very first root page is page 3
+                                self.btree_create_vacuum_full_state.set(
+                                    BtreeCreateVacuumFullState::AllocatePage { root_page_num },
+                                );
+                            }
+                            BtreeCreateVacuumFullState::AllocatePage { root_page_num } => {
+                                //  root_page_num here is the desired root page
+                                let page = return_if_io!(self.do_allocate_page(
+                                    page_type,
+                                    0,
+                                    BtreePageAllocMode::Exact(root_page_num),
+                                ));
+                                let allocated_page_id = page.get().get().id as u32;
+                                if allocated_page_id != root_page_num {
+                                    //  TODO(Zaid): Handle swapping the allocated page with the desired root page
+                                }
 
-                    //  root_page_num here is the desired root page
-                    let page = return_if_io!(self.do_allocate_page(
-                        page_type,
-                        0,
-                        BtreePageAllocMode::Exact(root_page_num),
-                    ));
-                    let allocated_page_id = page.get().get().id as u32;
-                    if allocated_page_id != root_page_num {
-                        //  TODO(Zaid): Handle swapping the allocated page with the desired root page
-                    }
-
-                    //  TODO(Zaid): Update the header metadata to reflect the new root page number
-
-                    //  For now map allocated_page_id since we are not swapping it with root_page_num
-                    match self.ptrmap_put(allocated_page_id, PtrmapType::RootPage, 0)? {
-                        IOResult::Done(_) => Ok(IOResult::Done(allocated_page_id)),
-                        IOResult::IO => Ok(IOResult::IO),
+                                //  TODO(Zaid): Update the header metadata to reflect the new root page number
+                                self.btree_create_vacuum_full_state.set(
+                                    BtreeCreateVacuumFullState::PtrMapPut { allocated_page_id },
+                                );
+                            }
+                            BtreeCreateVacuumFullState::PtrMapPut { allocated_page_id } => {
+                                //  For now map allocated_page_id since we are not swapping it with root_page_num
+                                let res = match self.ptrmap_put(
+                                    allocated_page_id,
+                                    PtrmapType::RootPage,
+                                    0,
+                                )? {
+                                    IOResult::Done(_) => Ok(IOResult::Done(allocated_page_id)),
+                                    IOResult::IO => return Ok(IOResult::IO),
+                                };
+                                self.btree_create_vacuum_full_state
+                                    .set(BtreeCreateVacuumFullState::Start);
+                                return res;
+                            }
+                        }
                     }
                 }
                 AutoVacuumMode::Incremental => {
