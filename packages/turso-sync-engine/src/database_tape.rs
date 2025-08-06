@@ -42,7 +42,7 @@ pub(crate) async fn run_stmt<'a>(
     loop {
         match stmt.step()? {
             StepResult::IO => {
-                coro.yield_(ProtocolCommand::IO).await?.none();
+                coro.yield_(ProtocolCommand::IO).await?;
             }
             StepResult::Done => {
                 return Ok(None);
@@ -67,7 +67,7 @@ pub(crate) async fn exec_stmt<'a>(
     loop {
         match stmt.step()? {
             StepResult::IO => {
-                coro.yield_(ProtocolCommand::IO).await?.none();
+                coro.yield_(ProtocolCommand::IO).await?;
             }
             StepResult::Done => {
                 return Ok(());
@@ -637,10 +637,7 @@ mod tests {
 
     use crate::{
         database_tape::{run_stmt, DatabaseReplaySessionOpts, DatabaseTape},
-        types::{
-            DatabaseTapeOperation, DatabaseTapeRowChange, DatabaseTapeRowChangeType,
-            ProtocolResponse,
-        },
+        types::{DatabaseTapeOperation, DatabaseTapeRowChange, DatabaseTapeRowChangeType},
     };
 
     #[test]
@@ -664,7 +661,7 @@ mod tests {
             }
         });
         let rows = loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(result) => break result,
             }
@@ -697,7 +694,7 @@ mod tests {
             }
         });
         let changes = loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(result) => break result,
             }
@@ -786,7 +783,7 @@ mod tests {
             }
         });
         let rows = loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(rows) => break rows,
             }
@@ -864,7 +861,7 @@ mod tests {
             }
         });
         let rows = loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(rows) => break rows,
             }
@@ -933,7 +930,7 @@ mod tests {
             }
         });
         let rows = loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(rows) => break rows,
             }

@@ -58,7 +58,7 @@ pub async fn db_bootstrap<C: ProtocolIO>(
                 completions.push(dbs[i].pwrite(pos, buffer.clone(), c)?);
             }
             while !completions.iter().all(|x| x.is_completed()) {
-                coro.yield_(ProtocolCommand::IO).await?.none();
+                coro.yield_(ProtocolCommand::IO).await?;
             }
             pos += content_len;
         }
@@ -441,7 +441,7 @@ pub async fn reset_wal_file(
     });
     let c = wal.truncate(wal_size, c)?;
     while !c.is_completed() {
-        coro.yield_(ProtocolCommand::IO).await?.none();
+        coro.yield_(ProtocolCommand::IO).await?;
     }
     Ok(())
 }
@@ -562,7 +562,6 @@ pub mod tests {
     use crate::{
         database_sync_operations::{transfer_logical_changes, transfer_physical_changes},
         database_tape::{run_stmt, DatabaseTape, DatabaseTapeOpts},
-        types::ProtocolResponse,
         wal_session::WalSession,
         Result,
     };
@@ -626,7 +625,7 @@ pub mod tests {
             Result::Ok(())
         });
         loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(result) => {
                     result.unwrap();
@@ -720,7 +719,7 @@ pub mod tests {
             Result::Ok(())
         });
         loop {
-            match gen.resume_with(Ok(ProtocolResponse::None)) {
+            match gen.resume_with(Ok(())) {
                 genawaiter::GeneratorState::Yielded(..) => io.run_once().unwrap(),
                 genawaiter::GeneratorState::Complete(result) => {
                     result.unwrap();

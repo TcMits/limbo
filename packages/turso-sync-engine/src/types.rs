@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{errors::Error, Result};
 
-pub type Coro = genawaiter::sync::Co<ProtocolCommand, Result<ProtocolResponse>>;
+pub type Coro = genawaiter::sync::Co<ProtocolCommand, Result<()>>;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DbSyncInfo {
@@ -264,50 +264,6 @@ fn get_core_value_blob_or_null(row: &turso_core::Row, index: usize) -> Result<Op
 }
 
 pub enum ProtocolCommand {
-    // Protocol waits for some IO - caller must spin IO event loop
+    // Protocol waits for some IO - caller must spin turso-db IO event loop and also drive ProtocolIO
     IO,
-    // // Protocol needs to initiate HTTP request - caller must initiate HTTP request using native approach
-    // Http {
-    //     method: http::Method,
-    //     path: String,
-    //     data: Option<Vec<u8>>,
-    // },
-    // // Protocol waits for more data in the response from Http Command
-    // HttpMoreData,
-    // Protocol needs to read all data from file at given path
-    // ReadFull {
-    //     path: String,
-    // },
-    // // Protocol needs to atomically overwrite data for file at given path
-    // WriteFull {
-    //     path: String,
-    //     data: Vec<u8>,
-    // },
-}
-
-#[derive(Debug)]
-pub enum ProtocolResponse {
-    None,
-    Content { status: u16, data: Vec<u8> },
-}
-
-impl ProtocolResponse {
-    pub fn none(self) -> () {
-        match self {
-            ProtocolResponse::None => {}
-            v @ _ => panic!(
-                "unexpected ProtocolResponse value: expected None, got {:?}",
-                v
-            ),
-        }
-    }
-    pub fn content(self) -> (u16, Vec<u8>) {
-        match self {
-            ProtocolResponse::Content { status, data } => (status, data),
-            v @ _ => panic!(
-                "unexpected ProtocolResponse value: expected Content, got {:?}",
-                v
-            ),
-        }
-    }
 }

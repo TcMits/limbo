@@ -29,7 +29,7 @@ mod tests {
         errors::Error,
         test_context::TestContext,
         test_protocol_io::TestProtocolIo,
-        types::{Coro, ProtocolCommand, ProtocolResponse},
+        types::{Coro, ProtocolCommand},
         Result,
     };
 
@@ -140,9 +140,9 @@ mod tests {
         }
         pub async fn run<T, F: std::future::Future<Output = Result<T>>>(
             &self,
-            mut g: genawaiter::sync::Gen<ProtocolCommand, Result<ProtocolResponse>, F>,
+            mut g: genawaiter::sync::Gen<ProtocolCommand, Result<()>, F>,
         ) -> Result<T> {
-            let mut response = Ok(ProtocolResponse::None);
+            let mut response = Ok(());
             loop {
                 // we must drive internal tokio clocks on every iteration - otherwise one TestRunner without work can block everything
                 // if other TestRunner sleeping - as time will "freeze" in this case
@@ -161,11 +161,10 @@ mod tests {
                                 _ = self.ctx.random_sleep() => { self.sync_server.requests.lock().unwrap().push(request); }
                             };
                         }
-                        response = self
-                            .io
-                            .run_once()
-                            .map(|_| ProtocolResponse::None)
-                            .map_err(|e| Error::DatabaseSyncEngineError(format!("io error: {e}")));
+                        response =
+                            self.io.run_once().map(|_| ()).map_err(|e| {
+                                Error::DatabaseSyncEngineError(format!("io error: {e}"))
+                            });
                     }
                 }
             }
