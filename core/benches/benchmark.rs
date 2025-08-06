@@ -545,6 +545,12 @@ fn bench_insert_rows(criterion: &mut Criterion) {
             let temp_dir = tempfile::tempdir().unwrap();
             let db_path = temp_dir.path().join("bench.db");
             let sqlite_conn = rusqlite::Connection::open(db_path).unwrap();
+            sqlite_conn
+                .pragma_update(None, "journal_mode", "WAL")
+                .unwrap();
+            sqlite_conn
+                .pragma_update(None, "locking_mode", "EXCLUSIVE")
+                .unwrap();
 
             // Create test table
             sqlite_conn
