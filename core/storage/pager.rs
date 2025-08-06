@@ -381,9 +381,6 @@ impl AtomicDbState {
 #[cfg(not(feature = "omit_autovacuum"))]
 enum PtrMapGetState {
     Start,
-    ReadPage {
-        page_size: usize,
-    },
     Deserialize {
         ptrmap_page: PageRef,
         offset_in_ptrmap_page: usize,
@@ -592,98 +589,86 @@ impl Pager {
     /// Returns `Ok(None)` if the page is not supposed to have a ptrmap entry (e.g. header, or a ptrmap page itself).
     #[cfg(not(feature = "omit_autovacuum"))]
     pub fn ptrmap_get(&self, target_page_num: u32) -> Result<IOResult<Option<PtrmapEntry>>> {
-        loop {
-            let ptrmap_get_state = self.ptrmap_get_state.borrow().clone();
-            match ptrmap_get_state {
-                PtrMapGetState::Start => {
-                    tracing::trace!("ptrmap_get(page_idx = {})", target_page_num);
-                    let configured_page_size =
-                        return_if_io!(self.with_header(|header| header.page_size)).get() as usize;
+        let ptrmap_get_state = self.ptrmap_get_state.borrow().clone();
+        match ptrmap_get_state {
+            PtrMapGetState::Start => {
+                tracing::trace!("ptrmap_get(page_idx = {})", target_page_num);
+                let configured_page_size =
+                    return_if_io!(self.with_header(|header| header.page_size)).get() as usize;
 
-                    if target_page_num < FIRST_PTRMAP_PAGE_NO
-                        || is_ptrmap_page(target_page_num, configured_page_size)
-                    {
-                        return Ok(IOResult::Done(None));
-                    }
-
-                    self.ptrmap_get_state.replace(PtrMapGetState::ReadPage {
-                        page_size: configured_page_size,
-                    });
+                if target_page_num < FIRST_PTRMAP_PAGE_NO
+                    || is_ptrmap_page(target_page_num, configured_page_size)
+                {
+                    return Ok(IOResult::Done(None));
                 }
-                PtrMapGetState::ReadPage {
-                    page_size: configured_page_size,
-                } => {
-                    let ptrmap_pg_no =
-                        get_ptrmap_page_no_for_db_page(target_page_num, configured_page_size);
-                    let offset_in_ptrmap_page = get_ptrmap_offset_in_page(
-                        target_page_num,
-                        ptrmap_pg_no,
-                        configured_page_size,
-                    )?;
-                    tracing::trace!(
-                        "ptrmap_get(page_idx = {}) = ptrmap_pg_no = {}",
-                        target_page_num,
-                        ptrmap_pg_no
-                    );
 
-                    let (ptrmap_page, _c) = self.read_page(ptrmap_pg_no as usize)?;
-                    self.ptrmap_get_state.replace(PtrMapGetState::Deserialize {
-                        ptrmap_page,
-                        offset_in_ptrmap_page,
-                    });
-                    return Ok(IOResult::IO);
-                }
-                PtrMapGetState::Deserialize {
+                let ptrmap_pg_no =
+                    get_ptrmap_page_no_for_db_page(target_page_num, configured_page_size);
+                let offset_in_ptrmap_page =
+                    get_ptrmap_offset_in_page(target_page_num, ptrmap_pg_no, configured_page_size)?;
+                tracing::trace!(
+                    "ptrmap_get(page_idx = {}) = ptrmap_pg_no = {}",
+                    target_page_num,
+                    ptrmap_pg_no
+                );
+
+                let (ptrmap_page, _c) = self.read_page(ptrmap_pg_no as usize)?;
+                self.ptrmap_get_state.replace(PtrMapGetState::Deserialize {
                     ptrmap_page,
                     offset_in_ptrmap_page,
-                } => {
-                    if ptrmap_page.is_locked() {
-                        return Ok(IOResult::IO);
-                    }
-                    if !ptrmap_page.is_loaded() {
-                        return Ok(IOResult::IO);
-                    }
-                    let ptrmap_page_inner = ptrmap_page.get();
-                    let ptrmap_pg_no = ptrmap_page_inner.id;
+                });
+                Ok(IOResult::IO)
+            }
+            PtrMapGetState::Deserialize {
+                ptrmap_page,
+                offset_in_ptrmap_page,
+            } => {
+                if ptrmap_page.is_locked() {
+                    return Ok(IOResult::IO);
+                }
+                if !ptrmap_page.is_loaded() {
+                    return Ok(IOResult::IO);
+                }
+                let ptrmap_page_inner = ptrmap_page.get();
+                let ptrmap_pg_no = ptrmap_page_inner.id;
 
-                    let page_content: &PageContent = match ptrmap_page_inner.contents.as_ref() {
-                        Some(content) => content,
-                        None => {
-                            return Err(LimboError::InternalError(format!(
-                                "Ptrmap page {ptrmap_pg_no} content not loaded"
-                            )));
-                        }
-                    };
-
-                    let full_buffer_slice: &[u8] = page_content.buffer.as_slice();
-
-                    // Ptrmap pages are not page 1, so their internal offset within their buffer should be 0.
-                    // The actual page data starts at page_content.offset within the full_buffer_slice.
-                    if ptrmap_pg_no != 1 && page_content.offset != 0 {
-                        return Err(LimboError::Corrupt(format!(
-                            "Ptrmap page {} has unexpected internal offset {}",
-                            ptrmap_pg_no, page_content.offset
+                let page_content: &PageContent = match ptrmap_page_inner.contents.as_ref() {
+                    Some(content) => content,
+                    None => {
+                        return Err(LimboError::InternalError(format!(
+                            "Ptrmap page {ptrmap_pg_no} content not loaded"
                         )));
                     }
-                    let ptrmap_page_data_slice: &[u8] = &full_buffer_slice[page_content.offset..];
-                    let actual_data_length = ptrmap_page_data_slice.len();
+                };
 
-                    // Check if the calculated offset for the entry is within the bounds of the actual page data length.
-                    if offset_in_ptrmap_page + PTRMAP_ENTRY_SIZE > actual_data_length {
-                        return Err(LimboError::InternalError(format!(
+                let full_buffer_slice: &[u8] = page_content.buffer.as_slice();
+
+                // Ptrmap pages are not page 1, so their internal offset within their buffer should be 0.
+                // The actual page data starts at page_content.offset within the full_buffer_slice.
+                if ptrmap_pg_no != 1 && page_content.offset != 0 {
+                    return Err(LimboError::Corrupt(format!(
+                        "Ptrmap page {} has unexpected internal offset {}",
+                        ptrmap_pg_no, page_content.offset
+                    )));
+                }
+                let ptrmap_page_data_slice: &[u8] = &full_buffer_slice[page_content.offset..];
+                let actual_data_length = ptrmap_page_data_slice.len();
+
+                // Check if the calculated offset for the entry is within the bounds of the actual page data length.
+                if offset_in_ptrmap_page + PTRMAP_ENTRY_SIZE > actual_data_length {
+                    return Err(LimboError::InternalError(format!(
                             "Ptrmap offset {offset_in_ptrmap_page} + entry size {PTRMAP_ENTRY_SIZE} out of bounds for page {ptrmap_pg_no} (actual data len {actual_data_length})"
                         )));
-                    }
+                }
 
-                    let entry_slice = &ptrmap_page_data_slice
-                        [offset_in_ptrmap_page..offset_in_ptrmap_page + PTRMAP_ENTRY_SIZE];
-                    self.ptrmap_get_state.replace(PtrMapGetState::Start);
-                    return match PtrmapEntry::deserialize(entry_slice) {
-                        Some(entry) => Ok(IOResult::Done(Some(entry))),
-                        None => Err(LimboError::Corrupt(format!(
-                            "Failed to deserialize ptrmap entry for page {target_page_num} from ptrmap page {ptrmap_pg_no}"
-                        ))),
-                    };
+                let entry_slice = &ptrmap_page_data_slice
+                    [offset_in_ptrmap_page..offset_in_ptrmap_page + PTRMAP_ENTRY_SIZE];
+                self.ptrmap_get_state.replace(PtrMapGetState::Start);
+                match PtrmapEntry::deserialize(entry_slice) {
+                    Some(entry) => Ok(IOResult::Done(Some(entry))),
+                    None => Err(LimboError::Corrupt(format!(
+                        "Failed to deserialize ptrmap entry for page {target_page_num} from ptrmap page {ptrmap_pg_no}"
+                    ))),
                 }
             }
         }
