@@ -49,7 +49,7 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
             }
 
             #[no_mangle]
-            unsafe extern "C" fn #open_fn_name(table: *const ::std::ffi::c_void, conn: *mut ::turso_ext::Conn) -> *const ::std::ffi::c_void {
+            unsafe extern "C" fn #open_fn_name(table: *const ::std::ffi::c_void, conn: *const ::turso_ext::Conn) -> *const ::std::ffi::c_void {
                 if table.is_null() {
                     return ::std::ptr::null();
                 }
