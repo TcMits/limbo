@@ -58,7 +58,7 @@ impl Connection {
                     LimboError::ExtensionError("Error locking extension libraries".to_string())
                 })?
                 .push((Arc::new(lib), api_ref));
-            {
+            if self.is_db_initialized() {
                 self.parse_schema_rows()?;
             }
             Ok(())
