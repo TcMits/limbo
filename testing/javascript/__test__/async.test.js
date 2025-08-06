@@ -341,6 +341,17 @@ test.serial("Database.prepare() after close()", async (t) => {
   });
 });
 
+test.serial("Database.pragma() after close()", async (t) => {
+  const db = t.context.db;
+  await db.close();
+  await t.throwsAsync(async () => {
+    await db.pragma("cache_size = 2000");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
 test.serial("Database.exec() after close()", async (t) => {
   const db = t.context.db;
   await db.close();
