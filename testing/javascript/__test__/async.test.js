@@ -147,7 +147,7 @@ test.skip("Statement.iterate()", async (t) => {
   }
 });
 
-test.skip("Statement.all()", async (t) => {
+test.serial("Statement.all()", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("SELECT * FROM users");
