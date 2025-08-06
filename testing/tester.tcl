@@ -191,9 +191,13 @@ proc run_test_expecting_error_content {sqlite_exec db_name sql expected_error_te
         exit 1
     }
 
+    # Remove box-drawing characters, multiplication signs, and other non-ASCII junk
+    set cleaned_result [regsub -all {[\u2500-\u257F\u00D7]} $result ""]
+    #TODO any other possible cleanups?
+    
     # Normalize both the actual and expected error messages
     # Remove all whitespace, newlines, and special characters for comparison
-    set normalized_actual [regsub -all {[[:space:]]|[[:punct:]]} $result ""]
+    set normalized_actual [regsub -all {[[:space:]]|[[:punct:]]} $cleaned_result ""]
     set normalized_expected [regsub -all {[[:space:]]|[[:punct:]]} $expected_error_text ""]
 
     # Convert to lowercase for case-insensitive comparison
