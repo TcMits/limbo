@@ -1,4 +1,3 @@
-use parking_lot::Mutex;
 use tracing::{instrument, Level};
 
 use crate::{
@@ -236,16 +235,14 @@ pub enum OverwriteCellState {
     AllocatePayload,
     /// Fill the cell payload with the new payload.
     FillPayload {
-        /// Dumb double-indirection via Arc because we clone [WriteState] for some reason and we use unsafe in [FillCellPayloadState::AllocateOverflowPages]
-        /// so the underlying Vec must not be cloned in upper layers.
-        new_payload: Arc<Mutex<Vec<u8>>>,
+        new_payload: Vec<u8>,
         rowid: Option<i64>,
         fill_cell_payload_state: FillCellPayloadState,
     },
     /// Clear the old cell's overflow pages and add them to the freelist.
     /// Overwrite the cell with the new payload.
     ClearOverflowPagesAndOverwrite {
-        new_payload: Arc<Mutex<Vec<u8>>>,
+        new_payload: Vec<u8>,
         old_offset: usize,
         old_local_size: usize,
     },
@@ -263,15 +260,15 @@ enum WriteState {
     Overwrite {
         page: Arc<BTreePageInner>,
         cell_idx: usize,
-        state: OverwriteCellState,
+        // This is an Option although it's not optional; we `take` it as owned for [BTreeCursor::overwrite_cell]
+        // to work around the borrow checker, and then insert it back if overwriting returns IO.
+        state: Option<OverwriteCellState>,
     },
     /// Insert a new cell. This path is taken when inserting a new row.
     Insert {
         page: Arc<BTreePageInner>,
         cell_idx: usize,
-        /// Dumb double-indirection via Arc because we clone [WriteState] for some reason and we use unsafe in [FillCellPayloadState::AllocateOverflowPages]
-        /// so the underlying Vec must not be cloned in upper layers.
-        new_payload: Arc<Mutex<Vec<u8>>>,
+        new_payload: Vec<u8>,
         fill_cell_payload_state: FillCellPayloadState,
     },
     BalanceStart,
@@ -2169,14 +2166,11 @@ impl BTreeCursor {
             self.state = CursorState::Write(WriteInfo::new());
         }
         let ret = loop {
-            let write_state = {
-                let write_info = self
-                    .state
-                    .mut_write_info()
-                    .expect("can't insert while counting");
-                write_info.state.clone()
-            };
-            match write_state {
+            let usable_space = self.usable_space();
+            // Although WriteState currently still implements Clone, do not any circumstances clone it here to work around borrow checker issues,
+            // you will mess things up by cloning vectors owned by variants of WriteState.
+            let write_info = self.state.mut_write_info().expect("must be in write state");
+            match &mut write_info.state {
                 WriteState::Start => {
                     let page = self.stack.top();
                     return_if_locked_maybe_load!(self.pager, page);
@@ -2200,10 +2194,7 @@ impl BTreeCursor {
                     // if the cell index is less than the total cells, check: if its an existing
                     // rowid, we are going to update / overwrite the cell
                     if cell_idx < page.get().get_contents().cell_count() {
-                        let cell = page
-                            .get()
-                            .get_contents()
-                            .cell_get(cell_idx, self.usable_space())?;
+                        let cell = page.get().get_contents().cell_get(cell_idx, usable_space)?;
                         match cell {
                             BTreeCell::TableLeafCell(tbl_leaf) => {
                                 if tbl_leaf.rowid == bkey.to_rowid() {
@@ -2216,7 +2207,7 @@ impl BTreeCursor {
                                     write_info.state = WriteState::Overwrite {
                                         page: page.clone(),
                                         cell_idx,
-                                        state: OverwriteCellState::AllocatePayload,
+                                        state: Some(OverwriteCellState::AllocatePayload),
                                     };
                                     continue;
                                 }
@@ -2241,7 +2232,7 @@ impl BTreeCursor {
                                     write_info.state = WriteState::Overwrite {
                                         page: page.clone(),
                                         cell_idx,
-                                        state: OverwriteCellState::AllocatePayload,
+                                        state: Some(OverwriteCellState::AllocatePayload),
                                     };
                                     continue;
                                 } else {
@@ -2262,9 +2253,7 @@ impl BTreeCursor {
                     write_info.state = WriteState::Insert {
                         page: page.clone(),
                         cell_idx,
-                        new_payload: Arc::new(Mutex::new(Vec::with_capacity(
-                            record_values.len() + 4,
-                        ))),
+                        new_payload: Vec::with_capacity(record_values.len() + 4),
                         fill_cell_payload_state: FillCellPayloadState::Start,
                     };
                     continue;
@@ -2273,41 +2262,18 @@ impl BTreeCursor {
                     page,
                     cell_idx,
                     new_payload,
-                    mut fill_cell_payload_state,
+                    ref mut fill_cell_payload_state,
                 } => {
-                    {
-                        let mut new_payload_mut = new_payload.lock();
-                        if fill_cell_payload(
-                            page.get().get().contents.as_ref().unwrap(),
-                            bkey.maybe_rowid(),
-                            &mut new_payload_mut,
-                            cell_idx,
-                            record,
-                            self.usable_space(),
-                            self.pager.clone(),
-                            &mut fill_cell_payload_state,
-                        )?
-                        .is_io()
-                        {
-                            let write_info = self
-                                .state
-                                .mut_write_info()
-                                .expect("write info should be present");
-                            let WriteState::Insert {
-                                fill_cell_payload_state: old_fill_cell_state,
-                                ..
-                            } = &mut write_info.state
-                            else {
-                                panic!("expected insert state");
-                            };
-                            // FIXME: don't clone WriteState on every iteration, it's really wasteful and leads to having
-                            // to do things like this to ensure the next state is consistent.
-                            // The reason WriteState is cloned is probably to work around the borrow checker, but we should
-                            // be able to not clone here regardless.
-                            *old_fill_cell_state = fill_cell_payload_state;
-                            return Ok(IOResult::IO);
-                        }
-                    }
+                    return_if_io!(fill_cell_payload(
+                        page.get().get().contents.as_ref().unwrap(),
+                        bkey.maybe_rowid(),
+                        new_payload,
+                        *cell_idx,
+                        record,
+                        usable_space,
+                        self.pager.clone(),
+                        fill_cell_payload_state,
+                    ));
 
                     {
                         let page = page.get();
@@ -2316,16 +2282,12 @@ impl BTreeCursor {
 
                         insert_into_cell(
                             contents,
-                            new_payload.lock().as_slice(),
-                            cell_idx,
-                            self.usable_space() as u16,
+                            new_payload.as_slice(),
+                            *cell_idx,
+                            usable_space as u16,
                         )?;
                     };
-                    self.stack.set_cell_index(cell_idx as i32);
-                    let write_info = self
-                        .state
-                        .mut_write_info()
-                        .expect("write info should be present");
+                    self.stack.set_cell_index(*cell_idx as i32);
                     let overflows = !page.get().get_contents().overflow_cells.is_empty();
                     if overflows {
                         write_info.state = WriteState::BalanceStart;
@@ -2346,13 +2308,19 @@ impl BTreeCursor {
                 WriteState::Overwrite {
                     page,
                     cell_idx,
-                    mut state,
+                    ref mut state,
                 } => {
                     turso_assert!(
                         page.get().is_loaded(),
                         "page {}is not loaded",
                         page.get().get().id
                     );
+                    let page = page.clone();
+
+                    // Currently it's necessary to .take() here to prevent double-borrow of `self` in `overwrite_cell`.
+                    // We insert the state back if overwriting returns IO.
+                    let mut state = state.take().expect("state should be present");
+                    let cell_idx = *cell_idx;
                     if self
                         .overwrite_cell(page.clone(), cell_idx, record, &mut state)?
                         .is_io()
@@ -2360,25 +2328,18 @@ impl BTreeCursor {
                         let write_info = self
                             .state
                             .mut_write_info()
-                            .expect("write info should be present");
-                        let WriteState::Overwrite {
-                            state: old_state, ..
-                        } = &mut write_info.state
-                        else {
-                            panic!("expected overwrite state");
+                            .expect("should be in write state");
+                        write_info.state = WriteState::Overwrite {
+                            page,
+                            cell_idx,
+                            state: Some(state),
                         };
-                        // FIXME: don't clone WriteState on every iteration, it's really wasteful and leads to having
-                        // to do things like this to ensure the next state is consistent.
-                        // The reason WriteState is cloned is probably to work around the borrow checker, but we should
-                        // be able to not clone here regardless.
-                        *old_state = state;
                         return Ok(IOResult::IO);
                     }
-                    let usable_space = self.usable_space();
                     let write_info = self
                         .state
                         .mut_write_info()
-                        .expect("write info should be present");
+                        .expect("should be in write state");
                     let overflows = !page.get().get_contents().overflow_cells.is_empty();
                     let underflows = !overflows && {
                         let free_space =
@@ -5325,7 +5286,7 @@ impl BTreeCursor {
                     let new_payload = Vec::with_capacity(serial_types_len);
                     let rowid = return_if_io!(self.rowid());
                     *state = OverwriteCellState::FillPayload {
-                        new_payload: Arc::new(Mutex::new(new_payload)),
+                        new_payload,
                         rowid,
                         fill_cell_payload_state: FillCellPayloadState::Start,
                     };
@@ -5339,12 +5300,10 @@ impl BTreeCursor {
                     let page = page_ref.get();
                     let page_contents = page.get().contents.as_ref().unwrap();
                     {
-                        let mut new_payload_mut = new_payload.lock();
-                        let new_payload_mut = &mut *new_payload_mut;
                         return_if_io!(fill_cell_payload(
                             page_contents,
                             *rowid,
-                            new_payload_mut,
+                            new_payload,
                             cell_idx,
                             record,
                             self.usable_space(),
@@ -5376,8 +5335,6 @@ impl BTreeCursor {
                     let cell = page_contents.cell_get(cell_idx, self.usable_space())?;
                     return_if_io!(self.clear_overflow_pages(&cell));
 
-                    let mut new_payload = new_payload.lock();
-                    let new_payload = &mut *new_payload;
                     // if it all fits in local space and old_local_size is enough, do an in-place overwrite
                     if new_payload.len() == *old_local_size {
                         let _res = BTreeCursor::overwrite_content(
