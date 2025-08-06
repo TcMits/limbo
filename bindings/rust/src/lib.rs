@@ -150,12 +150,7 @@ impl Database {
     /// Connect to the database.
     pub fn connect(&self) -> Result<Connection> {
         let conn = self.inner.connect()?;
-        #[allow(clippy::arc_with_non_send_sync)]
-        let connection = Connection {
-            inner: Arc::new(Mutex::new(conn)),
-            transaction_behavior: TransactionBehavior::Deferred,
-        };
-        Ok(connection)
+        Ok(Connection::create(conn))
     }
 }
 
@@ -178,6 +173,14 @@ unsafe impl Send for Connection {}
 unsafe impl Sync for Connection {}
 
 impl Connection {
+    pub fn create(conn: Arc<turso_core::Connection>) -> Self {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let connection = Connection {
+            inner: Arc::new(Mutex::new(conn)),
+            transaction_behavior: TransactionBehavior::Deferred,
+        };
+        connection
+    }
     /// Query the database with SQL.
     pub async fn query(&self, sql: &str, params: impl IntoParams) -> Result<Rows> {
         let mut stmt = self.prepare(sql).await?;

@@ -1166,7 +1166,7 @@ impl Pager {
                 "wal_frame_count() called on database without WAL".to_string(),
             ));
         };
-        Ok(wal.borrow().get_max_frame_in_wal())
+        Ok(wal.borrow().get_max_frame())
     }
 
     /// Flush all dirty pages to disk.

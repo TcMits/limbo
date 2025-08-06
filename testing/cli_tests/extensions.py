@@ -335,7 +335,7 @@ def _test_series(limbo: TestTursoShell):
     limbo.run_test_fn(
         "SELECT * FROM generate_series WHERE 1 = start AND 10 = stop;",
         lambda res: res == "1\n2\n3\n4\n5\n6\n7\n8\n9\n10",
-        "Constraint with column on RHS used as TVF arg"
+        "Constraint with column on RHS used as TVF arg",
     )
     limbo.run_test_fn(
         "SELECT * FROM generate_series WHERE stop = 10 AND start = 1;",
@@ -396,22 +396,22 @@ def _test_series(limbo: TestTursoShell):
     limbo.run_test_fn(
         "SELECT t.id, series.value FROM target t, generate_series(t.id, 3) series;",
         lambda res: res == "1|1\n1|2\n1|3\n2|2\n2|3\n3|3",
-        "Column reference from table on the left used as generate_series argument"
+        "Column reference from table on the left used as generate_series argument",
     )
     limbo.run_test_fn(
         "SELECT t.id, series.value FROM generate_series(t.id, 3) series, target t;",
         lambda res: res == "1|1\n1|2\n1|3\n2|2\n2|3\n3|3",
-        "Column reference from table on the right used as generate_series argument"
+        "Column reference from table on the right used as generate_series argument",
     )
     limbo.run_test_fn(
         "SELECT one.value, series.value FROM (SELECT 1 AS value) one, generate_series(one.value, 3) series;",
         lambda res: res == "1|1\n1|2\n1|3",
-        "Column reference from scalar subquery (left side)"
+        "Column reference from scalar subquery (left side)",
     )
     limbo.run_test_fn(
         "SELECT one.value, series.value FROM generate_series(one.value, 3) series, (SELECT 1 AS value) one;",
         lambda res: res == "1|1\n1|2\n1|3",
-        "Column reference from scalar subquery (right side)"
+        "Column reference from scalar subquery (right side)",
     )
     limbo.run_test_fn(
         "SELECT "
@@ -421,27 +421,27 @@ def _test_series(limbo: TestTursoShell):
         "NATURAL JOIN "
         "   (SELECT 1 AS start, 3 AS stop, 2 AS value) a;",
         lambda res: res == "2|1|3",
-        "Natural join where TVF arguments come from column references"
+        "Natural join where TVF arguments come from column references",
     )
     limbo.run_test_fn(
         "SELECT * FROM generate_series(a.start, a.stop) JOIN (SELECT 1 AS start, 3 AS stop) a USING (start, stop);",
         lambda res: res == "1\n2\n3",
-        "Join USING where TVF arguments come from column references"
+        "Join USING where TVF arguments come from column references",
     )
     limbo.run_test_fn(
         "SELECT a.value, b.value FROM generate_series(b.value, b.value+1) a JOIN generate_series(1, 2) b;",
         lambda res: res == "1|1\n2|1\n2|2\n3|2",
-        "TVF arguments come from another TVF"
+        "TVF arguments come from another TVF",
     )
     limbo.run_test_fn(
         "SELECT * FROM generate_series(a.start, a.stop) b, generate_series(b.start, b.stop) a;",
         lambda res: "No valid query plan found" in res or "no query solution" in res,
-        "circular column references between two generate_series"
+        "circular column references between two generate_series",
     )
     limbo.run_test_fn(
         "SELECT * FROM generate_series(b.start, b.stop) b;",
         lambda res: "Invalid Argument" in res or 'first argument to "generate_series()" missing or unusable' in res,
-        "self-reference in generate_series arguments"
+        "self-reference in generate_series arguments",
     )
     limbo.quit()
 
@@ -738,7 +738,9 @@ def test_create_virtual_table():
 
 
 def test_csv():
-    limbo = TestTursoShell()
+    # open new empty connection explicitly to test whether we can load an extension
+    # with brand new connection/uninitialized database.
+    limbo = TestTursoShell(init_commands="")
     ext_path = "./target/debug/liblimbo_csv"
     limbo.execute_dot(f".load {ext_path}")
 

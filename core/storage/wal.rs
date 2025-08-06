@@ -868,8 +868,8 @@ impl Wal for WalFile {
         // if it's not, than pages from WAL range [frame_watermark..nBackfill] are already in the DB file,
         // and in case if page first occurrence in WAL was after frame_watermark - we will be unable to read proper previous version of the page
         turso_assert!(
-            frame_watermark.is_none() || frame_watermark.unwrap() >= self.min_frame,
-            "frame_watermark must be >= than current WAL min_value value"
+            frame_watermark.is_none() || frame_watermark.unwrap() >= self.get_shared().nbackfills.load(Ordering::SeqCst),
+            "frame_watermark must be >= than current WAL backfill amount: frame_watermark={:?}, nBackfill={}", frame_watermark, self.get_shared().nbackfills.load(Ordering::SeqCst)
         );
 
         // if we are holding read_lock 0, skip and read right from db file.
@@ -905,7 +905,7 @@ impl Wal for WalFile {
             let buf_len = buf.len();
             turso_assert!(
                 bytes_read == buf_len as i32,
-                "read({bytes_read}) less than expected({buf_len})"
+                "read({bytes_read}) less than expected({buf_len}): frame_id={frame_id}"
             );
             let frame = frame.clone();
             finish_read_page(page.get().id, buf, frame).unwrap();

@@ -26,7 +26,9 @@ members = [
     "testing/sqlite_test_ext",
     "tests",
     "vendored/sqlite3-parser/sqlparser_bench",
-    "packages/turso-sync", "parser",
+    "parser",
+    "packages/turso-sync",
+    "packages/turso-sync-engine",
 ]
 exclude = ["perf/latency/limbo"]
 
@@ -39,6 +41,7 @@ repository = "https://github.com/tursodatabase/turso"
 
 [workspace.dependencies]
 turso = { path = "bindings/rust", version = "0.1.4-pre.2" }
+turso_core = { path = "core", version = "0.1.4-pre.2" }
 limbo_completion = { path = "extensions/completion", version = "0.1.4-pre.2" }
 turso_core = { path = "core", version = "0.1.4-pre.2" }
 limbo_crypto = { path = "extensions/crypto", version = "0.1.4-pre.2" }
