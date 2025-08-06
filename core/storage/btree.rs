@@ -208,7 +208,7 @@ enum DeleteState {
         btree_depth: usize,
         post_balancing_seek_key: Option<DeleteSavepoint>,
     },
-    WaitForBalancingToComplete {
+    Balancing {
         /// If provided, will also balance an ancestor page at depth `balance_ancestor_at_depth`.
         /// If not provided, balancing will stop as soon as a level is encountered where no balancing is required.
         balance_ancestor_at_depth: Option<usize>,
@@ -221,11 +221,6 @@ enum DeleteState {
     /// We need to have this separate state for re-entrancy as calling next()/prev() might yield on IO.
     /// FIXME: refactor DeleteState not to have SeekAfterBalancing and instead use save_context() and restore_context()
     TryAdvance,
-}
-
-struct DeleteInfo {
-    state: DeleteState,
-    balance_write_info: Option<WriteInfo>,
 }
 
 #[derive(Debug)]
@@ -245,6 +240,32 @@ pub enum OverwriteCellState {
         old_offset: usize,
         old_local_size: usize,
     },
+}
+
+#[derive(Debug, PartialEq)]
+/// State machine of a btree rebalancing operation.
+enum BalanceSubState {
+    Start,
+    /// Choose which sibling pages to balance (max 3).
+    /// Generally, the siblings involved will be the page that triggered the balancing and its left and right siblings.
+    /// The exceptions are:
+    /// 1. If the leftmost page triggered balancing, up to 3 leftmost pages will be balanced.
+    /// 2. If the rightmost page triggered balancing, up to 3 rightmost pages will be balanced.
+    NonRootPickSiblings,
+    /// Perform the actual balancing. This will result in 1-5 pages depending on the number of total cells to be distributed
+    /// from the source pages.
+    NonRootDoBalancing,
+    /// Free pages that are not used anymore after balancing.
+    FreePages {
+        curr_page: usize,
+        sibling_count_new: usize,
+    },
+}
+
+#[derive(Debug)]
+struct BalanceState {
+    sub_state: BalanceSubState,
+    balance_info: RefCell<Option<BalanceInfo>>,
 }
 
 /// State machine of a write operation.
@@ -270,20 +291,7 @@ enum WriteState {
         new_payload: Vec<u8>,
         fill_cell_payload_state: FillCellPayloadState,
     },
-    BalanceStart,
-    BalanceFreePages {
-        curr_page: usize,
-        sibling_count_new: usize,
-    },
-    /// Choose which sibling pages to balance (max 3).
-    /// Generally, the siblings involved will be the page that triggered the balancing and its left and right siblings.
-    /// The exceptions are:
-    /// 1. If the leftmost page triggered balancing, up to 3 leftmost pages will be balanced.
-    /// 2. If the rightmost page triggered balancing, up to 3 rightmost pages will be balanced.
-    BalanceNonRootPickSiblings,
-    /// Perform the actual balancing. This will result in 1-5 pages depending on the number of total cells to be distributed
-    /// from the source pages.
-    BalanceNonRootDoBalancing,
+    Balancing,
     Finish,
 }
 
@@ -356,7 +364,7 @@ impl BTreeKey<'_> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct BalanceInfo {
     /// Old pages being balanced. We can have maximum 3 pages being balanced at the same time.
     pages_to_balance: [Option<BTreePage>; MAX_SIBLING_PAGES_TO_BALANCE],
@@ -370,48 +378,18 @@ struct BalanceInfo {
     first_divider_cell: usize,
 }
 
-struct WriteInfo {
-    /// State of the write operation state machine.
-    state: WriteState,
-    balance_info: RefCell<Option<BalanceInfo>>,
-}
-
-impl WriteInfo {
-    fn new() -> WriteInfo {
-        WriteInfo {
-            state: WriteState::Start,
-            balance_info: RefCell::new(None),
-        }
-    }
-}
-
 /// Holds the state machine for the operation that was in flight when the cursor
 /// was suspended due to IO.
 enum CursorState {
     None,
     ReadWritePayload(PayloadOverflowWithOffset),
     /// The cursor is in a write operation.
-    /// The [WriteInfo] is optional only because during delete-invoked balancing, we have to .take() it between the
-    /// delete and balancing states. It is semantically strictly required.
-    Write(Option<WriteInfo>),
+    Write(WriteState),
     Destroy(DestroyInfo),
-    Delete(DeleteInfo),
+    Delete(DeleteState),
 }
 
 impl CursorState {
-    fn write_info(&self) -> Option<&WriteInfo> {
-        match self {
-            CursorState::Write(x) => Some(x.as_ref().expect("WriteInfo is required")),
-            _ => None,
-        }
-    }
-    fn mut_write_info(&mut self) -> Option<&mut WriteInfo> {
-        match self {
-            CursorState::Write(x) => Some(x.as_mut().expect("WriteInfo is required")),
-            _ => None,
-        }
-    }
-
     fn destroy_info(&self) -> Option<&DestroyInfo> {
         match self {
             CursorState::Destroy(x) => Some(x),
@@ -421,20 +399,6 @@ impl CursorState {
     fn mut_destroy_info(&mut self) -> Option<&mut DestroyInfo> {
         match self {
             CursorState::Destroy(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    fn delete_info(&self) -> Option<&DeleteInfo> {
-        match self {
-            CursorState::Delete(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    fn mut_delete_info(&mut self) -> Option<&mut DeleteInfo> {
-        match self {
-            CursorState::Delete(x) => Some(x),
             _ => None,
         }
     }
@@ -538,6 +502,8 @@ pub struct BTreeCursor {
     going_upwards: bool,
     /// Information maintained across execution attempts when an operation yields due to I/O.
     state: CursorState,
+    /// State machine for balancing.
+    balance_state: BalanceState,
     /// Information maintained while freeing overflow pages. Maintained separately from cursor state since
     /// any method could require freeing overflow pages
     overflow_state: OverflowState,
@@ -627,6 +593,10 @@ impl BTreeCursor {
             null_flag: false,
             going_upwards: false,
             state: CursorState::None,
+            balance_state: BalanceState {
+                sub_state: BalanceSubState::Start,
+                balance_info: RefCell::new(None),
+            },
             overflow_state: OverflowState::Start,
             stack: PageStack {
                 current_page: Cell::new(-1),
@@ -2164,12 +2134,14 @@ impl BTreeCursor {
             .expect("expected record present on insert");
         let record_values = record.get_values();
         if let CursorState::None = &self.state {
-            self.state = CursorState::Write(Some(WriteInfo::new()));
+            self.state = CursorState::Write(WriteState::Start);
         }
         let ret = loop {
             let usable_space = self.usable_space();
-            let write_info = self.state.mut_write_info().expect("must be in write state");
-            match &mut write_info.state {
+            let CursorState::Write(write_state) = &mut self.state else {
+                panic!("expected write state");
+            };
+            match write_state {
                 WriteState::Start => {
                     let page = self.stack.top();
                     return_if_locked_maybe_load!(self.pager, page);
@@ -2199,11 +2171,7 @@ impl BTreeCursor {
                                 if tbl_leaf.rowid == bkey.to_rowid() {
                                     tracing::debug!("TableLeafCell: found exact match with cell_idx={cell_idx}, overwriting");
                                     self.has_record.set(true);
-                                    let write_info = self
-                                        .state
-                                        .mut_write_info()
-                                        .expect("expected write info");
-                                    write_info.state = WriteState::Overwrite {
+                                    *write_state = WriteState::Overwrite {
                                         page: page.clone(),
                                         cell_idx,
                                         state: Some(OverwriteCellState::AllocatePayload),
@@ -2224,11 +2192,10 @@ impl BTreeCursor {
                                 if cmp == Ordering::Equal {
                                     tracing::debug!("IndexLeafCell: found exact match with cell_idx={cell_idx}, overwriting");
                                     self.has_record.set(true);
-                                    let write_info = self
-                                        .state
-                                        .mut_write_info()
-                                        .expect("expected write info");
-                                    write_info.state = WriteState::Overwrite {
+                                    let CursorState::Write(write_state) = &mut self.state else {
+                                        panic!("expected write state");
+                                    };
+                                    *write_state = WriteState::Overwrite {
                                         page: page.clone(),
                                         cell_idx,
                                         state: Some(OverwriteCellState::AllocatePayload),
@@ -2245,11 +2212,10 @@ impl BTreeCursor {
                         }
                     }
 
-                    let write_info = self
-                        .state
-                        .mut_write_info()
-                        .expect("write info should be present");
-                    write_info.state = WriteState::Insert {
+                    let CursorState::Write(write_state) = &mut self.state else {
+                        panic!("expected write state");
+                    };
+                    *write_state = WriteState::Insert {
                         page: page.clone(),
                         cell_idx,
                         new_payload: Vec::with_capacity(record_values.len() + 4),
@@ -2289,7 +2255,7 @@ impl BTreeCursor {
                     self.stack.set_cell_index(*cell_idx as i32);
                     let overflows = !page.get().get_contents().overflow_cells.is_empty();
                     if overflows {
-                        write_info.state = WriteState::BalanceStart;
+                        *write_state = WriteState::Balancing;
                         // If we balance, we must save the cursor position and seek to it later.
                         // FIXME: we shouldn't have both DeleteState::SeekAfterBalancing and
                         // save_context()/restore/context(), they are practically the same thing.
@@ -2300,7 +2266,7 @@ impl BTreeCursor {
                             }
                         });
                     } else {
-                        write_info.state = WriteState::Finish;
+                        *write_state = WriteState::Finish;
                     }
                     continue;
                 }
@@ -2324,29 +2290,27 @@ impl BTreeCursor {
                         .overwrite_cell(page.clone(), cell_idx, record, &mut state)?
                         .is_io()
                     {
-                        let write_info = self
-                            .state
-                            .mut_write_info()
-                            .expect("should be in write state");
-                        write_info.state = WriteState::Overwrite {
+                        let CursorState::Write(write_state) = &mut self.state else {
+                            panic!("expected write state");
+                        };
+                        *write_state = WriteState::Overwrite {
                             page,
                             cell_idx,
                             state: Some(state),
                         };
                         return Ok(IOResult::IO);
                     }
-                    let write_info = self
-                        .state
-                        .mut_write_info()
-                        .expect("should be in write state");
                     let overflows = !page.get().get_contents().overflow_cells.is_empty();
                     let underflows = !overflows && {
                         let free_space =
                             compute_free_space(page.get().get_contents(), usable_space as u16);
                         free_space as usize * 3 > usable_space * 2
                     };
+                    let CursorState::Write(write_state) = &mut self.state else {
+                        panic!("expected write state");
+                    };
                     if overflows || underflows {
-                        write_info.state = WriteState::BalanceStart;
+                        *write_state = WriteState::Balancing;
                         // If we balance, we must save the cursor position and seek to it later.
                         // FIXME: we shouldn't have both DeleteState::SeekAfterBalancing and
                         // save_context()/restore/context(), they are practically the same thing.
@@ -2357,22 +2321,23 @@ impl BTreeCursor {
                             }
                         });
                     } else {
-                        write_info.state = WriteState::Finish;
+                        *write_state = WriteState::Finish;
                     }
                     continue;
                 }
-                WriteState::BalanceStart
-                | WriteState::BalanceFreePages { .. }
-                | WriteState::BalanceNonRootPickSiblings
-                | WriteState::BalanceNonRootDoBalancing => {
+                WriteState::Balancing => {
                     return_if_io!(self.balance(None));
+                    let CursorState::Write(write_state) = &mut self.state else {
+                        panic!("expected write state");
+                    };
+                    *write_state = WriteState::Finish;
                 }
                 WriteState::Finish => {
                     break Ok(IOResult::Done(()));
                 }
             };
         };
-        if matches!(self.state.write_info().unwrap().state, WriteState::Finish) {
+        if matches!(self.state, CursorState::Write(WriteState::Finish)) {
             // if there was a balance triggered, the cursor position is invalid.
             // it's probably not the greatest idea in the world to do this eagerly here,
             // but at least it works.
@@ -2395,17 +2360,16 @@ impl BTreeCursor {
     /// If `Some(depth)`, the page on the stack at depth `depth` will be rebalanced after balancing the current page.
     #[instrument(skip(self), level = Level::DEBUG)]
     fn balance(&mut self, balance_ancestor_at_depth: Option<usize>) -> Result<IOResult<()>> {
-        turso_assert!(
-            matches!(self.state, CursorState::Write(_)),
-            "Cursor must be in balancing state"
-        );
-
         loop {
-            let write_info = self.state.mut_write_info().expect("must be balancing");
-            match &mut write_info.state {
-                WriteState::BalanceStart => {
+            let usable_space = self.usable_space();
+            let BalanceState {
+                sub_state,
+                balance_info,
+            } = &mut self.balance_state;
+            match sub_state {
+                BalanceSubState::Start => {
                     assert!(
-                        write_info.balance_info.borrow().is_none(),
+                        balance_info.borrow().is_none(),
                         "BalanceInfo should be empty on start"
                     );
                     let current_page = self.stack.top();
@@ -2422,7 +2386,6 @@ impl BTreeCursor {
                         // https://github.com/sqlite/sqlite/blob/0aa95099f5003dc99f599ab77ac0004950b281ef/src/btree.c#L9064-L9071
                         let current_page = current_page.get();
                         let page = current_page.get().contents.as_mut().unwrap();
-                        let usable_space = self.usable_space();
                         let free_space = compute_free_space(page, usable_space as u16);
                         let this_level_is_already_balanced = page.overflow_cells.is_empty()
                             && (!self.stack.has_parent()
@@ -2437,8 +2400,7 @@ impl BTreeCursor {
                                 continue;
                             }
                             // Otherwise, we're done.
-                            let write_info = self.state.mut_write_info().unwrap();
-                            write_info.state = WriteState::Finish;
+                            *sub_state = BalanceSubState::Start;
                             return Ok(IOResult::Done(()));
                         }
                     }
@@ -2446,46 +2408,36 @@ impl BTreeCursor {
                     if !self.stack.has_parent() {
                         let _res = self.balance_root()?;
                     }
+                    let BalanceState { sub_state, .. } = &mut self.balance_state;
+                    *sub_state = BalanceSubState::NonRootPickSiblings;
 
-                    let write_info = self.state.mut_write_info().unwrap();
-
-                    write_info.state = WriteState::BalanceNonRootPickSiblings;
                     self.stack.pop();
+                }
+                BalanceSubState::NonRootPickSiblings
+                | BalanceSubState::NonRootDoBalancing
+                | BalanceSubState::FreePages { .. } => {
                     return_if_io!(self.balance_non_root());
                 }
-                WriteState::BalanceNonRootPickSiblings
-                | WriteState::BalanceNonRootDoBalancing
-                | WriteState::BalanceFreePages { .. } => {
-                    return_if_io!(self.balance_non_root());
-                }
-                WriteState::Finish => return Ok(IOResult::Done(())),
-                _ => panic!("unexpected state on balance {:?}", write_info.state),
             }
         }
     }
 
     /// Balance a non root page by trying to balance cells between a maximum of 3 siblings that should be neighboring the page that overflowed/underflowed.
-    #[instrument(skip_all, level = Level::DEBUG)]
+    #[instrument(skip(self), level = Level::DEBUG)]
     fn balance_non_root(&mut self) -> Result<IOResult<()>> {
-        turso_assert!(
-            matches!(self.state, CursorState::Write(_)),
-            "Cursor must be in balancing state"
-        );
-
         loop {
             let usable_space = self.usable_space();
-            let write_info = self.state.mut_write_info().expect("must be balancing");
-            tracing::debug!(?write_info.state);
+            let BalanceState {
+                sub_state,
+                balance_info,
+            } = &mut self.balance_state;
+            tracing::debug!(?sub_state);
 
-            match &mut write_info.state {
-                WriteState::Start
-                | WriteState::Overwrite { .. }
-                | WriteState::Insert { .. }
-                | WriteState::BalanceStart
-                | WriteState::Finish => {
-                    panic!("balance_non_root: unexpected state {:?}", write_info.state)
+            match sub_state {
+                BalanceSubState::Start => {
+                    panic!("balance_non_root: unexpected state {sub_state:?}")
                 }
-                WriteState::BalanceNonRootPickSiblings => {
+                BalanceSubState::NonRootPickSiblings => {
                     // Since we are going to change the btree structure, let's forget our cached knowledge of the rightmost page.
                     let _ = self.move_to_right_state.1.take();
                     let parent_page = self.stack.top();
@@ -2616,7 +2568,7 @@ impl BTreeCursor {
                     let mut pgno: u32 = unsafe { right_pointer.cast::<u32>().read().swap_bytes() };
                     let current_sibling = sibling_pointer;
                     for i in (0..=current_sibling).rev() {
-                        let (page, _c) = self.read_page(pgno as usize)?;
+                        let (page, _c) = btree_read_page(&self.pager, pgno as usize)?;
                         {
                             // mark as dirty
                             let sibling_page = page.get();
@@ -2700,19 +2652,18 @@ impl BTreeCursor {
                         }
                     }
 
-                    let write_info = self.state.mut_write_info().unwrap();
-                    write_info.balance_info.replace(Some(BalanceInfo {
+                    balance_info.borrow_mut().replace(BalanceInfo {
                         pages_to_balance,
                         rightmost_pointer: right_pointer,
                         divider_cell_payloads: [const { None }; MAX_SIBLING_PAGES_TO_BALANCE - 1],
                         sibling_count,
                         first_divider_cell: first_cell_divider,
-                    }));
-                    write_info.state = WriteState::BalanceNonRootDoBalancing;
+                    });
+                    *sub_state = BalanceSubState::NonRootDoBalancing;
                 }
-                WriteState::BalanceNonRootDoBalancing => {
+                BalanceSubState::NonRootDoBalancing => {
                     // Ensure all involved pages are in memory.
-                    let mut balance_info = write_info.balance_info.borrow_mut();
+                    let mut balance_info = balance_info.borrow_mut();
                     let balance_info = balance_info.as_mut().unwrap();
                     for page in balance_info
                         .pages_to_balance
@@ -3587,17 +3538,17 @@ impl BTreeCursor {
                         right_page_id,
                         usable_space,
                     );
-                    write_info.state = WriteState::BalanceFreePages {
+                    *sub_state = BalanceSubState::FreePages {
                         curr_page: sibling_count_new,
                         sibling_count_new,
                     };
                 }
-                WriteState::BalanceFreePages {
+                BalanceSubState::FreePages {
                     curr_page,
                     sibling_count_new,
                 } => {
                     let sibling_count = {
-                        let balance_info = write_info.balance_info.borrow();
+                        let balance_info = balance_info.borrow();
                         balance_info
                             .as_ref()
                             .expect("must be balancing")
@@ -3605,17 +3556,17 @@ impl BTreeCursor {
                     };
                     // We have to free pages that are not used anymore
                     if !((*sibling_count_new..sibling_count).contains(curr_page)) {
-                        write_info.state = WriteState::BalanceStart;
-                        let _ = write_info.balance_info.take();
+                        *sub_state = BalanceSubState::Start;
+                        let _ = balance_info.take();
                         return Ok(IOResult::Done(()));
                     } else {
-                        let balance_info = write_info.balance_info.borrow();
+                        let balance_info = balance_info.borrow();
                         let balance_info = balance_info.as_ref().expect("must be balancing");
                         let page = balance_info.pages_to_balance[*curr_page].as_ref().unwrap();
                         return_if_io!(self
                             .pager
                             .free_page(Some(page.get().clone()), page.get().get().id));
-                        write_info.state = WriteState::BalanceFreePages {
+                        *sub_state = BalanceSubState::FreePages {
                             curr_page: *curr_page + 1,
                             sibling_count_new: *sibling_count_new,
                         };
@@ -4547,7 +4498,7 @@ impl BTreeCursor {
     /// 5. ClearOverflowPages -> Clear the overflow pages if there are any before dropping the cell, then if we are in a leaf page we just drop the cell in place.
     /// if we are in interior page, we need to rotate keys in order to replace current cell (InteriorNodeReplacement).
     /// 6. InteriorNodeReplacement -> we copy the left subtree leaf node into the deleted interior node's place.
-    /// 7. WaitForBalancingToComplete -> perform balancing
+    /// 7. Balancing -> perform balancing
     /// 8. SeekAfterBalancing -> adjust the cursor to a node that is closer to the deleted value. go to Finish
     /// 9. Finish -> Delete operation is done. Return CursorResult(Ok())
     #[instrument(skip(self), level = Level::DEBUG)]
@@ -4555,16 +4506,13 @@ impl BTreeCursor {
         assert!(self.mv_cursor.is_none());
 
         if let CursorState::None = &self.state {
-            self.state = CursorState::Delete(DeleteInfo {
-                state: DeleteState::Start,
-                balance_write_info: None,
-            })
+            self.state = CursorState::Delete(DeleteState::Start);
         }
 
         loop {
-            let delete_state = {
-                let delete_info = self.state.delete_info().expect("cannot get delete info");
-                delete_info.state.clone()
+            let delete_state = match &self.state {
+                CursorState::Delete(x) => x.clone(),
+                _ => unreachable!("expected delete state"),
             };
             tracing::debug!(?delete_state);
 
@@ -4585,8 +4533,7 @@ impl BTreeCursor {
                         return Ok(IOResult::Done(()));
                     }
 
-                    let delete_info = self.state.mut_delete_info().unwrap();
-                    delete_info.state = DeleteState::DeterminePostBalancingSeekKey;
+                    self.state = CursorState::Delete(DeleteState::DeterminePostBalancingSeekKey);
                 }
 
                 DeleteState::DeterminePostBalancingSeekKey => {
@@ -4608,10 +4555,9 @@ impl BTreeCursor {
                         DeleteSavepoint::Rowid(rowid)
                     };
 
-                    let delete_info = self.state.mut_delete_info().unwrap();
-                    delete_info.state = DeleteState::LoadPage {
+                    self.state = CursorState::Delete(DeleteState::LoadPage {
                         post_balancing_seek_key: Some(target_key),
-                    };
+                    });
                 }
 
                 DeleteState::LoadPage {
@@ -4620,10 +4566,9 @@ impl BTreeCursor {
                     let page = self.stack.top();
                     return_if_locked_maybe_load!(self.pager, page);
 
-                    let delete_info = self.state.mut_delete_info().unwrap();
-                    delete_info.state = DeleteState::FindCell {
+                    self.state = CursorState::Delete(DeleteState::FindCell {
                         post_balancing_seek_key,
-                    };
+                    });
                 }
 
                 DeleteState::FindCell {
@@ -4656,13 +4601,12 @@ impl BTreeCursor {
                         _ => None,
                     };
 
-                    let delete_info = self.state.mut_delete_info().unwrap();
-                    delete_info.state = DeleteState::ClearOverflowPages {
+                    self.state = CursorState::Delete(DeleteState::ClearOverflowPages {
                         cell_idx,
                         cell,
                         original_child_pointer,
                         post_balancing_seek_key,
-                    };
+                    });
                 }
 
                 DeleteState::ClearOverflowPages {
@@ -4677,23 +4621,21 @@ impl BTreeCursor {
                     let page = page.get();
                     let contents = page.get_contents();
 
-                    let delete_info = self.state.mut_delete_info().unwrap();
                     if !contents.is_leaf() {
-                        delete_info.state = DeleteState::InteriorNodeReplacement {
+                        self.state = CursorState::Delete(DeleteState::InteriorNodeReplacement {
                             page: page.clone(),
                             btree_depth: self.stack.current(),
                             cell_idx,
                             original_child_pointer,
                             post_balancing_seek_key,
-                        };
+                        });
                     } else {
                         drop_cell(contents, cell_idx, self.usable_space() as u16)?;
 
-                        let delete_info = self.state.mut_delete_info().unwrap();
-                        delete_info.state = DeleteState::CheckNeedsBalancing {
+                        self.state = CursorState::Delete(DeleteState::CheckNeedsBalancing {
                             btree_depth: self.stack.current(),
                             post_balancing_seek_key,
-                        };
+                        });
                     }
                 }
 
@@ -4799,11 +4741,10 @@ impl BTreeCursor {
                         drop_cell(leaf_contents, leaf_cell_idx, self.usable_space() as u16)?;
                     }
 
-                    let delete_info = self.state.mut_delete_info().unwrap();
-                    delete_info.state = DeleteState::CheckNeedsBalancing {
+                    self.state = CursorState::Delete(DeleteState::CheckNeedsBalancing {
                         btree_depth,
                         post_balancing_seek_key,
-                    };
+                    });
                 }
 
                 DeleteState::CheckNeedsBalancing {
@@ -4846,12 +4787,6 @@ impl BTreeCursor {
                     let needs_balancing = leaf_underflows || interior_overflows_or_underflows;
 
                     if needs_balancing {
-                        let delete_info = self.state.mut_delete_info().unwrap();
-                        if delete_info.balance_write_info.is_none() {
-                            let mut write_info = WriteInfo::new();
-                            write_info.state = WriteState::BalanceStart;
-                            delete_info.balance_write_info = Some(write_info);
-                        }
                         let balance_only_ancestor =
                             !leaf_underflows && interior_overflows_or_underflows;
                         if balance_only_ancestor {
@@ -4861,14 +4796,15 @@ impl BTreeCursor {
                             }
                         }
                         let balance_both = leaf_underflows && interior_overflows_or_underflows;
-                        delete_info.state = DeleteState::WaitForBalancingToComplete {
+                        assert!(self.balance_state.sub_state == BalanceSubState::Start, "There should be no balancing operation in progress when delete state is {:?}, got: {:?}", self.state, self.balance_state.sub_state);
+                        self.state = CursorState::Delete(DeleteState::Balancing {
                             balance_ancestor_at_depth: if balance_both {
                                 Some(btree_depth)
                             } else {
                                 None
                             },
                             target_key: post_balancing_seek_key.unwrap(),
-                        }
+                        });
                     } else {
                         // No balancing needed, we're done
                         self.stack.retreat();
@@ -4877,51 +4813,13 @@ impl BTreeCursor {
                     }
                 }
 
-                DeleteState::WaitForBalancingToComplete {
+                DeleteState::Balancing {
                     target_key,
                     balance_ancestor_at_depth,
                 } => {
-                    let delete_info = self.state.mut_delete_info().unwrap();
-
-                    // Switch the CursorState to Write state for balancing
-                    let write_info = delete_info
-                        .balance_write_info
-                        .take()
-                        .expect("WriteInfo is required");
-                    self.state = CursorState::Write(Some(write_info));
-
-                    match self.balance(balance_ancestor_at_depth)? {
-                        IOResult::Done(()) => {
-                            let write_info = match &mut self.state {
-                                CursorState::Write(wi) => wi.take().expect("WriteInfo is required"),
-                                _ => unreachable!("Balance operation changed cursor state"),
-                            };
-
-                            // Move to seek state
-                            self.state = CursorState::Delete(DeleteInfo {
-                                state: DeleteState::SeekAfterBalancing { target_key },
-                                balance_write_info: Some(write_info),
-                            });
-                        }
-
-                        IOResult::IO => {
-                            // Move to seek state
-                            // Save balance progress and return IO
-                            let write_info = match &mut self.state {
-                                CursorState::Write(wi) => wi.take().expect("WriteInfo is required"),
-                                _ => unreachable!("Balance operation changed cursor state"),
-                            };
-
-                            self.state = CursorState::Delete(DeleteInfo {
-                                state: DeleteState::WaitForBalancingToComplete {
-                                    target_key,
-                                    balance_ancestor_at_depth,
-                                },
-                                balance_write_info: Some(write_info),
-                            });
-                            return Ok(IOResult::IO);
-                        }
-                    }
+                    return_if_io!(self.balance(balance_ancestor_at_depth));
+                    self.state =
+                        CursorState::Delete(DeleteState::SeekAfterBalancing { target_key });
                 }
 
                 DeleteState::SeekAfterBalancing { target_key } => {
@@ -4936,18 +4834,7 @@ impl BTreeCursor {
                     let seek_result = return_if_io!(self.seek(key, SeekOp::LT));
 
                     if let SeekResult::TryAdvance = seek_result {
-                        let CursorState::Delete(delete_info) = &mut self.state else {
-                            unreachable!("expected delete state");
-                        };
-                        self.state = CursorState::Delete(DeleteInfo {
-                            state: DeleteState::TryAdvance,
-                            balance_write_info: Some(
-                                delete_info
-                                    .balance_write_info
-                                    .take()
-                                    .expect("WriteInfo is required"),
-                            ),
-                        });
+                        self.state = CursorState::Delete(DeleteState::TryAdvance);
                         continue;
                     }
 
