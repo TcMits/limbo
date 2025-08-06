@@ -11,6 +11,8 @@ export declare class Database {
   constructor(path: string)
   /** Returns whether the database is in memory-only mode. */
   get memory(): boolean
+  /** Returns whether the database connection is open. */
+  get open(): boolean
   /**
    * Executes a batch of SQL statements.
    *

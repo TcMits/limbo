@@ -35,6 +35,7 @@ pub struct Database {
     io: Arc<dyn turso_core::IO>,
     conn: Arc<turso_core::Connection>,
     is_memory: bool,
+    is_open: RefCell<bool>,
 }
 
 #[napi]
@@ -76,6 +77,7 @@ impl Database {
             io,
             conn,
             is_memory,
+            is_open: RefCell::new(true),
         })
     }
 
@@ -83,6 +85,12 @@ impl Database {
     #[napi(getter)]
     pub fn memory(&self) -> bool {
         self.is_memory
+    }
+
+    /// Returns whether the database connection is open.
+    #[napi(getter)]
+    pub fn open(&self) -> bool {
+        *self.is_open.borrow()
     }
 
     /// Executes a batch of SQL statements.
@@ -167,6 +175,7 @@ impl Database {
     /// `Ok(())` if the database is closed successfully.
     #[napi]
     pub fn close(&self) -> Result<()> {
+        *self.is_open.borrow_mut() = false;
         // Database close is handled automatically when dropped
         Ok(())
     }

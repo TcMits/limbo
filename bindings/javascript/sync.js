@@ -87,6 +87,10 @@ class Database {
    * @param {string} sql - The SQL statement string to prepare.
    */
   prepare(sql) {
+    if (!this.open) {
+      throw new TypeError("The database connection is not open");
+    }
+    
     if (!sql) {
       throw new RangeError("The supplied SQL string contains no statements");
     }
