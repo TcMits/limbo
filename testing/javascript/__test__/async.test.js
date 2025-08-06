@@ -341,7 +341,7 @@ test.serial("Database.prepare() after close()", async (t) => {
   });
 });
 
-test.skip("Database.exec() after close()", async (t) => {
+test.serial("Database.exec() after close()", async (t) => {
   const db = t.context.db;
   await db.close();
   await t.throwsAsync(async () => {
