@@ -3,8 +3,8 @@ use crate::schema::Column;
 use crate::util::columns_from_create_table_body;
 use crate::{Connection, LimboError, SymbolTable, Value};
 use fallible_iterator::FallibleIterator;
-use std::cell::RefCell;
 use std::ffi::c_void;
+use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 use turso_ext::{ConstraintInfo, IndexInfo, OrderByInfo, ResultCode, VTabKind, VTabModuleImpl};
@@ -105,7 +105,7 @@ impl VirtualTable {
                 Ok(VirtualTableCursor::Pragma(Box::new(table.open(conn)?)))
             }
             VirtualTableType::External(table) => {
-                Ok(VirtualTableCursor::External(table.open(conn)?))
+                Ok(VirtualTableCursor::External(table.open(conn.clone())?))
             }
         }
     }
@@ -183,22 +183,6 @@ impl VirtualTableCursor {
 pub(crate) struct ExtVirtualTable {
     implementation: Rc<VTabModuleImpl>,
     table_ptr: *const c_void,
-    connection_ptr: RefCell<Option<*mut turso_ext::Conn>>,
-}
-
-impl Drop for ExtVirtualTable {
-    fn drop(&mut self) {
-        if let Some(conn) = self.connection_ptr.borrow_mut().take() {
-            if conn.is_null() {
-                return;
-            }
-            // free the memory for the turso_ext::Conn itself
-            let mut conn = unsafe { Box::from_raw(conn) };
-            // frees the boxed Weak pointer
-            conn.close();
-        }
-        *self.connection_ptr.borrow_mut() = None;
-    }
 }
 
 impl ExtVirtualTable {
@@ -241,7 +225,6 @@ impl ExtVirtualTable {
         }
         let (schema, table_ptr) = module.implementation.create(args)?;
         let vtab = ExtVirtualTable {
-            connection_ptr: RefCell::new(None),
             implementation: module.implementation.clone(),
             table_ptr,
         };
@@ -252,18 +235,21 @@ impl ExtVirtualTable {
     /// can optionally use to query the other tables.
     fn open(&self, conn: Arc<Connection>) -> crate::Result<ExtVirtualTableCursor> {
         // we need a Weak<Connection> to upgrade and call from the extension.
-        let weak_box: *mut Arc<Connection> = Box::into_raw(Box::new(conn));
+        let weak = Arc::downgrade(&conn);
+        let weak_box = Box::into_raw(Box::new(weak));
         let conn = turso_ext::Conn::new(
-            weak_box.cast(),
+            weak_box as *mut c_void,
             crate::ext::prepare_stmt,
             crate::ext::execute,
-            crate::ext::close,
         );
-        let ext_conn_ptr = Box::into_raw(Box::new(conn));
+        let ext_conn_ptr = NonNull::new(Box::into_raw(Box::new(conn))).expect("null pointer");
         // store the leaked connection pointer on the table so it can be freed on drop
-        *self.connection_ptr.borrow_mut() = Some(ext_conn_ptr);
-        let cursor = unsafe { (self.implementation.open)(self.table_ptr, ext_conn_ptr) };
-        ExtVirtualTableCursor::new(cursor, self.implementation.clone())
+        let Some(cursor) = NonNull::new(unsafe {
+            (self.implementation.open)(self.table_ptr, ext_conn_ptr.as_ptr()) as *mut c_void
+        }) else {
+            return Err(LimboError::ExtensionError("Open returned null".to_string()));
+        };
+        ExtVirtualTableCursor::new(cursor, ext_conn_ptr, self.implementation.clone())
     }
 
     fn update(&self, args: &[Value]) -> crate::Result<Option<i64>> {
@@ -300,25 +286,28 @@ impl ExtVirtualTable {
 }
 
 pub struct ExtVirtualTableCursor {
-    cursor: *const c_void,
+    cursor: NonNull<c_void>,
+    // the core `[Connection]` pointer the vtab module needs to
+    // query other internal tables.
+    conn_ptr: Option<NonNull<turso_ext::Conn>>,
     implementation: Rc<VTabModuleImpl>,
 }
 
 impl ExtVirtualTableCursor {
-    fn new(cursor: *const c_void, implementation: Rc<VTabModuleImpl>) -> crate::Result<Self> {
-        if cursor.is_null() {
-            return Err(LimboError::InternalError(
-                "VirtualTableCursor: cursor is null".into(),
-            ));
-        }
+    fn new(
+        cursor: NonNull<c_void>,
+        conn_ptr: NonNull<turso_ext::Conn>,
+        implementation: Rc<VTabModuleImpl>,
+    ) -> crate::Result<Self> {
         Ok(Self {
             cursor,
+            conn_ptr: Some(conn_ptr),
             implementation,
         })
     }
 
     fn rowid(&self) -> i64 {
-        unsafe { (self.implementation.rowid)(self.cursor) }
+        unsafe { (self.implementation.rowid)(self.cursor.as_ptr()) }
     }
 
     #[tracing::instrument(skip(self))]
@@ -337,7 +326,7 @@ impl ExtVirtualTableCursor {
             .unwrap_or(std::ptr::null_mut());
         let rc = unsafe {
             (self.implementation.filter)(
-                self.cursor,
+                self.cursor.as_ptr(),
                 arg_count as i32,
                 ext_args.as_ptr(),
                 c_idx_str,
@@ -357,12 +346,12 @@ impl ExtVirtualTableCursor {
     }
 
     fn column(&self, column: usize) -> crate::Result<Value> {
-        let val = unsafe { (self.implementation.column)(self.cursor, column as u32) };
+        let val = unsafe { (self.implementation.column)(self.cursor.as_ptr(), column as u32) };
         Value::from_ffi(val)
     }
 
     fn next(&self) -> crate::Result<bool> {
-        let rc = unsafe { (self.implementation.next)(self.cursor) };
+        let rc = unsafe { (self.implementation.next)(self.cursor.as_ptr()) };
         match rc {
             ResultCode::OK => Ok(true),
             ResultCode::EOF => Ok(false),
@@ -373,7 +362,15 @@ impl ExtVirtualTableCursor {
 
 impl Drop for ExtVirtualTableCursor {
     fn drop(&mut self) {
-        let result = unsafe { (self.implementation.close)(self.cursor) };
+        if let Some(ptr) = self.conn_ptr.take() {
+            // first free the boxed turso_ext::Conn pointer itself
+            let conn = unsafe { Box::from_raw(ptr.as_ptr()) };
+            if !conn._ctx.is_null() {
+                // we also leaked the Weak 'ctx' pointer, so free this as well
+                let _ = unsafe { Box::from_raw(conn._ctx as *mut std::sync::Weak<Connection>) };
+            }
+        }
+        let result = unsafe { (self.implementation.close)(self.cursor.as_ptr()) };
         if !result.is_ok() {
             tracing::error!("Failed to close virtual table cursor");
         }

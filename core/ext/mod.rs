@@ -19,7 +19,7 @@ use turso_ext::{
     ExtensionApi, InitAggFunction, ResultCode, ScalarFunction, VTabKind, VTabModuleImpl,
 };
 pub use turso_ext::{FinalizeFunction, StepFunction, Value as ExtValue, ValueType as ExtValueType};
-pub use vtab_xconnect::{close, execute, prepare_stmt};
+pub use vtab_xconnect::{execute, prepare_stmt};
 
 /// The context passed to extensions to register with Core
 /// along with the function pointers

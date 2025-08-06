@@ -4,21 +4,9 @@ use std::{
     ffi::{c_char, c_void, CStr, CString},
     num::NonZeroUsize,
     ptr,
-    sync::Arc,
+    sync::Weak,
 };
 use turso_ext::{Conn as ExtConn, ResultCode, Stmt, Value as ExtValue};
-
-/// Free memory for the internal context of the connection.
-/// This function does not close the core connection itself,
-/// it only frees the memory the table is responsible for.
-pub unsafe extern "C" fn close(ctx: *mut c_void) {
-    if ctx.is_null() {
-        return;
-    }
-    // only free the memory for the boxed connection, we don't upgrade
-    // or actually close the core connection, as we were 'sharing' it.
-    let _ = Box::from_raw(ctx as *mut Arc<Connection>);
-}
 
 /// Wrapper around core Connection::execute with optional arguments to bind
 /// to the statment This function takes ownership of the optional turso_ext::Value array if provided
@@ -41,48 +29,54 @@ pub unsafe extern "C" fn execute(
         tracing::error!("query: null connection");
         return ResultCode::Error;
     };
-    let conn_ptr = extcon._ctx as *const Arc<Connection>;
-    let conn = &*conn_ptr;
-    match conn.query(&sql_str) {
-        Ok(Some(mut stmt)) => {
-            if arg_count > 0 {
-                let args_slice = &mut std::slice::from_raw_parts_mut(args, arg_count as usize);
-                for (i, val) in args_slice.iter_mut().enumerate() {
-                    stmt.bind_at(
-                        NonZeroUsize::new(i + 1).unwrap(),
-                        Value::from_ffi(std::mem::take(val)).unwrap_or(Value::Null),
-                    );
+    if extcon._ctx.is_null() {
+        tracing::error!("execute: connection ctx is null");
+        return ResultCode::Error;
+    }
+    let weak_box = extcon._ctx as *const Weak<Connection>;
+    let weak = unsafe { &*weak_box };
+    if let Some(conn) = weak.upgrade() {
+        match conn.query(&sql_str) {
+            Ok(Some(mut stmt)) => {
+                if arg_count > 0 {
+                    let args_slice = &mut std::slice::from_raw_parts_mut(args, arg_count as usize);
+                    for (i, val) in args_slice.iter_mut().enumerate() {
+                        stmt.bind_at(
+                            NonZeroUsize::new(i + 1).unwrap(),
+                            Value::from_ffi(std::mem::take(val)).unwrap_or(Value::Null),
+                        );
+                    }
                 }
-            }
-            loop {
-                match stmt.step() {
-                    Ok(StepResult::Row) => {
-                        tracing::error!("execute used for query returning a row");
-                        return ResultCode::Error;
-                    }
-                    Ok(StepResult::Done) => {
-                        *last_insert_rowid = conn.last_insert_rowid();
-                        return ResultCode::OK;
-                    }
-                    Ok(StepResult::IO) => {
-                        let res = stmt.run_once();
-                        if res.is_err() {
+                loop {
+                    match stmt.step() {
+                        Ok(StepResult::Row) => {
+                            tracing::error!("execute used for query returning a row");
                             return ResultCode::Error;
                         }
-                        continue;
-                    }
-                    Ok(StepResult::Interrupt) => return ResultCode::Interrupt,
-                    Ok(StepResult::Busy) => return ResultCode::Busy,
-                    Err(e) => {
-                        tracing::error!("execute: failed to execute query: {:?}", e);
-                        return ResultCode::Error;
+                        Ok(StepResult::Done) => {
+                            *last_insert_rowid = conn.last_insert_rowid();
+                            return ResultCode::OK;
+                        }
+                        Ok(StepResult::IO) => {
+                            let res = stmt.run_once();
+                            if res.is_err() {
+                                return ResultCode::Error;
+                            }
+                            continue;
+                        }
+                        Ok(StepResult::Interrupt) => return ResultCode::Interrupt,
+                        Ok(StepResult::Busy) => return ResultCode::Busy,
+                        Err(e) => {
+                            tracing::error!("execute: failed to execute query: {:?}", e);
+                            return ResultCode::Error;
+                        }
                     }
                 }
             }
-        }
-        Ok(None) => tracing::error!("query: no statement returned"),
-        Err(e) => tracing::error!("query: failed to execute query: {:?}", e),
-    };
+            Ok(None) => tracing::error!("query: no statement returned"),
+            Err(e) => tracing::error!("query: failed to execute query: {:?}", e),
+        };
+    }
     ResultCode::Error
 }
 
@@ -101,26 +95,35 @@ pub unsafe extern "C" fn prepare_stmt(ctx: *mut ExtConn, sql: *const c_char) -> 
         tracing::error!("prepare_stmt: null connection");
         return ptr::null_mut();
     };
-    let db_ptr = extcon._ctx as *const Arc<Connection>;
-    let conn = &*db_ptr;
-    match conn.prepare(&sql_str) {
-        Ok(stmt) => {
-            let raw_stmt = Box::into_raw(Box::new(stmt)) as *mut c_void;
-            Box::into_raw(Box::new(Stmt::new(
-                extcon._ctx,
-                raw_stmt,
-                stmt_bind_args_fn,
-                stmt_step,
-                stmt_get_row,
-                stmt_get_column_names,
-                stmt_free_current_row,
-                stmt_close,
-            )))
+    if extcon._ctx.is_null() {
+        tracing::error!("prepare_stmt: null connection ctx");
+        return ptr::null_mut();
+    }
+    let weak_box = extcon._ctx as *const Weak<Connection>;
+    let weak = unsafe { &*weak_box };
+    if let Some(conn) = weak.upgrade() {
+        match conn.prepare(&sql_str) {
+            Ok(stmt) => {
+                let raw_stmt = Box::into_raw(Box::new(stmt)) as *mut c_void;
+                Box::into_raw(Box::new(Stmt::new(
+                    extcon._ctx,
+                    raw_stmt,
+                    stmt_bind_args_fn,
+                    stmt_step,
+                    stmt_get_row,
+                    stmt_get_column_names,
+                    stmt_free_current_row,
+                    stmt_close,
+                )))
+            }
+            Err(e) => {
+                tracing::error!("prepare_stmt: failed to prepare statement: {:?}", e);
+                ptr::null_mut()
+            }
         }
-        Err(e) => {
-            tracing::error!("prepare_stmt: failed to prepare statement: {:?}", e);
-            ptr::null_mut()
-        }
+    } else {
+        tracing::error!("failed to upgrade stored connection on vtable module");
+        ptr::null_mut()
     }
 }
 
