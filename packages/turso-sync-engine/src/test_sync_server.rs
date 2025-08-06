@@ -31,20 +31,35 @@ struct TestSyncServerState {
     sessions: HashMap<String, SyncSession>,
 }
 
-#[derive(Debug, Clone)]
-pub struct TestSyncServerOpts {
-    pub pull_batch_size: usize,
-}
-
 #[derive(Clone)]
 pub struct TestSyncServer {
     ctx: Arc<TestContext>,
     db: turso::Database,
-    opts: Arc<TestSyncServerOpts>,
     state: Arc<Mutex<TestSyncServerState>>,
 }
 
 impl TestSyncServer {
+    pub async fn new(ctx: Arc<TestContext>, path: &Path) -> Result<Self> {
+        let mut generations = HashMap::new();
+        generations.insert(
+            1,
+            Generation {
+                snapshot: EMPTY_WAL_MODE_DB.to_vec(),
+                frames: Vec::new(),
+            },
+        );
+        Ok(Self {
+            ctx,
+            db: turso::Builder::new_local(path.to_str().unwrap())
+                .build()
+                .await?,
+            state: Arc::new(Mutex::new(TestSyncServerState {
+                generation: 1,
+                generations,
+                sessions: HashMap::new(),
+            })),
+        })
+    }
     pub async fn db_info(&self, completion: TestDataCompletion) -> Result<()> {
         tracing::debug!("db_info");
         self.ctx.faulty_call("db_info_start").await?;
@@ -244,47 +259,7 @@ impl TestSyncServer {
 
         Ok(())
     }
-}
 
-// empty DB with single 4096-byte page and WAL mode (PRAGMA journal_mode=WAL)
-// see test test_empty_wal_mode_db_content which validates asset content
-pub const EMPTY_WAL_MODE_DB: &[u8] = include_bytes!("test_empty.db");
-
-pub async fn convert_rows(rows: &mut turso::Rows) -> Result<Vec<Vec<turso::Value>>> {
-    let mut rows_values = vec![];
-    while let Some(row) = rows.next().await? {
-        let mut row_values = vec![];
-        for i in 0..row.column_count() {
-            row_values.push(row.get_value(i)?);
-        }
-        rows_values.push(row_values);
-    }
-    Ok(rows_values)
-}
-
-impl TestSyncServer {
-    pub async fn new(ctx: Arc<TestContext>, path: &Path, opts: TestSyncServerOpts) -> Result<Self> {
-        let mut generations = HashMap::new();
-        generations.insert(
-            1,
-            Generation {
-                snapshot: EMPTY_WAL_MODE_DB.to_vec(),
-                frames: Vec::new(),
-            },
-        );
-        Ok(Self {
-            ctx,
-            db: turso::Builder::new_local(path.to_str().unwrap())
-                .build()
-                .await?,
-            opts: Arc::new(opts),
-            state: Arc::new(Mutex::new(TestSyncServerState {
-                generation: 1,
-                generations,
-                sessions: HashMap::new(),
-            })),
-        })
-    }
     pub fn db(&self) -> turso::Database {
         self.db.clone()
     }
@@ -309,4 +284,20 @@ impl TestSyncServer {
         }
         Ok(())
     }
+}
+
+// empty DB with single 4096-byte page and WAL mode (PRAGMA journal_mode=WAL)
+// see test test_empty_wal_mode_db_content which validates asset content
+pub const EMPTY_WAL_MODE_DB: &[u8] = include_bytes!("test_empty.db");
+
+pub async fn convert_rows(rows: &mut turso::Rows) -> Result<Vec<Vec<turso::Value>>> {
+    let mut rows_values = vec![];
+    while let Some(row) = rows.next().await? {
+        let mut row_values = vec![];
+        for i in 0..row.column_count() {
+            row_values.push(row.get_value(i)?);
+        }
+        rows_values.push(row_values);
+    }
+    Ok(rows_values)
 }

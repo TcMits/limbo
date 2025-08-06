@@ -434,7 +434,7 @@ pub mod tests {
         database_sync_engine::DatabaseSyncEngineOpts,
         test_context::{FaultInjectionStrategy, TestContext},
         test_protocol_io::TestProtocolIo,
-        test_sync_server::{convert_rows, TestSyncServerOpts},
+        test_sync_server::convert_rows,
         tests::{deterministic_runtime, seed_u64, TestRunner},
         Result,
     };
@@ -450,9 +450,8 @@ pub mod tests {
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
             let dir = tempfile::TempDir::new().unwrap();
             let server_path = dir.path().join("server.db");
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let ctx = Arc::new(TestContext::new(seed_u64()));
-            let protocol = TestProtocolIo::new(ctx.clone(), &server_path, opts)
+            let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
                 .await
                 .unwrap();
             let mut runner = TestRunner::new(ctx.clone(), io, protocol.clone());
@@ -574,9 +573,8 @@ pub mod tests {
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
             let dir = tempfile::TempDir::new().unwrap();
             let server_path = dir.path().join("server.db");
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let ctx = Arc::new(TestContext::new(seed_u64()));
-            let server = TestProtocolIo::new(ctx.clone(), &server_path, opts)
+            let server = TestProtocolIo::new(ctx.clone(), &server_path)
                 .await
                 .unwrap();
             let mut runner = TestRunner::new(ctx.clone(), io.clone(), server.clone());
@@ -642,10 +640,9 @@ pub mod tests {
         deterministic_runtime(async || {
             let dir = tempfile::TempDir::new().unwrap();
             let server_path = dir.path().join("server.db");
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let ctx = Arc::new(TestContext::new(seed_u64()));
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
-            let protocol = TestProtocolIo::new(ctx.clone(), &server_path, opts)
+            let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
                 .await
                 .unwrap();
             let mut dbs = Vec::new();
@@ -697,10 +694,9 @@ pub mod tests {
         deterministic_runtime(async || {
             let dir = tempfile::TempDir::new().unwrap();
             let server_path = dir.path().join("server.db");
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
             let ctx = Arc::new(TestContext::new(seed_u64()));
-            let protocol = TestProtocolIo::new(ctx.clone(), &server_path, opts)
+            let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
                 .await
                 .unwrap();
 
@@ -770,9 +766,8 @@ pub mod tests {
             let dir = tempfile::TempDir::new().unwrap();
             let server_path = dir.path().join("server.db");
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let ctx = Arc::new(TestContext::new(seed_u64()));
-            let protocol = TestProtocolIo::new(ctx.clone(), &server_path, opts)
+            let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
                 .await
                 .unwrap();
 
@@ -844,7 +839,6 @@ pub mod tests {
         deterministic_runtime(async || {
             let dir = tempfile::TempDir::new().unwrap();
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let ctx = Arc::new(TestContext::new(seed_u64()));
 
             let mut session = ctx.fault_session();
@@ -853,7 +847,7 @@ pub mod tests {
                 it += 1;
 
                 let server_path = dir.path().join(format!("server-{it}.db"));
-                let protocol = TestProtocolIo::new(ctx.clone(), &server_path, opts.clone())
+                let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
                     .await
                     .unwrap();
 
@@ -914,7 +908,6 @@ pub mod tests {
         deterministic_runtime(async || {
             let dir = tempfile::TempDir::new().unwrap();
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
-            let opts = TestSyncServerOpts { pull_batch_size: 1 };
             let ctx = Arc::new(TestContext::new(seed_u64()));
 
             let mut session = ctx.fault_session();
@@ -923,7 +916,7 @@ pub mod tests {
                 it += 1;
 
                 let server_path = dir.path().join(format!("server-{it}.db"));
-                let protocol = TestProtocolIo::new(ctx.clone(), &server_path, opts.clone())
+                let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
                     .await
                     .unwrap();
 

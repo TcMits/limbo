@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use turso_core::{types::Text, Buffer, Completion, LimboError, Value};
 
@@ -47,8 +47,8 @@ pub async fn db_bootstrap<C: ProtocolIO>(
             let chunk = chunk.data();
             let content_len = chunk.len();
             // todo(sivukhin): optimize allocations here
-            let buffer = Arc::new(RefCell::new(Buffer::allocate(chunk.len(), Rc::new(|_| {}))));
-            buffer.borrow_mut().as_mut_slice().copy_from_slice(&chunk);
+            let buffer = Arc::new(Buffer::allocate(chunk.len(), Rc::new(|_| {})));
+            buffer.as_mut_slice().copy_from_slice(&chunk);
             let mut completions = Vec::with_capacity(dbs.len());
             for i in 0..dbs.len() {
                 let c = Completion::new_write(move |size| {

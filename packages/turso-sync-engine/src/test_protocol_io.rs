@@ -11,7 +11,7 @@ use crate::{
     errors::Error,
     protocol_io::{DataCompletion, DataPollResult, ProtocolIO},
     test_context::TestContext,
-    test_sync_server::{TestSyncServer, TestSyncServerOpts},
+    test_sync_server::TestSyncServer,
     Result,
 };
 
@@ -102,11 +102,11 @@ impl DataCompletion for TestDataCompletion {
 }
 
 impl TestProtocolIo {
-    pub async fn new(ctx: Arc<TestContext>, path: &Path, opts: TestSyncServerOpts) -> Result<Self> {
+    pub async fn new(ctx: Arc<TestContext>, path: &Path) -> Result<Self> {
         Ok(Self {
             ctx: ctx.clone(),
             requests: Arc::new(std::sync::Mutex::new(Vec::new())),
-            server: TestSyncServer::new(ctx, path, opts).await?,
+            server: TestSyncServer::new(ctx, path).await?,
             files: Arc::new(Mutex::new(HashMap::new())),
         })
     }
