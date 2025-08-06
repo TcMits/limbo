@@ -73,7 +73,8 @@ impl VTabModuleImpl {
 
 pub type VtabFnCreate = unsafe extern "C" fn(args: *const Value, argc: i32) -> VTabCreateResult;
 
-pub type VtabFnOpen = unsafe extern "C" fn(table: *const c_void, conn: *mut Conn) -> *const c_void;
+pub type VtabFnOpen =
+    unsafe extern "C" fn(table: *const c_void, conn: *const Conn) -> *const c_void;
 
 pub type VtabFnClose = unsafe extern "C" fn(cursor: *const c_void) -> ResultCode;
 
@@ -408,7 +409,6 @@ pub type BindArgsFn = unsafe extern "C" fn(ctx: *mut Stmt, idx: i32, arg: Value)
 pub type StmtStepFn = unsafe extern "C" fn(ctx: *mut Stmt) -> ResultCode;
 pub type StmtGetRowValuesFn = unsafe extern "C" fn(ctx: *mut Stmt);
 pub type FreeCurrentRowFn = unsafe extern "C" fn(ctx: *mut Stmt);
-pub type CloseConnectionFn = unsafe extern "C" fn(ctx: *mut c_void);
 pub type CloseStmtFn = unsafe extern "C" fn(ctx: *mut Stmt);
 
 /// core database connection
@@ -416,25 +416,18 @@ pub type CloseStmtFn = unsafe extern "C" fn(ctx: *mut Stmt);
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Conn {
-    // boxed Rc::Weak from core::Connection
+    // std::sync::Weak from core::Connection
     pub _ctx: *mut c_void,
     pub _prepare_stmt: PrepareStmtFn,
     pub _execute: ExecuteFn,
-    pub _close: CloseConnectionFn,
 }
 
 impl Conn {
-    pub fn new(
-        ctx: *mut c_void,
-        prepare_stmt: PrepareStmtFn,
-        exec_fn: ExecuteFn,
-        close: CloseConnectionFn,
-    ) -> Self {
+    pub fn new(ctx: *mut c_void, prepare_stmt: PrepareStmtFn, exec_fn: ExecuteFn) -> Self {
         Conn {
             _ctx: ctx,
             _prepare_stmt: prepare_stmt,
             _execute: exec_fn,
-            _close: close,
         }
     }
 
@@ -445,14 +438,6 @@ impl Conn {
             return Err(ResultCode::Error);
         }
         Ok(unsafe { &mut *(ptr) })
-    }
-
-    pub fn close(&mut self) {
-        if self._ctx.is_null() {
-            return;
-        }
-        unsafe { (self._close)(self._ctx) };
-        self._ctx = std::ptr::null_mut();
     }
 
     /// execute a SQL statement with the given arguments.
@@ -482,7 +467,7 @@ impl Conn {
         let Ok(sql) = CString::new(sql) else {
             return std::ptr::null_mut();
         };
-        unsafe { (self._prepare_stmt)(self as *const _ as *mut Conn, sql.as_ptr()) }
+        unsafe { (self._prepare_stmt)(self as *const Conn as *mut Conn, sql.as_ptr()) }
     }
 }
 
@@ -506,10 +491,10 @@ impl Drop for Statement {
 /// the VTable is dropped, so there is no need to manually close the connection.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Connection(*mut Conn);
+pub struct Connection(*const Conn);
 
 impl Connection {
-    pub fn new(ctx: *mut Conn) -> Self {
+    pub fn new(ctx: *const Conn) -> Self {
         Connection(ctx)
     }
 
