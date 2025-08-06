@@ -122,12 +122,10 @@ impl Database {
     /// A `Statement` instance.
     #[napi]
     pub fn prepare(&self, sql: String) -> Result<Statement> {
-        let stmt = self.conn.prepare(&sql).map_err(|e| {
-            Error::new(
-                Status::GenericFailure,
-                format!("Failed to prepare statement: {e}"),
-            )
-        })?;
+        let stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|e| Error::new(Status::GenericFailure, format!("{e}")))?;
         let column_names: Vec<std::ffi::CString> = (0..stmt.num_columns())
             .map(|i| std::ffi::CString::new(stmt.get_column_name(i).to_string()).unwrap())
             .collect();
