@@ -5380,8 +5380,11 @@ impl BTreeCursor {
                     let new_payload = &mut *new_payload;
                     // if it all fits in local space and old_local_size is enough, do an in-place overwrite
                     if new_payload.len() == *old_local_size {
-                        let _res =
-                            self.overwrite_content(page_ref.clone(), *old_offset, new_payload)?;
+                        let _res = BTreeCursor::overwrite_content(
+                            page_ref.clone(),
+                            *old_offset,
+                            new_payload,
+                        )?;
                         return Ok(IOResult::Done(()));
                     }
 
@@ -5403,7 +5406,6 @@ impl BTreeCursor {
     }
 
     pub fn overwrite_content(
-        &mut self,
         page_ref: BTreePage,
         dest_offset: usize,
         new_payload: &[u8],
