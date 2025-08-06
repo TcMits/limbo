@@ -2256,6 +2256,7 @@ impl BTreeCursor {
                     let overflows = !page.get().get_contents().overflow_cells.is_empty();
                     if overflows {
                         *write_state = WriteState::Balancing;
+                        assert!(self.balance_state.sub_state == BalanceSubState::Start, "There should be no balancing operation in progress when insert state is {:?}, got: {:?}", self.state, self.balance_state.sub_state);
                         // If we balance, we must save the cursor position and seek to it later.
                         // FIXME: we shouldn't have both DeleteState::SeekAfterBalancing and
                         // save_context()/restore/context(), they are practically the same thing.
@@ -2311,6 +2312,7 @@ impl BTreeCursor {
                     };
                     if overflows || underflows {
                         *write_state = WriteState::Balancing;
+                        assert!(self.balance_state.sub_state == BalanceSubState::Start, "There should be no balancing operation in progress when overwrite state is {:?}, got: {:?}", self.state, self.balance_state.sub_state);
                         // If we balance, we must save the cursor position and seek to it later.
                         // FIXME: we shouldn't have both DeleteState::SeekAfterBalancing and
                         // save_context()/restore/context(), they are practically the same thing.
