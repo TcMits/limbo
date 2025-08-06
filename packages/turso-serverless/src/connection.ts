@@ -15,6 +15,7 @@ export interface Config extends SessionConfig {}
 export class Connection {
   private config: Config;
   private session: Session;
+  private isOpen: boolean = true;
 
   constructor(config: Config) {
     if (!config.url) {
@@ -40,6 +41,9 @@ export class Connection {
    * ```
    */
   prepare(sql: string): Statement {
+    if (!this.isOpen) {
+      throw new TypeError("The database connection is not open");
+    }
     return new Statement(this.config, sql);
   }
 
@@ -97,6 +101,7 @@ export class Connection {
    * This sends a close request to the server to properly clean up the stream.
    */
   async close(): Promise<void> {
+    this.isOpen = false;
     await this.session.close();
   }
 }
