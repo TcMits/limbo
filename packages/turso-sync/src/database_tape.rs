@@ -60,7 +60,7 @@ impl DatabaseTape {
         opts: DatabaseChangesIteratorOpts,
     ) -> Result<DatabaseChangesIterator> {
         tracing::debug!("opening changes iterator with options {:?}", opts);
-        let conn = self.inner.connect()?;
+        let conn = self.connect().await?;
         let query = opts.mode.query(&self.cdc_table, opts.batch_size);
         let query_stmt = conn.prepare(&query).await?;
         Ok(DatabaseChangesIterator {
