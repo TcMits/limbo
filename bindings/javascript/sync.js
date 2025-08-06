@@ -190,6 +190,10 @@ class Database {
    * @param {string} sql - The SQL statement string to execute.
    */
   exec(sql) {
+    if (!this.open) {
+      throw new TypeError("The database connection is not open");
+    }
+    
     try {
       this.db.batch(sql);
     } catch (err) {
