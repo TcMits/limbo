@@ -43,7 +43,7 @@ async fn update_meta<IO: ProtocolIO>(
     let mut meta = orig.as_ref().unwrap().clone();
     update(&mut meta);
     tracing::debug!("update_meta: {meta:?}");
-    let completion = io.full_write(&meta_path, meta.dump()?)?;
+    let completion = io.full_write(meta_path, meta.dump()?)?;
     // todo: what happen if we will actually update the metadata on disk but fail and so in memory state will not be updated
     wait_full_body(coro, &completion).await?;
     *orig = Some(meta);
@@ -58,7 +58,7 @@ async fn set_meta<IO: ProtocolIO>(
     meta: DatabaseMetadata,
 ) -> Result<()> {
     tracing::debug!("set_meta: {meta:?}");
-    let completion = io.full_write(&meta_path, meta.dump()?)?;
+    let completion = io.full_write(meta_path, meta.dump()?)?;
     // todo: what happen if we will actually update the metadata on disk but fail and so in memory state will not be updated
     wait_full_body(coro, &completion).await?;
     *orig = Some(meta);

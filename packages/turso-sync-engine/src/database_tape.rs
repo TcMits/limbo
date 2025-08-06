@@ -60,10 +60,7 @@ pub(crate) async fn run_stmt<'a>(
     }
 }
 
-pub(crate) async fn exec_stmt<'a>(
-    coro: &'_ Coro,
-    stmt: &'a mut turso_core::Statement,
-) -> Result<()> {
+pub(crate) async fn exec_stmt(coro: &Coro, stmt: &mut turso_core::Statement) -> Result<()> {
     loop {
         match stmt.step()? {
             StepResult::IO => {
@@ -112,7 +109,7 @@ impl DatabaseTape {
         let connection = self.inner.connect()?;
         tracing::debug!("set '{CDC_PRAGMA_NAME}' for new connection");
         let mut stmt = connection.prepare(&self.pragma_query)?;
-        run_stmt(&coro, &mut stmt).await?;
+        run_stmt(coro, &mut stmt).await?;
         Ok(connection)
     }
     /// Builds an iterator which emits [DatabaseTapeOperation] by extracting data from CDC table
@@ -138,7 +135,7 @@ impl DatabaseTape {
         let conn = self.connect(coro).await?;
         let mut wal_session = WalSession::new(conn);
         wal_session.begin()?;
-        Ok(DatabaseWalSession::new(coro, wal_session).await?)
+        DatabaseWalSession::new(coro, wal_session).await
     }
 
     /// Start replay session which can apply [DatabaseTapeOperation] from [Self::iterate_changes]
@@ -149,7 +146,7 @@ impl DatabaseTape {
     ) -> Result<DatabaseReplaySession> {
         tracing::debug!("opening replay session");
         Ok(DatabaseReplaySession {
-            conn: self.connect(&coro).await?,
+            conn: self.connect(coro).await?,
             cached_delete_stmt: HashMap::new(),
             cached_insert_stmt: HashMap::new(),
             in_txn: false,
@@ -554,11 +551,11 @@ impl DatabaseReplaySession {
             let placeholders = ["?"].repeat(columns).join(",");
             format!("INSERT INTO {table_name} VALUES ({placeholders})")
         } else {
-            let mut table_info_stmt = self.conn.prepare(&format!(
+            let mut table_info_stmt = self.conn.prepare(format!(
                 "SELECT name FROM pragma_table_info('{table_name}')"
             ))?;
             let mut column_names = Vec::with_capacity(columns + 1);
-            while let Some(column) = run_stmt(&coro, &mut table_info_stmt).await? {
+            while let Some(column) = run_stmt(coro, &mut table_info_stmt).await? {
                 let turso_core::Value::Text(text) = column.get_value(0) else {
                     return Err(Error::DatabaseTapeError(
                         "unexpected column type for pragma_table_info query".to_string(),
@@ -579,12 +576,12 @@ impl DatabaseReplaySession {
         let (query, pk_column_indices) = if self.opts.use_implicit_rowid {
             (format!("DELETE FROM {table_name} WHERE rowid = ?"), None)
         } else {
-            let mut pk_info_stmt = self.conn.prepare(&format!(
+            let mut pk_info_stmt = self.conn.prepare(format!(
                 "SELECT cid, name FROM pragma_table_info('{table_name}') WHERE pk = 1"
             ))?;
             let mut pk_predicates = Vec::with_capacity(1);
             let mut pk_column_indices = Vec::with_capacity(1);
-            while let Some(column) = run_stmt(&coro, &mut pk_info_stmt).await? {
+            while let Some(column) = run_stmt(coro, &mut pk_info_stmt).await? {
                 let turso_core::Value::Integer(column_id) = column.get_value(0) else {
                     return Err(Error::DatabaseTapeError(
                         "unexpected column type for pragma_table_info query".to_string(),
@@ -624,7 +621,7 @@ fn parse_bin_record(bin_record: Vec<u8>) -> Result<Vec<turso_core::Value>> {
     let mut values = Vec::with_capacity(columns);
     for i in 0..columns {
         let value = cursor.get_value(&record, i)?;
-        values.push(value.to_owned().into());
+        values.push(value.to_owned());
     }
     Ok(values)
 }

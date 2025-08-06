@@ -39,7 +39,7 @@ pub struct DatabaseMetadata {
 
 impl DatabaseMetadata {
     pub fn load(data: &[u8]) -> Result<Self> {
-        let meta = serde_json::from_slice::<DatabaseMetadata>(&data[..])?;
+        let meta = serde_json::from_slice::<DatabaseMetadata>(data)?;
         Ok(meta)
     }
     pub fn dump(&self) -> Result<Vec<u8>> {

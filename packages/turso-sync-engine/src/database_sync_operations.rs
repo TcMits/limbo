@@ -47,15 +47,16 @@ pub async fn db_bootstrap<C: ProtocolIO>(
             let chunk = chunk.data();
             let content_len = chunk.len();
             // todo(sivukhin): optimize allocations here
+            #[allow(clippy::arc_with_non_send_sync)]
             let buffer = Arc::new(Buffer::allocate(chunk.len(), Rc::new(|_| {})));
-            buffer.as_mut_slice().copy_from_slice(&chunk);
+            buffer.as_mut_slice().copy_from_slice(chunk);
             let mut completions = Vec::with_capacity(dbs.len());
-            for i in 0..dbs.len() {
+            for db in dbs {
                 let c = Completion::new_write(move |size| {
                     // todo(sivukhin): we need to error out in case of partial read
                     assert!(size as usize == content_len);
                 });
-                completions.push(dbs[i].pwrite(pos, buffer.clone(), c)?);
+                completions.push(db.pwrite(pos, buffer.clone(), c)?);
             }
             while !completions.iter().all(|x| x.is_completed()) {
                 coro.yield_(ProtocolCommand::IO).await?;
@@ -184,7 +185,7 @@ pub async fn wal_push<C: ProtocolIO>(
     let mut frames_data = Vec::with_capacity((end_frame - start_frame) as usize * WAL_FRAME_SIZE);
     let mut buffer = [0u8; WAL_FRAME_SIZE];
     for frame_no in start_frame..end_frame {
-        let frame_info = wal_session.read_at(frame_no as u64, &mut buffer)?;
+        let frame_info = wal_session.read_at(frame_no, &mut buffer)?;
         tracing::trace!(
             "wal_push: collect frame {} ({:?}) for push",
             frame_no,
@@ -216,13 +217,13 @@ pub async fn wal_push<C: ProtocolIO>(
     Ok(status.baton)
 }
 
-const TURSO_SYNC_META_TABLE: &'static str =
+const TURSO_SYNC_META_TABLE: &str =
     "CREATE TABLE IF NOT EXISTS turso_sync_last_change_id (client_id TEXT PRIMARY KEY, pull_gen INTEGER, change_id INTEGER)";
-const TURSO_SYNC_SELECT_LAST_CHANGE_ID: &'static str =
+const TURSO_SYNC_SELECT_LAST_CHANGE_ID: &str =
     "SELECT pull_gen, change_id FROM turso_sync_last_change_id WHERE client_id = ?";
-const TURSO_SYNC_INSERT_LAST_CHANGE_ID: &'static str =
+const TURSO_SYNC_INSERT_LAST_CHANGE_ID: &str =
     "INSERT INTO turso_sync_last_change_id(client_id, pull_gen, change_id) VALUES (?, 0, 0)";
-const TURSO_SYNC_UPDATE_LAST_CHANGE_ID: &'static str =
+const TURSO_SYNC_UPDATE_LAST_CHANGE_ID: &str =
     "UPDATE turso_sync_last_change_id SET pull_gen = ?, change_id = ? WHERE client_id = ?";
 
 /// Transfers row changes from source DB to target DB
@@ -252,7 +253,7 @@ pub async fn transfer_logical_changes(
 
         match run_stmt(coro, &mut select_last_change_id_stmt).await? {
             Some(row) => row.get_value(0).as_int().ok_or_else(|| {
-                Error::DatabaseSyncEngineError(format!("unexpected source pull_gen type"))
+                Error::DatabaseSyncEngineError("unexpected source pull_gen type".to_string())
             })?,
             None => {
                 tracing::debug!("transfer_logical_changes: client_id={client_id}, turso_sync_last_change_id table is not found");
@@ -274,10 +275,10 @@ pub async fn transfer_logical_changes(
     let mut last_change_id = match run_stmt(coro, &mut select_last_change_id_stmt).await? {
         Some(row) => {
             let target_pull_gen = row.get_value(0).as_int().ok_or_else(|| {
-                Error::DatabaseSyncEngineError(format!("unexpected target pull_gen type"))
+                Error::DatabaseSyncEngineError("unexpected target pull_gen type".to_string())
             })?;
             let target_change_id = row.get_value(1).as_int().ok_or_else(|| {
-                Error::DatabaseSyncEngineError(format!("unexpected target change_id type"))
+                Error::DatabaseSyncEngineError("unexpected target change_id type".to_string())
             })?;
             tracing::debug!(
                 "transfer_logical_changes: client_id={client_id}, target_pull_gen={target_pull_gen}, target_change_id={target_change_id}"
@@ -396,7 +397,7 @@ pub async fn transfer_physical_changes(
 
     let target_sync_watermark = {
         let mut target_session = DatabaseWalSession::new(coro, target_session).await?;
-        let _ = target_session.rollback_changes_after(target_wal_match_watermark)?;
+        target_session.rollback_changes_after(target_wal_match_watermark)?;
         let mut last_frame_info = None;
         let mut frame = vec![0u8; WAL_FRAME_SIZE];
         let mut target_sync_watermark = target_session.frames_count()?;
@@ -505,7 +506,7 @@ async fn wal_push_http<C: ProtocolIO>(
 }
 
 async fn db_info_http<C: ProtocolIO>(coro: &Coro, client: &C) -> Result<DbSyncInfo> {
-    let completion = client.http(http::Method::GET, format!("/info"), None)?;
+    let completion = client.http(http::Method::GET, "/info".to_string(), None)?;
     let status = wait_status(coro, &completion).await?;
     let status_body = wait_full_body(coro, &completion).await?;
     if status != http::StatusCode::OK {

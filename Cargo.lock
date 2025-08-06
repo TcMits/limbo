@@ -4375,7 +4375,7 @@ dependencies = [
 
 [[package]]
 name = "turso_sync_engine"
-version = "0.1.4-pre.1"
+version = "0.1.4-pre.2"
 dependencies = [
  "bytes",
  "ctor",
