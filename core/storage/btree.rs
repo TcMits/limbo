@@ -4357,7 +4357,7 @@ impl BTreeCursor {
     }
 
     #[instrument(skip(self), level = Level::DEBUG)]
-    pub fn rowid(&mut self) -> Result<IOResult<Option<i64>>> {
+    pub fn rowid(&self) -> Result<IOResult<Option<i64>>> {
         if let Some(mv_cursor) = &self.mv_cursor {
             if self.has_record.get() {
                 let mut mv_cursor = mv_cursor.borrow_mut();
