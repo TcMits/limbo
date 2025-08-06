@@ -353,6 +353,15 @@ pub fn translate_drop_index(
             )));
         }
     }
+    // Return an error if the index is an unique or primary key.
+    if let Some(idx) = maybe_index {
+        if idx.unique {
+            return Err(crate::error::LimboError::InvalidArgument(
+                "index associated with UNIQUE or PRIMARY KEY constraint cannot be dropped"
+                    .to_string(),
+            ));
+        }
+    }
 
     let cdc_table = prepare_cdc_if_necessary(&mut program, schema, SQLITE_TABLEID)?;
 
