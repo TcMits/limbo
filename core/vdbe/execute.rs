@@ -8322,12 +8322,12 @@ pub fn op_max_pgcnt(
     pager: &Rc<Pager>,
     mv_store: Option<&Arc<MvStore>>,
 ) -> Result<InsnFunctionStepResult> {
-    let Insn::MaxPgcnt { db, dest, new_max } = insn else {
-        unreachable!("unexpected Insn {:?}", insn)
-    };
+    load_insn!(MaxPgcnt { db, dest, new_max }, insn);
 
     if *db > 0 {
-        todo!("temp/attached databases not implemented yet");
+        return Err(LimboError::InternalError(
+            "temp/attached databases not implemented yet".to_string(),
+        ));
     }
 
     let result_value = if *new_max == 0 {
@@ -8342,6 +8342,46 @@ pub fn op_max_pgcnt(
     };
 
     state.registers[*dest] = Register::Value(Value::Integer(result_value.into()));
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
+pub fn op_journal_mode(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let Insn::JournalMode { db, dest, new_mode } = insn else {
+        unreachable!("unexpected Insn {:?}", insn)
+    };
+
+    if *db > 0 {
+        todo!("temp/attached databases not implemented yet");
+    }
+
+    // Currently, Turso only supports WAL mode
+    // If a new mode is specified, we validate it but always return "wal"
+    if let Some(mode) = new_mode {
+        let mode_lower = mode.to_lowercase();
+        // Valid journal modes in SQLite are: delete, truncate, persist, memory, wal, off
+        // We accept any valid mode but always use WAL
+        match mode_lower.as_str() {
+            "delete" | "truncate" | "persist" | "memory" | "wal" | "off" => {
+                // Mode is valid, but we stay in WAL mode
+            }
+            _ => {
+                // Invalid journal mode
+                return Err(LimboError::ParseError(format!(
+                    "Unknown journal mode: {mode}"
+                )));
+            }
+        }
+    }
+
+    // Always return "wal" as the current journal mode
+    state.registers[*dest] = Register::Value(Value::build_text("wal"));
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }

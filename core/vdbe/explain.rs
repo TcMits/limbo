@@ -1654,6 +1654,16 @@ pub fn insn_to_str(
                 0,
                 format!("r[{dest}]=max_page_count(db[{db}],{new_max})"),
             ),
+            Insn::JournalMode { db, dest, new_mode } => (
+                "JournalMode",
+                *db as i32,
+                *dest as i32,
+                0,
+                Value::build_text(new_mode.as_ref().unwrap_or(&String::new())),
+                0,
+                format!("r[{dest}]=journal_mode(db[{db}]{})",
+                    new_mode.as_ref().map_or(String::new(), |m| format!(",'{m}'"))),
+            ),
             Insn::CollSeq { reg, collation } => (
                 "CollSeq",
                 reg.unwrap_or(0) as i32,

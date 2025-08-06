@@ -1043,6 +1043,14 @@ pub enum Insn {
         dest: usize,    // P2: output register
         new_max: usize, // P3: new maximum page count (0 = just return current)
     },
+    /// Get or set the journal mode for database P1.
+    /// If P3 is not null, it contains the new journal mode string.
+    /// Store the resulting journal mode in register P2.
+    JournalMode {
+        db: usize,                // P1: database index
+        dest: usize,              // P2: output register for result
+        new_mode: Option<String>, // P3: new journal mode (if setting)
+    },
 }
 
 impl Insn {
@@ -1175,6 +1183,7 @@ impl Insn {
             Insn::RenameTable { .. } => execute::op_rename_table,
             Insn::DropColumn { .. } => execute::op_drop_column,
             Insn::MaxPgcnt { .. } => execute::op_max_pgcnt,
+            Insn::JournalMode { .. } => execute::op_journal_mode,
         }
     }
 }

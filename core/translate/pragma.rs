@@ -120,14 +120,23 @@ fn update_pragma(
             let year = chrono::Local::now().year();
             bail_parse_error!("It's {year}. UTF-8 won.");
         }
-        PragmaName::JournalMode => query_pragma(
-            PragmaName::JournalMode,
-            schema,
-            None,
-            pager,
-            connection,
-            program,
-        ),
+        PragmaName::JournalMode => {
+            // For JournalMode, when setting a value, we use the opcode
+            let mode_str = match value {
+                Expr::Name(name) => name.as_str().to_string(),
+                _ => parse_string(&value)?,
+            };
+
+            let result_reg = program.alloc_register();
+            program.emit_insn(Insn::JournalMode {
+                db: 0,
+                dest: result_reg,
+                new_mode: Some(mode_str),
+            });
+            program.emit_result_row(result_reg, 1);
+            program.add_pragma_result_column("journal_mode".into());
+            Ok((program, TransactionMode::None))
+        }
         PragmaName::LegacyFileFormat => Ok((program, TransactionMode::None)),
         PragmaName::WalCheckpoint => query_pragma(
             PragmaName::WalCheckpoint,
@@ -357,7 +366,12 @@ fn query_pragma(
             Ok((program, TransactionMode::None))
         }
         PragmaName::JournalMode => {
-            program.emit_string8("wal".into(), register);
+            // Use the JournalMode opcode to get the current journal mode
+            program.emit_insn(Insn::JournalMode {
+                db: 0,
+                dest: register,
+                new_mode: None,
+            });
             program.emit_result_row(register, 1);
             program.add_pragma_result_column(pragma.to_string());
             Ok((program, TransactionMode::None))

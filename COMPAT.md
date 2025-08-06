@@ -479,7 +479,7 @@ Modifiers:
 | IntegrityCk    | Yes    |         |
 | IsNull         | Yes    |         |
 | IsUnique       | No     |         |
-| JournalMode    | No     |         |
+| JournalMode    | Yes    |         |
 | Jump           | Yes    |         |
 | Last           | Yes    |         |
 | Le             | Yes    |         |
