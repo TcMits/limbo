@@ -158,7 +158,7 @@ test.serial("Statement.all()", async (t) => {
   t.deepEqual(await stmt.all(), expected);
 });
 
-test.skip("Statement.all() [raw]", async (t) => {
+test.serial("Statement.all() [raw]", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("SELECT * FROM users");
