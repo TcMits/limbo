@@ -353,7 +353,7 @@ pub fn translate_drop_index(
             )));
         }
     }
-    // Return an error if the index is an unique or primary key.
+    // Return an error if the index is associated with a unique or primary key constraint.
     if let Some(idx) = maybe_index {
         if idx.unique {
             return Err(crate::error::LimboError::InvalidArgument(
