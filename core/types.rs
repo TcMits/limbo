@@ -2466,6 +2466,12 @@ pub enum IOResult<T> {
     IO,
 }
 
+impl<T> IOResult<T> {
+    pub fn is_io(&self) -> bool {
+        matches!(self, IOResult::IO)
+    }
+}
+
 /// Evaluate a Result<IOResult<T>>, if IO return IO.
 #[macro_export]
 macro_rules! return_if_io {
