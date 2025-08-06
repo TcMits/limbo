@@ -415,7 +415,7 @@ test.skip("errors", async (t) => {
   }
 });
 
-test.skip("Database.prepare() after close()", async (t) => {
+test.serial("Database.prepare() after close()", async (t) => {
   const db = t.context.db;
   db.close();
   t.throws(() => {
@@ -426,7 +426,7 @@ test.skip("Database.prepare() after close()", async (t) => {
   });
 });
 
-test.skip("Database.exec() after close()", async (t) => {
+test.serial("Database.exec() after close()", async (t) => {
   const db = t.context.db;
   db.close();
   t.throws(() => {
