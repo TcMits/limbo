@@ -27,25 +27,36 @@ use super::wal::CheckpointMode;
 #[cfg(not(feature = "omit_autovacuum"))]
 use ptrmap::*;
 
+#[derive(Debug, Clone)]
 pub struct HeaderRef(PageRef);
 
 impl HeaderRef {
     pub fn from_pager(pager: &Pager) -> Result<IOResult<Self>> {
-        if !pager.db_state.is_initialized() {
-            return Err(LimboError::Page1NotAlloc);
+        let state = pager.header_ref_state.borrow().clone();
+        tracing::trace!(?state);
+        match state {
+            HeaderRefState::Start => {
+                if !pager.db_state.is_initialized() {
+                    return Err(LimboError::Page1NotAlloc);
+                }
+
+                let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
+                *pager.header_ref_state.borrow_mut() = HeaderRefState::CreateHeader { page };
+                Ok(IOResult::IO)
+            }
+            HeaderRefState::CreateHeader { page } => {
+                // TODO: will have to remove this when tracking IO completions
+                if page.is_locked() {
+                    return Ok(IOResult::IO);
+                }
+                turso_assert!(
+                    page.get().id == DatabaseHeader::PAGE_ID,
+                    "incorrect header page id"
+                );
+                *pager.header_ref_state.borrow_mut() = HeaderRefState::Start;
+                Ok(IOResult::Done(Self(page)))
+            }
         }
-
-        let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
-        if page.is_locked() {
-            return Ok(IOResult::IO);
-        }
-
-        turso_assert!(
-            page.get().id == DatabaseHeader::PAGE_ID,
-            "incorrect header page id"
-        );
-
-        Ok(IOResult::Done(Self(page)))
     }
 
     pub fn borrow(&self) -> &DatabaseHeader {
@@ -55,27 +66,38 @@ impl HeaderRef {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct HeaderRefMut(PageRef);
 
 impl HeaderRefMut {
     pub fn from_pager(pager: &Pager) -> Result<IOResult<Self>> {
-        if !pager.db_state.is_initialized() {
-            return Err(LimboError::Page1NotAlloc);
+        let state = pager.header_ref_state.borrow().clone();
+        tracing::trace!(?state);
+        match state {
+            HeaderRefState::Start => {
+                if !pager.db_state.is_initialized() {
+                    return Err(LimboError::Page1NotAlloc);
+                }
+
+                let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
+                *pager.header_ref_state.borrow_mut() = HeaderRefState::CreateHeader { page };
+                Ok(IOResult::IO)
+            }
+            HeaderRefState::CreateHeader { page } => {
+                // TODO: will have to remove this when tracking IO completions
+                if page.is_locked() {
+                    return Ok(IOResult::IO);
+                }
+                turso_assert!(
+                    page.get().id == DatabaseHeader::PAGE_ID,
+                    "incorrect header page id"
+                );
+
+                pager.add_dirty(&page);
+                *pager.header_ref_state.borrow_mut() = HeaderRefState::Start;
+                Ok(IOResult::Done(Self(page)))
+            }
         }
-
-        let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
-        if page.is_locked() {
-            return Ok(IOResult::IO);
-        }
-
-        turso_assert!(
-            page.get().id == DatabaseHeader::PAGE_ID,
-            "incorrect header page id"
-        );
-
-        pager.add_dirty(&page);
-
-        Ok(IOResult::Done(Self(page)))
     }
 
     pub fn borrow_mut(&self) -> &mut DatabaseHeader {
@@ -368,6 +390,12 @@ enum PtrMapGetState {
     },
 }
 
+#[derive(Debug, Clone)]
+enum HeaderRefState {
+    Start,
+    CreateHeader { page: PageRef },
+}
+
 /// The pager interface implements the persistence layer by providing access
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
@@ -410,6 +438,7 @@ pub struct Pager {
     #[cfg(not(feature = "omit_autovacuum"))]
     /// State machine for [Pager::ptrmap_get]
     ptrmap_get_state: RefCell<PtrMapGetState>,
+    header_ref_state: RefCell<HeaderRefState>,
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +544,7 @@ impl Pager {
             allocate_page_state: RefCell::new(AllocatePageState::Start),
             #[cfg(not(feature = "omit_autovacuum"))]
             ptrmap_get_state: RefCell::new(PtrMapGetState::Start),
+            header_ref_state: RefCell::new(HeaderRefState::Start),
         })
     }
 
@@ -2349,6 +2379,14 @@ mod ptrmap_tests {
         )
         .unwrap();
         run_until_done(|| pager.allocate_page1(), &pager).unwrap();
+        {
+            let page_cache = pager.page_cache.read();
+            println!(
+                "Cache Len: {} Cap: {}",
+                page_cache.len(),
+                page_cache.capacity()
+            );
+        }
         pager
             .io
             .block(|| {
@@ -2360,10 +2398,20 @@ mod ptrmap_tests {
         //  Allocate all the pages as btree root pages
         const EXPECTED_FIRST_ROOT_PAGE_ID: u32 = 3; // page1 = 1,  first ptrmap page = 2, root page = 3
         for i in 0..initial_db_pages {
-            match run_until_done(
+            let res = run_until_done(
                 || pager.btree_create(&CreateBTreeFlags::new_table()),
                 &pager,
-            ) {
+            );
+            {
+                let page_cache = pager.page_cache.read();
+                println!(
+                    "i: {} Cache Len: {} Cap: {}",
+                    i,
+                    page_cache.len(),
+                    page_cache.capacity()
+                );
+            }
+            match res {
                 Ok(root_page_id) => {
                     assert_eq!(root_page_id, EXPECTED_FIRST_ROOT_PAGE_ID + i);
                 }
