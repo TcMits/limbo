@@ -2402,21 +2402,11 @@ impl BTreeCursor {
         );
 
         loop {
-            let state = self
-                .state
-                .write_info()
-                .expect("must be balancing")
-                .state
-                .clone();
-            match state {
+            let write_info = self.state.mut_write_info().expect("must be balancing");
+            match &mut write_info.state {
                 WriteState::BalanceStart => {
                     assert!(
-                        self.state
-                            .write_info()
-                            .unwrap()
-                            .balance_info
-                            .borrow()
-                            .is_none(),
+                        write_info.balance_info.borrow().is_none(),
                         "BalanceInfo should be empty on start"
                     );
                     let current_page = self.stack.top();
@@ -2459,6 +2449,7 @@ impl BTreeCursor {
                     }
 
                     let write_info = self.state.mut_write_info().unwrap();
+
                     write_info.state = WriteState::BalanceNonRootPickSiblings;
                     self.stack.pop();
                     return_if_io!(self.balance_non_root());
@@ -2469,7 +2460,7 @@ impl BTreeCursor {
                     return_if_io!(self.balance_non_root());
                 }
                 WriteState::Finish => return Ok(IOResult::Done(())),
-                _ => panic!("unexpected state on balance {state:?}"),
+                _ => panic!("unexpected state on balance {:?}", write_info.state),
             }
         }
     }
