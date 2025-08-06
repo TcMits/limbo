@@ -112,12 +112,15 @@ export class Statement {
     const result = await this.session.execute(this.sql, normalizedArgs);
     
     if (this.presentationMode === 'raw') {
-      // In raw mode, return arrays of values
-      // Each row is already an array with column properties added
       return result.rows.map((row: any) => [...row]);
     }
-    
-    return result.rows;
+    return result.rows.map((row: any) => {
+      const obj: any = {};
+      result.columns.forEach((col: string, i: number) => {
+        obj[col] = row[i];
+      });
+      return obj;
+    });
   }
 
   /**
