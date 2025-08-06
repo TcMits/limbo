@@ -103,7 +103,7 @@ impl File for WindowsFile {
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         let buf = buffer.as_slice();
         file.write_all(buf)?;
-        c.complete(buffer.borrow().len() as i32);
+        c.complete(buffer.len() as i32);
         Ok(c)
     }
 
