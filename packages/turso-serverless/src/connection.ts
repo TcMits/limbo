@@ -60,6 +60,9 @@ export class Connection {
    * ```
    */
   async exec(sql: string): Promise<any> {
+    if (!this.isOpen) {
+      throw new TypeError("The database connection is not open");
+    }
     return this.session.sequence(sql);
   }
 
