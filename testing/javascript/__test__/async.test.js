@@ -330,7 +330,7 @@ test.skip("errors", async (t) => {
   t.is(noTableError.rawCode, 1)
 });
 
-test.skip("Database.prepare() after close()", async (t) => {
+test.serial("Database.prepare() after close()", async (t) => {
   const db = t.context.db;
   await db.close();
   await t.throwsAsync(async () => {
