@@ -54,9 +54,14 @@ class Database {
     opts.timeout = opts.timeout === undefined ? 0 : opts.timeout;
 
     this.db = new NativeDB(path, opts);
-    this.memory = this.db.memory;
-    const db = this.db;
-
+    this.initialize(db, opts.path, opts.readonly);
+  }
+  static create() {
+    return Object.create(this.prototype);
+  }
+  initialize(db, name, readonly) {
+    this.db = db;
+    this.memory = db.memory;
     Object.defineProperties(this, {
       inTransaction: {
         get() {
@@ -65,12 +70,12 @@ class Database {
       },
       name: {
         get() {
-          return path;
+          return name;
         },
       },
       readonly: {
         get() {
-          return opts.readonly;
+          return readonly;
         },
       },
       open: {

@@ -34,8 +34,9 @@ enum PresentationMode {
 
 /// A database connection.
 #[napi]
+#[derive(Clone)]
 pub struct Database {
-    _db: Arc<turso_core::Database>,
+    _db: Option<Arc<turso_core::Database>>,
     io: Arc<dyn turso_core::IO>,
     conn: Arc<turso_core::Connection>,
     is_memory: bool,
@@ -76,13 +77,22 @@ impl Database {
             .connect()
             .map_err(|e| Error::new(Status::GenericFailure, format!("Failed to connect: {e}")))?;
 
-        Ok(Database {
+        Ok(Self::create(Some(db), io, conn, is_memory))
+    }
+
+    pub fn create(
+        db: Option<Arc<turso_core::Database>>,
+        io: Arc<dyn turso_core::IO>,
+        conn: Arc<turso_core::Connection>,
+        is_memory: bool,
+    ) -> Self {
+        Database {
             _db: db,
             io,
             conn,
             is_memory,
             is_open: Cell::new(true),
-        })
+        }
     }
 
     /// Returns whether the database is in memory-only mode.
@@ -418,7 +428,8 @@ impl Statement {
 
 /// Async task for running the I/O loop.
 pub struct IoLoopTask {
-    io: Arc<dyn turso_core::IO>,
+    // this field is set in the turso-sync-engine package
+    pub io: Arc<dyn turso_core::IO>,
 }
 
 impl Task for IoLoopTask {
