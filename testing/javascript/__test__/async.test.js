@@ -128,21 +128,21 @@ test.serial("Statement.get() [raw]", async (t) => {
   t.deepEqual(await stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
 });
 
-test.skip("Statement.iterate() [empty]", async (t) => {
+test.serial("Statement.iterate() [empty]", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("SELECT * FROM users WHERE id = 0");
   const it = await stmt.iterate();
-  t.is(it.next().done, true);
+  t.is((await it.next()).done, true);
 });
 
-test.skip("Statement.iterate()", async (t) => {
+test.serial("Statement.iterate()", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("SELECT * FROM users");
   const expected = [1, 2];
   var idx = 0;
-  for (const row of await stmt.iterate()) {
+  for await (const row of await stmt.iterate()) {
     t.is(row.id, expected[idx++]);
   }
 });

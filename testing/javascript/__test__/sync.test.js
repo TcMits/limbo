@@ -143,7 +143,7 @@ test.serial("Statement.get() [raw]", async (t) => {
   t.deepEqual(stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
 });
 
-test.skip("Statement.iterate() [empty]", async (t) => {
+test.serial("Statement.iterate() [empty]", async (t) => {
   const db = t.context.db;
 
   const stmt = db.prepare("SELECT * FROM users WHERE id = 0");
@@ -152,7 +152,7 @@ test.skip("Statement.iterate() [empty]", async (t) => {
   t.is(stmt.iterate({}).next().done, true);
 });
 
-test.skip("Statement.iterate()", async (t) => {
+test.serial("Statement.iterate()", async (t) => {
   const db = t.context.db;
 
   const stmt = db.prepare("SELECT * FROM users");
