@@ -1696,7 +1696,7 @@ impl Pager {
 
                     let trunk_page_contents = trunk_page.get().contents.as_ref().unwrap();
                     let number_of_leaf_pages =
-                        trunk_page_contents.read_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET);
+                        trunk_page_contents.read_u32_no_offset(TRUNK_PAGE_LEAF_COUNT_OFFSET);
 
                     // Reserve 2 slots for the trunk page header which is 8 bytes or 2*LEAF_ENTRY_SIZE
                     let max_free_list_entries =
@@ -1709,9 +1709,11 @@ impl Pager {
                         );
                         self.add_dirty(trunk_page);
 
-                        trunk_page_contents
-                            .write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, number_of_leaf_pages + 1);
-                        trunk_page_contents.write_u32(
+                        trunk_page_contents.write_u32_no_offset(
+                            TRUNK_PAGE_LEAF_COUNT_OFFSET,
+                            number_of_leaf_pages + 1,
+                        );
+                        trunk_page_contents.write_u32_no_offset(
                             TRUNK_PAGE_HEADER_SIZE
                                 + (number_of_leaf_pages as usize * LEAF_ENTRY_SIZE),
                             page_id as u32,
@@ -1733,9 +1735,9 @@ impl Pager {
 
                     let contents = page.get().contents.as_mut().unwrap();
                     // Point to previous trunk
-                    contents.write_u32(TRUNK_PAGE_NEXT_PAGE_OFFSET, trunk_page_id);
+                    contents.write_u32_no_offset(TRUNK_PAGE_NEXT_PAGE_OFFSET, trunk_page_id);
                     // Zero leaf count
-                    contents.write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, 0);
+                    contents.write_u32_no_offset(TRUNK_PAGE_LEAF_COUNT_OFFSET, 0);
                     // Update page 1 to point to new trunk
                     header.freelist_trunk_page = (page_id as u32).into();
                     break;
@@ -1904,9 +1906,9 @@ impl Pager {
                     );
                     let page_contents = trunk_page.get().contents.as_ref().unwrap();
                     let next_trunk_page_id =
-                        page_contents.read_u32(FREELIST_TRUNK_OFFSET_NEXT_TRUNK);
+                        page_contents.read_u32_no_offset(FREELIST_TRUNK_OFFSET_NEXT_TRUNK);
                     let number_of_freelist_leaves =
-                        page_contents.read_u32(FREELIST_TRUNK_OFFSET_LEAF_COUNT);
+                        page_contents.read_u32_no_offset(FREELIST_TRUNK_OFFSET_LEAF_COUNT);
 
                     // There are leaf pointers on this trunk page, so we can reuse one of the pages
                     // for the allocation.
@@ -1968,7 +1970,7 @@ impl Pager {
                     );
                     let page_contents = trunk_page.get().contents.as_ref().unwrap();
                     let next_leaf_page_id =
-                        page_contents.read_u32(FREELIST_TRUNK_OFFSET_FIRST_LEAF);
+                        page_contents.read_u32_no_offset(FREELIST_TRUNK_OFFSET_FIRST_LEAF);
                     let (leaf_page, _c) = self.read_page(next_leaf_page_id as usize)?;
                     if leaf_page.is_locked() {
                         return Ok(IOResult::IO);
@@ -2007,7 +2009,7 @@ impl Pager {
                         );
                     }
                     // write the new leaf count
-                    page_contents.write_u32(
+                    page_contents.write_u32_no_offset(
                         FREELIST_TRUNK_OFFSET_LEAF_COUNT,
                         remaining_leaves_count as u32,
                     );
