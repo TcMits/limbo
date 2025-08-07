@@ -130,3 +130,7 @@ Cargo.lock
 !.yarn/sdks
 !.yarn/versions
 /npm
+
+*-draft
+*-synced
+*-info
