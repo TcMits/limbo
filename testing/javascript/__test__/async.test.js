@@ -52,7 +52,48 @@ test.serial("Open in-memory database", async (t) => {
   t.is(db.memory, true);
 });
 
-test.skip("Statement.prepare() error", async (t) => {
+// ==========================================================================
+// Database.exec()
+// ==========================================================================
+
+test.skip("Database.exec() syntax error", async (t) => {
+  const db = t.context.db;
+
+  const syntaxError = await t.throwsAsync(async () => {
+    await db.exec("SYNTAX ERROR");
+  }, {
+    instanceOf: t.context.errorType,
+    message: 'near "SYNTAX": syntax error',
+    code: 'SQLITE_ERROR'
+  });
+
+  t.is(syntaxError.rawCode, 1)
+  const noTableError = await t.throwsAsync(async () => {
+    await db.exec("SELECT * FROM missing_table");
+  }, {
+    instanceOf: t.context.errorType,
+    message: "no such table: missing_table",
+    code: 'SQLITE_ERROR'
+  });
+  t.is(noTableError.rawCode, 1)
+});
+
+test.serial("Database.exec() after close()", async (t) => {
+  const db = t.context.db;
+  await db.close();
+  await t.throwsAsync(async () => {
+    await db.exec("SELECT 1");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
+// ==========================================================================
+// Database.prepare()
+// ==========================================================================
+
+test.skip("Database.prepare() syntax error", async (t) => {
   const db = t.context.db;
 
   await t.throwsAsync(async () => {
@@ -63,6 +104,113 @@ test.skip("Statement.prepare() error", async (t) => {
   });
 });
 
+
+test.serial("Database.prepare() after close()", async (t) => {
+  const db = t.context.db;
+  await db.close();
+  await t.throwsAsync(async () => {
+    await db.prepare("SELECT 1");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
+// ==========================================================================
+// Database.pragma()
+// ==========================================================================
+
+test.serial("Database.pragma()", async (t) => {
+  if (process.env.PROVIDER === "serverless") {
+    t.pass("Skipping pragma test for serverless");
+    return;
+  }
+  const db = t.context.db;
+  await db.pragma("cache_size = 2000");
+  t.deepEqual(await db.pragma("cache_size"), [{ "cache_size": 2000 }]);
+});
+
+test.serial("Database.pragma() after close()", async (t) => {
+  const db = t.context.db;
+  await db.close();
+  await t.throwsAsync(async () => {
+    await db.pragma("cache_size = 2000");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
+// ==========================================================================
+// Database.transaction()
+// ==========================================================================
+
+test.skip("Database.transaction()", async (t) => {
+  const db = t.context.db;
+
+  const insert = await db.prepare(
+    "INSERT INTO users(name, email) VALUES (:name, :email)"
+  );
+
+  const insertMany = db.transaction((users) => {
+    t.is(db.inTransaction, true);
+    for (const user of users) insert.run(user);
+  });
+
+  t.is(db.inTransaction, false);
+  await insertMany([
+    { name: "Joey", email: "joey@example.org" },
+    { name: "Sally", email: "sally@example.org" },
+    { name: "Junior", email: "junior@example.org" },
+  ]);
+  t.is(db.inTransaction, false);
+
+  const stmt = await db.prepare("SELECT * FROM users WHERE id = ?");
+  t.is(stmt.get(3).name, "Joey");
+  t.is(stmt.get(4).name, "Sally");
+  t.is(stmt.get(5).name, "Junior");
+});
+
+test.skip("Database.transaction().immediate()", async (t) => {
+  const db = t.context.db;
+  const insert = await db.prepare(
+    "INSERT INTO users(name, email) VALUES (:name, :email)"
+  );
+  const insertMany = db.transaction((users) => {
+    t.is(db.inTransaction, true);
+    for (const user of users) insert.run(user);
+  });
+  t.is(db.inTransaction, false);
+  await insertMany.immediate([
+    { name: "Joey", email: "joey@example.org" },
+    { name: "Sally", email: "sally@example.org" },
+    { name: "Junior", email: "junior@example.org" },
+  ]);
+  t.is(db.inTransaction, false);
+});
+
+// ==========================================================================
+// Database.interrupt()
+// ==========================================================================
+
+test.skip("Database.interrupt()", async (t) => {
+  const db = t.context.db;
+  const stmt = await db.prepare("WITH RECURSIVE infinite_loop(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM infinite_loop) SELECT * FROM infinite_loop;");
+  const fut = stmt.all();
+  db.interrupt();
+  await t.throwsAsync(async () => {
+    await fut;
+  }, {
+    instanceOf: t.context.errorType,
+    message: 'interrupted',
+    code: 'SQLITE_INTERRUPT'
+  });
+});
+
+// ==========================================================================
+// Statement.run()
+// ==========================================================================
+
 test.serial("Statement.run() [positional]", async (t) => {
   const db = t.context.db;
 
@@ -71,6 +219,10 @@ test.serial("Statement.run() [positional]", async (t) => {
   t.is(info.changes, 1);
   t.is(info.lastInsertRowid, 3);
 });
+
+// ==========================================================================
+// Statement.get()
+// ==========================================================================
 
 test.serial("Statement.get() [no parameters]", async (t) => {
   const db = t.context.db;
@@ -120,13 +272,16 @@ test.serial("Statement.get() [named]", async (t) => {
   t.is((await stmt.get({ id: 2 })).name, "Bob");
 });
 
-
 test.serial("Statement.get() [raw]", async (t) => {
   const db = t.context.db;
 
   const stmt = await db.prepare("SELECT * FROM users WHERE id = ?");
   t.deepEqual(await stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
 });
+
+// ==========================================================================
+// Statement.iterate()
+// ==========================================================================
 
 test.serial("Statement.iterate() [empty]", async (t) => {
   const db = t.context.db;
@@ -146,6 +301,10 @@ test.serial("Statement.iterate()", async (t) => {
     t.is(row.id, expected[idx++]);
   }
 });
+
+// ==========================================================================
+// Statement.all()
+// ==========================================================================
 
 test.serial("Statement.all()", async (t) => {
   const db = t.context.db;
@@ -202,6 +361,10 @@ test.skip("Statement.all() [statement safe integers]", async (t) => {
   t.deepEqual(await stmt.raw().all(), expected);
 });
 
+// ==========================================================================
+// Statement.raw()
+// ==========================================================================
+
 test.skip("Statement.raw() [failure]", async (t) => {
   const db = t.context.db;
   const stmt = await db.prepare("INSERT INTO users (id, name, email) VALUES (?, ?, ?)");
@@ -211,6 +374,10 @@ test.skip("Statement.raw() [failure]", async (t) => {
     message: 'The raw() method is only for statements that return data'
   });
 });
+
+// ==========================================================================
+// Statement.columns()
+// ==========================================================================
 
 test.skip("Statement.columns()", async (t) => {
   const db = t.context.db;
@@ -254,129 +421,9 @@ test.skip("Statement.columns()", async (t) => {
   ]);
 });
 
-test.skip("Database.transaction()", async (t) => {
-  const db = t.context.db;
-
-  const insert = await db.prepare(
-    "INSERT INTO users(name, email) VALUES (:name, :email)"
-  );
-
-  const insertMany = db.transaction((users) => {
-    t.is(db.inTransaction, true);
-    for (const user of users) insert.run(user);
-  });
-
-  t.is(db.inTransaction, false);
-  await insertMany([
-    { name: "Joey", email: "joey@example.org" },
-    { name: "Sally", email: "sally@example.org" },
-    { name: "Junior", email: "junior@example.org" },
-  ]);
-  t.is(db.inTransaction, false);
-
-  const stmt = await db.prepare("SELECT * FROM users WHERE id = ?");
-  t.is(stmt.get(3).name, "Joey");
-  t.is(stmt.get(4).name, "Sally");
-  t.is(stmt.get(5).name, "Junior");
-});
-
-test.skip("Database.transaction().immediate()", async (t) => {
-  const db = t.context.db;
-  const insert = await db.prepare(
-    "INSERT INTO users(name, email) VALUES (:name, :email)"
-  );
-  const insertMany = db.transaction((users) => {
-    t.is(db.inTransaction, true);
-    for (const user of users) insert.run(user);
-  });
-  t.is(db.inTransaction, false);
-  await insertMany.immediate([
-    { name: "Joey", email: "joey@example.org" },
-    { name: "Sally", email: "sally@example.org" },
-    { name: "Junior", email: "junior@example.org" },
-  ]);
-  t.is(db.inTransaction, false);
-});
-
-test.serial("Database.pragma()", async (t) => {
-  if (process.env.PROVIDER === "serverless") {
-    t.pass("Skipping pragma test for serverless");
-    return;
-  }
-  const db = t.context.db;
-  await db.pragma("cache_size = 2000");
-  t.deepEqual(await db.pragma("cache_size"), [{ "cache_size": 2000 }]);
-});
-
-test.skip("errors", async (t) => {
-  const db = t.context.db;
-
-  const syntaxError = await t.throwsAsync(async () => {
-    await db.exec("SYNTAX ERROR");
-  }, {
-    instanceOf: t.context.errorType,
-    message: 'near "SYNTAX": syntax error',
-    code: 'SQLITE_ERROR'
-  });
-
-  t.is(syntaxError.rawCode, 1)
-  const noTableError = await t.throwsAsync(async () => {
-    await db.exec("SELECT * FROM missing_table");
-  }, {
-    instanceOf: t.context.errorType,
-    message: "no such table: missing_table",
-    code: 'SQLITE_ERROR'
-  });
-  t.is(noTableError.rawCode, 1)
-});
-
-test.serial("Database.prepare() after close()", async (t) => {
-  const db = t.context.db;
-  await db.close();
-  await t.throwsAsync(async () => {
-    await db.prepare("SELECT 1");
-  }, {
-    instanceOf: TypeError,
-    message: "The database connection is not open"
-  });
-});
-
-test.serial("Database.pragma() after close()", async (t) => {
-  const db = t.context.db;
-  await db.close();
-  await t.throwsAsync(async () => {
-    await db.pragma("cache_size = 2000");
-  }, {
-    instanceOf: TypeError,
-    message: "The database connection is not open"
-  });
-});
-
-test.serial("Database.exec() after close()", async (t) => {
-  const db = t.context.db;
-  await db.close();
-  await t.throwsAsync(async () => {
-    await db.exec("SELECT 1");
-  }, {
-    instanceOf: TypeError,
-    message: "The database connection is not open"
-  });
-});
-
-test.skip("Database.interrupt()", async (t) => {
-  const db = t.context.db;
-  const stmt = await db.prepare("WITH RECURSIVE infinite_loop(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM infinite_loop) SELECT * FROM infinite_loop;");
-  const fut = stmt.all();
-  db.interrupt();
-  await t.throwsAsync(async () => {
-    await fut;
-  }, {
-    instanceOf: t.context.errorType,
-    message: 'interrupted',
-    code: 'SQLITE_INTERRUPT'
-  });
-});
-
+// ==========================================================================
+// Statement.interrupt()
+// ==========================================================================
 
 test.skip("Statement.interrupt()", async (t) => {
   const db = t.context.db;

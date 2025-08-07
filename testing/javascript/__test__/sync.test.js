@@ -48,7 +48,50 @@ test.serial("Open in-memory database", async (t) => {
   t.is(db.memory, true);
 });
 
-test.skip("Statement.prepare() error", async (t) => {
+// ==========================================================================
+// Database.exec()
+// ==========================================================================
+
+test.skip("Database.exec() syntax error", async (t) => {
+  const db = t.context.db;
+
+  const syntaxError = t.throws(() => {
+    db.exec("SYNTAX ERROR");
+  }, {
+    instanceOf: t.context.errorType,
+    message: 'near "SYNTAX": syntax error',
+    code: 'SQLITE_ERROR'
+  });
+  const noTableError = t.throws(() => {
+    db.exec("SELECT * FROM missing_table");
+  }, {
+    instanceOf: t.context.errorType,
+    message: "no such table: missing_table",
+    code: 'SQLITE_ERROR'
+  });
+
+  if (t.context.provider === 'libsql') {
+    t.is(noTableError.rawCode, 1)
+    t.is(syntaxError.rawCode, 1)
+  }
+});
+
+test.serial("Database.exec() after close()", async (t) => {
+  const db = t.context.db;
+  db.close();
+  t.throws(() => {
+    db.exec("SELECT 1");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
+// ==========================================================================
+// Database.prepare()
+// ==========================================================================
+
+test.skip("Statement.prepare() syntax error", async (t) => {
   const db = t.context.db;
 
   t.throws(() => {
@@ -58,6 +101,90 @@ test.skip("Statement.prepare() error", async (t) => {
     message: 'near "SYNTAX": syntax error'
   });
 });
+
+test.serial("Database.prepare() after close()", async (t) => {
+  const db = t.context.db;
+  db.close();
+  t.throws(() => {
+    db.prepare("SELECT 1");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
+// ==========================================================================
+// Database.pragma()
+// ==========================================================================
+
+test.serial("Database.pragma()", async (t) => {
+  const db = t.context.db;
+  db.pragma("cache_size = 2000");
+  t.deepEqual(db.pragma("cache_size"), [{ "cache_size": 2000 }]);
+});
+
+test.serial("Database.pragma() after close()", async (t) => {
+  const db = t.context.db;
+  db.close();
+  t.throws(() => {
+    db.pragma("cache_size = 2000");
+  }, {
+    instanceOf: TypeError,
+    message: "The database connection is not open"
+  });
+});
+
+// ==========================================================================
+// Database.transaction()
+// ==========================================================================
+
+test.skip("Database.transaction()", async (t) => {
+  const db = t.context.db;
+
+  const insert = db.prepare(
+    "INSERT INTO users(name, email) VALUES (:name, :email)"
+  );
+
+  const insertMany = db.transaction((users) => {
+    t.is(db.inTransaction, true);
+    for (const user of users) insert.run(user);
+  });
+
+  t.is(db.inTransaction, false);
+  insertMany([
+    { name: "Joey", email: "joey@example.org" },
+    { name: "Sally", email: "sally@example.org" },
+    { name: "Junior", email: "junior@example.org" },
+  ]);
+  t.is(db.inTransaction, false);
+
+  const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
+  t.is(stmt.get(3).name, "Joey");
+  t.is(stmt.get(4).name, "Sally");
+  t.is(stmt.get(5).name, "Junior");
+});
+
+test.skip("Database.transaction().immediate()", async (t) => {
+  const db = t.context.db;
+  const insert = db.prepare(
+    "INSERT INTO users(name, email) VALUES (:name, :email)"
+  );
+  const insertMany = db.transaction((users) => {
+    t.is(db.inTransaction, true);
+    for (const user of users) insert.run(user);
+  });
+  t.is(db.inTransaction, false);
+  insertMany.immediate([
+    { name: "Joey", email: "joey@example.org" },
+    { name: "Sally", email: "sally@example.org" },
+    { name: "Junior", email: "junior@example.org" },
+  ]);
+  t.is(db.inTransaction, false);
+});
+
+// ==========================================================================
+// Statement.run()
+// ==========================================================================
 
 test.serial("Statement.run() returning rows", async (t) => {
   const db = t.context.db;
@@ -83,149 +210,6 @@ test.serial("Statement.run() [named]", async (t) => {
   const info = stmt.run({"name": "Carol", "email": "carol@example.net"});
   t.is(info.changes, 1);
   t.is(info.lastInsertRowid, 3);
-});
-
-test.serial("Statement.get() [no parameters]", async (t) => {
-  const db = t.context.db;
-
-  var stmt = 0;
-
-  stmt = db.prepare("SELECT * FROM users");
-  t.is(stmt.get().name, "Alice");
-  t.deepEqual(stmt.raw().get(), [1, 'Alice', 'alice@example.org']);
-});
-
-test.serial("Statement.get() [positional]", async (t) => {
-  const db = t.context.db;
-
-  var stmt = 0;
-
-  stmt = db.prepare("SELECT * FROM users WHERE id = ?");
-  t.is(stmt.get(0), undefined);
-  t.is(stmt.get([0]), undefined);
-  t.is(stmt.get(1).name, "Alice");
-  t.is(stmt.get(2).name, "Bob");
-
-  stmt = db.prepare("SELECT * FROM users WHERE id = ?1");
-  t.is(stmt.get({1: 0}), undefined);
-  t.is(stmt.get({1: 1}).name, "Alice");
-  t.is(stmt.get({1: 2}).name, "Bob");
-});
-
-test.serial("Statement.get() [named]", async (t) => {
-  const db = t.context.db;
-
-  var stmt = undefined;
-
-  stmt = db.prepare("SELECT :b, :a");
-  t.deepEqual(stmt.raw().get({ a: 'a', b: 'b' }), ['b', 'a']);
-
-  stmt = db.prepare("SELECT * FROM users WHERE id = :id");
-  t.is(stmt.get({ id: 0 }), undefined);
-  t.is(stmt.get({ id: 1 }).name, "Alice");
-  t.is(stmt.get({ id: 2 }).name, "Bob");
-
-  stmt = db.prepare("SELECT * FROM users WHERE id = @id");
-  t.is(stmt.get({ id: 0 }), undefined);
-  t.is(stmt.get({ id: 1 }).name, "Alice");
-  t.is(stmt.get({ id: 2 }).name, "Bob");
-
-  stmt = db.prepare("SELECT * FROM users WHERE id = $id");
-  t.is(stmt.get({ id: 0 }), undefined);
-  t.is(stmt.get({ id: 1 }).name, "Alice");
-  t.is(stmt.get({ id: 2 }).name, "Bob");
-});
-
-test.serial("Statement.get() [raw]", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
-  t.deepEqual(stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
-});
-
-test.serial("Statement.iterate() [empty]", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT * FROM users WHERE id = 0");
-  t.is(stmt.iterate().next().done, true);
-  t.is(stmt.iterate([]).next().done, true);
-  t.is(stmt.iterate({}).next().done, true);
-});
-
-test.serial("Statement.iterate()", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT * FROM users");
-  const expected = [1, 2];
-  var idx = 0;
-  for (const row of stmt.iterate()) {
-    t.is(row.id, expected[idx++]);
-  }
-});
-
-test.serial("Statement.all()", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT * FROM users");
-  const expected = [
-    { id: 1, name: "Alice", email: "alice@example.org" },
-    { id: 2, name: "Bob", email: "bob@example.com" },
-  ];
-  t.deepEqual(stmt.all(), expected);
-});
-
-test.serial("Statement.all() [raw]", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT * FROM users");
-  const expected = [
-    [1, "Alice", "alice@example.org"],
-    [2, "Bob", "bob@example.com"],
-  ];
-  t.deepEqual(stmt.raw().all(), expected);
-});
-
-test.serial("Statement.all() [pluck]", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT * FROM users");
-  const expected = [
-    1,
-    2,
-  ];
-  t.deepEqual(stmt.pluck().all(), expected);
-});
-
-test.skip("Statement.all() [default safe integers]", async (t) => {
-  const db = t.context.db;
-  db.defaultSafeIntegers();
-  const stmt = db.prepare("SELECT * FROM users");
-  const expected = [
-    [1n, "Alice", "alice@example.org"],
-    [2n, "Bob", "bob@example.com"],
-  ];
-  t.deepEqual(stmt.raw().all(), expected);
-});
-
-test.skip("Statement.all() [statement safe integers]", async (t) => {
-  const db = t.context.db;
-  const stmt = db.prepare("SELECT * FROM users");
-  stmt.safeIntegers();
-  const expected = [
-    [1n, "Alice", "alice@example.org"],
-    [2n, "Bob", "bob@example.com"],
-  ];
-  t.deepEqual(stmt.raw().all(), expected);
-});
-
-test.skip("Statement.raw() [failure]", async (t) => {
-  const db = t.context.db;
-  const stmt = db.prepare("INSERT INTO users (id, name, email) VALUES (?, ?, ?)");
-  t.throws(() => {
-    stmt.raw()
-  }, {
-    message: 'The raw() method is only for statements that return data'
-  });
 });
 
 test.skip("Statement.run() with array bind parameter", async (t) => {
@@ -288,6 +272,180 @@ test.skip("Statement.run() for vector feature with Float32Array bind parameter",
   db.exec(`DROP TABLE t`);
 });
 
+// ==========================================================================
+// Statement.get()
+// ==========================================================================
+
+test.serial("Statement.get() [no parameters]", async (t) => {
+  const db = t.context.db;
+
+  var stmt = 0;
+
+  stmt = db.prepare("SELECT * FROM users");
+  t.is(stmt.get().name, "Alice");
+  t.deepEqual(stmt.raw().get(), [1, 'Alice', 'alice@example.org']);
+});
+
+test.serial("Statement.get() [positional]", async (t) => {
+  const db = t.context.db;
+
+  var stmt = 0;
+
+  stmt = db.prepare("SELECT * FROM users WHERE id = ?");
+  t.is(stmt.get(0), undefined);
+  t.is(stmt.get([0]), undefined);
+  t.is(stmt.get(1).name, "Alice");
+  t.is(stmt.get(2).name, "Bob");
+
+  stmt = db.prepare("SELECT * FROM users WHERE id = ?1");
+  t.is(stmt.get({1: 0}), undefined);
+  t.is(stmt.get({1: 1}).name, "Alice");
+  t.is(stmt.get({1: 2}).name, "Bob");
+});
+
+test.serial("Statement.get() [named]", async (t) => {
+  const db = t.context.db;
+
+  var stmt = undefined;
+
+  stmt = db.prepare("SELECT :b, :a");
+  t.deepEqual(stmt.raw().get({ a: 'a', b: 'b' }), ['b', 'a']);
+
+  stmt = db.prepare("SELECT * FROM users WHERE id = :id");
+  t.is(stmt.get({ id: 0 }), undefined);
+  t.is(stmt.get({ id: 1 }).name, "Alice");
+  t.is(stmt.get({ id: 2 }).name, "Bob");
+
+  stmt = db.prepare("SELECT * FROM users WHERE id = @id");
+  t.is(stmt.get({ id: 0 }), undefined);
+  t.is(stmt.get({ id: 1 }).name, "Alice");
+  t.is(stmt.get({ id: 2 }).name, "Bob");
+
+  stmt = db.prepare("SELECT * FROM users WHERE id = $id");
+  t.is(stmt.get({ id: 0 }), undefined);
+  t.is(stmt.get({ id: 1 }).name, "Alice");
+  t.is(stmt.get({ id: 2 }).name, "Bob");
+});
+
+test.serial("Statement.get() [raw]", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
+  t.deepEqual(stmt.raw().get(1), [1, "Alice", "alice@example.org"]);
+});
+
+test.skip("Statement.get() values", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT ?").raw();
+  t.deepEqual(stmt.get(1), [1]);
+  t.deepEqual(stmt.get(Number.MIN_VALUE), [Number.MIN_VALUE]);
+  t.deepEqual(stmt.get(Number.MAX_VALUE), [Number.MAX_VALUE]);
+  t.deepEqual(stmt.get(Number.MAX_SAFE_INTEGER), [Number.MAX_SAFE_INTEGER]);
+  t.deepEqual(stmt.get(9007199254740991n), [9007199254740991]);
+});
+
+// ==========================================================================
+// Statement.iterate()
+// ==========================================================================
+
+test.serial("Statement.iterate() [empty]", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users WHERE id = 0");
+  t.is(stmt.iterate().next().done, true);
+  t.is(stmt.iterate([]).next().done, true);
+  t.is(stmt.iterate({}).next().done, true);
+});
+
+test.serial("Statement.iterate()", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [1, 2];
+  var idx = 0;
+  for (const row of stmt.iterate()) {
+    t.is(row.id, expected[idx++]);
+  }
+});
+
+// ==========================================================================
+// Statement.all()
+// ==========================================================================
+
+test.serial("Statement.all()", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [
+    { id: 1, name: "Alice", email: "alice@example.org" },
+    { id: 2, name: "Bob", email: "bob@example.com" },
+  ];
+  t.deepEqual(stmt.all(), expected);
+});
+
+test.serial("Statement.all() [raw]", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [
+    [1, "Alice", "alice@example.org"],
+    [2, "Bob", "bob@example.com"],
+  ];
+  t.deepEqual(stmt.raw().all(), expected);
+});
+
+test.serial("Statement.all() [pluck]", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [
+    1,
+    2,
+  ];
+  t.deepEqual(stmt.pluck().all(), expected);
+});
+
+test.skip("Statement.all() [default safe integers]", async (t) => {
+  const db = t.context.db;
+  db.defaultSafeIntegers();
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [
+    [1n, "Alice", "alice@example.org"],
+    [2n, "Bob", "bob@example.com"],
+  ];
+  t.deepEqual(stmt.raw().all(), expected);
+});
+
+test.skip("Statement.all() [statement safe integers]", async (t) => {
+  const db = t.context.db;
+  const stmt = db.prepare("SELECT * FROM users");
+  stmt.safeIntegers();
+  const expected = [
+    [1n, "Alice", "alice@example.org"],
+    [2n, "Bob", "bob@example.com"],
+  ];
+  t.deepEqual(stmt.raw().all(), expected);
+});
+
+// ==========================================================================
+// Statement.raw()
+// ==========================================================================
+
+test.skip("Statement.raw() [failure]", async (t) => {
+  const db = t.context.db;
+  const stmt = db.prepare("INSERT INTO users (id, name, email) VALUES (?, ?, ?)");
+  t.throws(() => {
+    stmt.raw()
+  }, {
+    message: 'The raw() method is only for statements that return data'
+  });
+});
+
+// ==========================================================================
+// Statement.columns()
+// ==========================================================================
+
 test.skip("Statement.columns()", async (t) => {
   const db = t.context.db;
 
@@ -328,113 +486,6 @@ test.skip("Statement.columns()", async (t) => {
       type: "TEXT",
     },
   ]);
-});
-
-test.skip("Database.transaction()", async (t) => {
-  const db = t.context.db;
-
-  const insert = db.prepare(
-    "INSERT INTO users(name, email) VALUES (:name, :email)"
-  );
-
-  const insertMany = db.transaction((users) => {
-    t.is(db.inTransaction, true);
-    for (const user of users) insert.run(user);
-  });
-
-  t.is(db.inTransaction, false);
-  insertMany([
-    { name: "Joey", email: "joey@example.org" },
-    { name: "Sally", email: "sally@example.org" },
-    { name: "Junior", email: "junior@example.org" },
-  ]);
-  t.is(db.inTransaction, false);
-
-  const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
-  t.is(stmt.get(3).name, "Joey");
-  t.is(stmt.get(4).name, "Sally");
-  t.is(stmt.get(5).name, "Junior");
-});
-
-test.skip("Database.transaction().immediate()", async (t) => {
-  const db = t.context.db;
-  const insert = db.prepare(
-    "INSERT INTO users(name, email) VALUES (:name, :email)"
-  );
-  const insertMany = db.transaction((users) => {
-    t.is(db.inTransaction, true);
-    for (const user of users) insert.run(user);
-  });
-  t.is(db.inTransaction, false);
-  insertMany.immediate([
-    { name: "Joey", email: "joey@example.org" },
-    { name: "Sally", email: "sally@example.org" },
-    { name: "Junior", email: "junior@example.org" },
-  ]);
-  t.is(db.inTransaction, false);
-});
-
-test.skip("values", async (t) => {
-  const db = t.context.db;
-
-  const stmt = db.prepare("SELECT ?").raw();
-  t.deepEqual(stmt.get(1), [1]);
-  t.deepEqual(stmt.get(Number.MIN_VALUE), [Number.MIN_VALUE]);
-  t.deepEqual(stmt.get(Number.MAX_VALUE), [Number.MAX_VALUE]);
-  t.deepEqual(stmt.get(Number.MAX_SAFE_INTEGER), [Number.MAX_SAFE_INTEGER]);
-  t.deepEqual(stmt.get(9007199254740991n), [9007199254740991]);
-});
-
-test.serial("Database.pragma()", async (t) => {
-  const db = t.context.db;
-  db.pragma("cache_size = 2000");
-  t.deepEqual(db.pragma("cache_size"), [{ "cache_size": 2000 }]);
-});
-
-test.skip("errors", async (t) => {
-  const db = t.context.db;
-
-  const syntaxError = t.throws(() => {
-    db.exec("SYNTAX ERROR");
-  }, {
-    instanceOf: t.context.errorType,
-    message: 'near "SYNTAX": syntax error',
-    code: 'SQLITE_ERROR'
-  });
-  const noTableError = t.throws(() => {
-    db.exec("SELECT * FROM missing_table");
-  }, {
-    instanceOf: t.context.errorType,
-    message: "no such table: missing_table",
-    code: 'SQLITE_ERROR'
-  });
-
-  if (t.context.provider === 'libsql') {
-    t.is(noTableError.rawCode, 1)
-    t.is(syntaxError.rawCode, 1)
-  }
-});
-
-test.serial("Database.prepare() after close()", async (t) => {
-  const db = t.context.db;
-  db.close();
-  t.throws(() => {
-    db.prepare("SELECT 1");
-  }, {
-    instanceOf: TypeError,
-    message: "The database connection is not open"
-  });
-});
-
-test.serial("Database.exec() after close()", async (t) => {
-  const db = t.context.db;
-  db.close();
-  t.throws(() => {
-    db.exec("SELECT 1");
-  }, {
-    instanceOf: TypeError,
-    message: "The database connection is not open"
-  });
 });
 
 test.skip("Timeout option", async (t) => {
