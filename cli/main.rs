@@ -15,6 +15,10 @@ use std::{
     sync::{atomic::Ordering, LazyLock},
 };
 
+#[cfg(not(target_family = "wasm"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn rustyline_config() -> Config {
     Config::builder()
         .completion_type(rustyline::CompletionType::List)
