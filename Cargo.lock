@@ -4397,6 +4397,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "turso_sync_js"
+version = "0.1.4-pre.5"
+dependencies = [
+ "genawaiter",
+ "http",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "turso_core",
+ "turso_node",
+ "turso_sync_engine",
+]
+
+[[package]]
 name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
