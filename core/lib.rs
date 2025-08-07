@@ -1739,6 +1739,14 @@ impl Connection {
     pub fn get_pager(&self) -> Rc<Pager> {
         self.pager.borrow().clone()
     }
+
+    pub fn get_query_only(&self) -> bool {
+        self.query_only.get()
+    }
+
+    pub fn set_query_only(&self, value: bool) {
+        self.query_only.set(value);
+    }
 }
 
 pub struct Statement {
