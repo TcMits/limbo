@@ -731,18 +731,15 @@ impl PageContent {
     pub fn cell_get_raw_region(&self, idx: usize, usable_size: usize) -> (usize, usize) {
         let buf = self.as_ptr();
         let ncells = self.cell_count();
-        let (cell_pointer_array_start, _) = self.cell_pointer_array_offset_and_size();
         assert!(idx < ncells, "cell_get: idx out of bounds");
-        let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
-        let cell_pointer = self.read_u16_no_offset(cell_pointer) as usize;
-        let start = cell_pointer;
+        let start = self.cell_get_raw_start_offset(idx);
         let payload_overflow_threshold_max =
             payload_overflow_threshold_max(self.page_type(), usable_size);
         let payload_overflow_threshold_min =
             payload_overflow_threshold_min(self.page_type(), usable_size);
         let len = match self.page_type() {
             PageType::IndexInterior => {
-                let (len_payload, n_payload) = read_varint(&buf[cell_pointer + 4..]).unwrap();
+                let (len_payload, n_payload) = read_varint(&buf[start + 4..]).unwrap();
                 let (overflows, to_read) = payload_overflows(
                     len_payload as usize,
                     payload_overflow_threshold_max,
@@ -756,11 +753,11 @@ impl PageContent {
                 }
             }
             PageType::TableInterior => {
-                let (_, n_rowid) = read_varint(&buf[cell_pointer + 4..]).unwrap();
+                let (_, n_rowid) = read_varint(&buf[start + 4..]).unwrap();
                 4 + n_rowid
             }
             PageType::IndexLeaf => {
-                let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
+                let (len_payload, n_payload) = read_varint(&buf[start..]).unwrap();
                 let (overflows, to_read) = payload_overflows(
                     len_payload as usize,
                     payload_overflow_threshold_max,
@@ -778,8 +775,8 @@ impl PageContent {
                 }
             }
             PageType::TableLeaf => {
-                let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
-                let (_, n_rowid) = read_varint(&buf[cell_pointer + n_payload..]).unwrap();
+                let (len_payload, n_payload) = read_varint(&buf[start..]).unwrap();
+                let (_, n_rowid) = read_varint(&buf[start + n_payload..]).unwrap();
                 let (overflows, to_read) = payload_overflows(
                     len_payload as usize,
                     payload_overflow_threshold_max,
