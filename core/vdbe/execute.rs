@@ -8353,12 +8353,11 @@ pub fn op_journal_mode(
     pager: &Rc<Pager>,
     mv_store: Option<&Arc<MvStore>>,
 ) -> Result<InsnFunctionStepResult> {
-    let Insn::JournalMode { db, dest, new_mode } = insn else {
-        unreachable!("unexpected Insn {:?}", insn)
-    };
-
+    load_insn!(JournalMode { db, dest, new_mode }, insn);
     if *db > 0 {
-        todo!("temp/attached databases not implemented yet");
+        return Err(LimboError::InternalError(
+            "temp/attached databases not implemented yet".to_string(),
+        ));
     }
 
     // Currently, Turso only supports WAL mode
