@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
-import Database from '@tursodatabase/turso';
+import { Database } from '@tursodatabase/turso';
 
 const sqlite = new Database('sqlite.db');
 const db = drizzle({ client: sqlite });
