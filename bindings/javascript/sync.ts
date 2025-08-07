@@ -38,6 +38,7 @@ export class Database {
   static SqliteError = SqliteError;
   db: NativeDB;
   memory: boolean;
+  open: boolean;
 
   /**
    * Creates a new database connection. If the database file pointed to by `path` does not exists, it will be created.
