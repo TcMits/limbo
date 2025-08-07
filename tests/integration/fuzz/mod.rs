@@ -1719,4 +1719,164 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    #[ignore]
+    pub fn fuzz_long_create_table_drop_table_alter_table() {
+        let db = TempDatabase::new_empty(true);
+        let limbo_conn = db.connect_limbo();
+
+        let (mut rng, seed) = rng_from_time_or_env();
+        tracing::info!("create_table_drop_table_fuzz seed: {}", seed);
+
+        // Keep track of current tables and their columns in memory
+        let mut current_tables: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut table_counter = 0;
+
+        // Column types for random generation
+        const COLUMN_TYPES: [&str; 6] = ["INTEGER", "TEXT", "REAL", "BLOB", "BOOLEAN", "NUMERIC"];
+        const COLUMN_NAMES: [&str; 8] = [
+            "id", "name", "value", "data", "info", "field", "col", "attr",
+        ];
+
+        let mut undroppable_cols = HashSet::new();
+
+        for iteration in 0..50000 {
+            println!("iteration: {iteration} (seed: {seed})");
+            let operation = rng.random_range(0..100); // 0: create, 1: drop, 2: alter, 3: alter rename
+
+            match operation {
+                0..20 => {
+                    // Create table
+                    if current_tables.len() < 10 {
+                        // Limit number of tables
+                        let table_name = format!("table_{table_counter}");
+                        table_counter += 1;
+
+                        let num_columns = rng.random_range(1..6);
+                        let mut columns = Vec::new();
+
+                        for i in 0..num_columns {
+                            let col_name = if i == 0 && rng.random_bool(0.3) {
+                                "id".to_string()
+                            } else {
+                                format!(
+                                    "{}_{}",
+                                    COLUMN_NAMES[rng.random_range(0..COLUMN_NAMES.len())],
+                                    rng.random_range(0..u64::MAX)
+                                )
+                            };
+
+                            let col_type = COLUMN_TYPES[rng.random_range(0..COLUMN_TYPES.len())];
+                            let constraint = if i == 0 && rng.random_bool(0.2) {
+                                " PRIMARY KEY"
+                            } else if rng.random_bool(0.1) {
+                                " UNIQUE"
+                            } else {
+                                ""
+                            };
+
+                            if constraint.contains("UNIQUE") || constraint.contains("PRIMARY KEY") {
+                                undroppable_cols.insert((table_name.clone(), col_name.clone()));
+                            }
+
+                            columns.push(format!("{col_name} {col_type}{constraint}"));
+                        }
+
+                        let create_sql =
+                            format!("CREATE TABLE {} ({})", table_name, columns.join(", "));
+
+                        // Execute the create table statement
+                        limbo_exec_rows(&db, &limbo_conn, &create_sql);
+
+                        // Successfully created table, update our tracking
+                        current_tables.insert(
+                            table_name.clone(),
+                            columns
+                                .iter()
+                                .map(|c| c.split_whitespace().next().unwrap().to_string())
+                                .collect(),
+                        );
+                    }
+                }
+
+                20..30 => {
+                    // Drop table
+                    if !current_tables.is_empty() {
+                        let table_names: Vec<String> = current_tables.keys().cloned().collect();
+                        let table_to_drop = &table_names[rng.random_range(0..table_names.len())];
+
+                        let drop_sql = format!("DROP TABLE {table_to_drop}");
+                        limbo_exec_rows(&db, &limbo_conn, &drop_sql);
+
+                        // Successfully dropped table, update our tracking
+                        current_tables.remove(table_to_drop);
+                    }
+                }
+                30..60 => {
+                    // Alter table - add column
+                    if !current_tables.is_empty() {
+                        let table_names: Vec<String> = current_tables.keys().cloned().collect();
+                        let table_to_alter = &table_names[rng.random_range(0..table_names.len())];
+
+                        let new_col_name = format!("new_col_{}", rng.random_range(0..u64::MAX));
+                        let col_type = COLUMN_TYPES[rng.random_range(0..COLUMN_TYPES.len())];
+
+                        let alter_sql = format!(
+                            "ALTER TABLE {} ADD COLUMN {} {}",
+                            table_to_alter, &new_col_name, col_type
+                        );
+
+                        limbo_exec_rows(&db, &limbo_conn, &alter_sql);
+
+                        // Successfully added column, update our tracking
+                        let table_name = table_to_alter.clone();
+                        let col_name = new_col_name.clone();
+                        if let Some(columns) = current_tables.get_mut(&table_name) {
+                            columns.push(new_col_name);
+                        }
+                    }
+                }
+                60..100 => {
+                    // Alter table - drop column
+                    if !current_tables.is_empty() {
+                        let table_names: Vec<String> = current_tables.keys().cloned().collect();
+                        let table_to_alter = &table_names[rng.random_range(0..table_names.len())];
+
+                        let table_name = table_to_alter.clone();
+                        if let Some(columns) = current_tables.get(&table_name) {
+                            let droppable_cols = columns
+                                .iter()
+                                .filter(|c| {
+                                    !undroppable_cols.contains(&(table_name.clone(), c.to_string()))
+                                })
+                                .collect::<Vec<_>>();
+                            if columns.len() > 1 && !droppable_cols.is_empty() {
+                                // Don't drop the last column
+                                let col_index = rng.random_range(0..droppable_cols.len());
+                                let col_to_drop = droppable_cols[col_index].clone();
+
+                                let alter_sql = format!(
+                                    "ALTER TABLE {table_to_alter} DROP COLUMN {col_to_drop}"
+                                );
+                                limbo_exec_rows(&db, &limbo_conn, &alter_sql);
+
+                                // Successfully dropped column, update our tracking
+                                let columns = current_tables.get_mut(&table_name).unwrap();
+                                columns.retain(|c| c != &col_to_drop);
+                            }
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        // Final verification - the test passes if we didn't crash
+        println!(
+            "create_table_drop_table_fuzz completed successfully with {} tables remaining",
+            current_tables.len()
+        );
+    }
 }
