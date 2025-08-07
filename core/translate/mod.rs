@@ -131,6 +131,10 @@ pub fn translate_inner(
             | ast::Stmt::Insert(..)
     );
 
+    if is_write && connection.get_query_only() {
+        bail_parse_error!("Cannot execute write statement in query_only mode")
+    }
+
     let is_select = matches!(stmt, ast::Stmt::Select { .. });
 
     let mut program = match stmt {
