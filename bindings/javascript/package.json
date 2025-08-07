@@ -16,10 +16,6 @@
   "files": [
     "browser.js",
     "index.js",
-    "promise.cjs",
-    "promise.mjs",
-    "sync.cjs",
-    "sync.mjs",
     "dist/**"
   ],
   "types": "index.d.ts",
