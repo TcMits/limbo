@@ -371,6 +371,7 @@ impl Database {
             capture_data_changes: RefCell::new(CaptureDataChangesMode::Off),
             closed: Cell::new(false),
             attached_databases: RefCell::new(DatabaseCatalog::new()),
+            query_only: Cell::new(false),
         });
         let builtin_syms = self.builtin_syms.borrow();
         // add built-in extensions symbols to the connection to prevent having to load each time
@@ -726,6 +727,7 @@ pub struct Connection {
     closed: Cell<bool>,
     /// Attached databases
     attached_databases: RefCell<DatabaseCatalog>,
+    query_only: Cell<bool>,
 }
 
 impl Connection {
