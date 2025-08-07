@@ -530,26 +530,6 @@ pub fn open_loop(
                         });
                     }
                 }
-
-                for cond in predicates
-                    .iter()
-                    .filter(|cond| cond.should_eval_at_loop(join_index, join_order))
-                {
-                    let jump_target_when_true = program.allocate_label();
-                    let condition_metadata = ConditionMetadata {
-                        jump_if_condition_is_true: false,
-                        jump_target_when_true,
-                        jump_target_when_false: next,
-                    };
-                    translate_condition_expr(
-                        program,
-                        table_references,
-                        &cond.expr,
-                        condition_metadata,
-                        &t_ctx.resolver,
-                    )?;
-                    program.preassign_label_to_next_insn(jump_target_when_true);
-                }
             }
             Operation::Search(search) => {
                 assert!(
@@ -645,27 +625,27 @@ pub fn open_loop(
                         }
                     }
                 }
-
-                for cond in predicates
-                    .iter()
-                    .filter(|cond| cond.should_eval_at_loop(join_index, join_order))
-                {
-                    let jump_target_when_true = program.allocate_label();
-                    let condition_metadata = ConditionMetadata {
-                        jump_if_condition_is_true: false,
-                        jump_target_when_true,
-                        jump_target_when_false: next,
-                    };
-                    translate_condition_expr(
-                        program,
-                        table_references,
-                        &cond.expr,
-                        condition_metadata,
-                        &t_ctx.resolver,
-                    )?;
-                    program.preassign_label_to_next_insn(jump_target_when_true);
-                }
             }
+        }
+
+        for cond in predicates
+            .iter()
+            .filter(|cond| cond.should_eval_at_loop(join_index, join_order))
+        {
+            let jump_target_when_true = program.allocate_label();
+            let condition_metadata = ConditionMetadata {
+                jump_if_condition_is_true: false,
+                jump_target_when_true,
+                jump_target_when_false: next,
+            };
+            translate_condition_expr(
+                program,
+                table_references,
+                &cond.expr,
+                condition_metadata,
+                &t_ctx.resolver,
+            )?;
+            program.preassign_label_to_next_insn(jump_target_when_true);
         }
 
         // Set the match flag to true if this is a LEFT JOIN.
