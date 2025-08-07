@@ -150,7 +150,7 @@ Turso aims to be fully compatible with SQLite, with opt-in features not supporte
 | PRAGMA page_size                 | Yes        |                                              |
 | PRAGMA parser_trace              | No         |                                              |
 | PRAGMA pragma_list               | Yes        |                                              |
-| PRAGMA query_only                | No         |                                              |
+| PRAGMA query_only                | Yes        |                                              |
 | PRAGMA quick_check               | No         |                                              |
 | PRAGMA read_uncommitted          | No         |                                              |
 | PRAGMA recursive_triggers        | No         |                                              |
