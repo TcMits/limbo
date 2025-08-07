@@ -7,7 +7,7 @@
 // The `params` parameter is an array of parameters.
 //
 // The function returns void.
-function bindParams(stmt, params) {
+export function bindParams(stmt, params) {
   const len = params?.length;
   if (len === 0) {
     return;
@@ -66,5 +66,3 @@ function bindPositionalParams(stmt, params) {
 function bindValue(stmt, index, value) {
   stmt.bindAt(index, value);
 }
-
-module.exports = { bindParams };

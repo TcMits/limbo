@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "module": "esnext",
+    "target": "esnext",
+    "outDir": "dist/esm",
+    "paths": {
+      "#entry-point": [
+        "./index.js"
+      ]
+    }
+  },
+  "include": [
+    "*"
+  ]
+}
