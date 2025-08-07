@@ -546,7 +546,23 @@ fn bench_insert_rows(criterion: &mut Criterion) {
             let db_path = temp_dir.path().join("bench.db");
             let sqlite_conn = rusqlite::Connection::open(db_path).unwrap();
             sqlite_conn
+                .pragma_update(None, "synchronous", "FULL")
+                .unwrap();
+            sqlite_conn
                 .pragma_update(None, "journal_mode", "WAL")
+                .unwrap();
+            let journal_mode = sqlite_conn
+                .pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))
+                .unwrap();
+            assert_eq!(journal_mode.to_lowercase(), "wal");
+            let synchronous = sqlite_conn
+                .pragma_query_value(None, "synchronous", |row| row.get::<_, String>(0))
+                .unwrap();
+            assert_eq!(synchronous.to_lowercase(), "full");
+
+            // Create test table
+            sqlite_conn
+                .execute("CREATE TABLE test (id INTEGER, value TEXT)", [])
                 .unwrap();
             sqlite_conn
                 .pragma_update(None, "locking_mode", "EXCLUSIVE")
