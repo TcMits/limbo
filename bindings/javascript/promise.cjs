@@ -1,2 +1,2 @@
-const Database = require('./dist/cjs/promise');
+const { Database } = require('./dist/cjs/promise');
 module.exports = Database;
