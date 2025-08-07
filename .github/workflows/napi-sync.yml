@@ -110,8 +110,8 @@ jobs:
         with:
           name: turso-sync-js-${{ matrix.settings.target }}
           path: |
-            packages/${{ env.APP_NAME }}.*.node
-            packages/${{ env.APP_NAME }}.*.wasm
+            packages/turso-sync-js/${{ env.APP_NAME }}.*.node
+            packages/turso-sync-js/${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
   test-macOS-windows-binding:
     name: Test turso-sync-js on ${{ matrix.settings.target }} - node@${{ matrix.node }}
@@ -206,8 +206,8 @@ jobs:
         with:
           name: turso-sync-js-universal-apple-darwin
           path: |
-            packages/${{ env.APP_NAME }}.*.node
-            packages/${{ env.APP_NAME }}.*.wasm
+            packages/turso-sync-js/${{ env.APP_NAME }}.*.node
+            packages/turso-sync-js${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
   publish:
     name: Publish
