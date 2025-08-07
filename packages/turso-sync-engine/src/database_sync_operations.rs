@@ -121,7 +121,7 @@ pub async fn wal_pull<'a, C: ProtocolIO, U: AsyncFnMut(&'a Coro, u64) -> Result<
         while let Some(chunk) = data.poll_data()? {
             let mut chunk = chunk.data();
             while !chunk.is_empty() {
-                let to_fill = WAL_FRAME_SIZE - buffer.len();
+                let to_fill = (WAL_FRAME_SIZE - buffer.len()).min(chunk.len());
                 buffer.extend_from_slice(&chunk[0..to_fill]);
                 chunk = &chunk[to_fill..];
 
@@ -455,8 +455,8 @@ async fn wal_pull_http<C: ProtocolIO>(
     end_frame: u64,
 ) -> Result<WalHttpPullResult<C::DataCompletion>> {
     let completion = client.http(
-        http::Method::GET,
-        format!("/sync/{generation}/{start_frame}/{end_frame}"),
+        "GET",
+        &format!("/sync/{generation}/{start_frame}/{end_frame}"),
         None,
     )?;
     let status = wait_status(coro, &completion).await?;
@@ -490,8 +490,8 @@ async fn wal_push_http<C: ProtocolIO>(
         .map(|baton| format!("/{baton}"))
         .unwrap_or("".to_string());
     let completion = client.http(
-        http::Method::POST,
-        format!("/sync/{generation}/{start_frame}/{end_frame}{baton}"),
+        "POST",
+        &format!("/sync/{generation}/{start_frame}/{end_frame}{baton}"),
         Some(frames),
     )?;
     let status = wait_status(coro, &completion).await?;
@@ -506,7 +506,7 @@ async fn wal_push_http<C: ProtocolIO>(
 }
 
 async fn db_info_http<C: ProtocolIO>(coro: &Coro, client: &C) -> Result<DbSyncInfo> {
-    let completion = client.http(http::Method::GET, "/info".to_string(), None)?;
+    let completion = client.http("GET", "/info", None)?;
     let status = wait_status(coro, &completion).await?;
     let status_body = wait_full_body(coro, &completion).await?;
     if status != http::StatusCode::OK {
@@ -522,7 +522,7 @@ async fn db_bootstrap_http<C: ProtocolIO>(
     client: &C,
     generation: u64,
 ) -> Result<C::DataCompletion> {
-    let completion = client.http(http::Method::GET, format!("/export/{generation}"), None)?;
+    let completion = client.http("GET", &format!("/export/{generation}"), None)?;
     let status = wait_status(coro, &completion).await?;
     if status != http::StatusCode::OK.as_u16() {
         return Err(Error::DatabaseSyncEngineError(format!(

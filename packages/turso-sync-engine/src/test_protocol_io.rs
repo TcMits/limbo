@@ -74,7 +74,7 @@ impl TestDataCompletion {
 }
 
 impl DataCompletion for TestDataCompletion {
-    type HttpPollResult = TestDataPollResult;
+    type DataPollResult = TestDataPollResult;
 
     fn status(&self) -> Result<Option<u16>> {
         let poison = self.poisoned.lock().unwrap();
@@ -86,7 +86,7 @@ impl DataCompletion for TestDataCompletion {
         Ok(*self.status.lock().unwrap())
     }
 
-    fn poll_data(&self) -> Result<Option<Self::HttpPollResult>> {
+    fn poll_data(&self) -> Result<Option<Self::DataPollResult>> {
         let poison = self.poisoned.lock().unwrap();
         if poison.is_some() {
             return Err(Error::DatabaseSyncEngineError(format!(
@@ -138,17 +138,12 @@ impl TestProtocolIo {
 
 impl ProtocolIO for TestProtocolIo {
     type DataCompletion = TestDataCompletion;
-    fn http(
-        &self,
-        method: http::Method,
-        path: String,
-        data: Option<Vec<u8>>,
-    ) -> Result<TestDataCompletion> {
+    fn http(&self, method: &str, path: &str, data: Option<Vec<u8>>) -> Result<TestDataCompletion> {
         let completion = TestDataCompletion::new();
         {
             let completion = completion.clone();
             let path = &path[1..].split("/").collect::<Vec<_>>();
-            match (method.as_str(), path.as_slice()) {
+            match (method, path.as_slice()) {
                 ("GET", ["info"]) => {
                     self.schedule(completion, |s, c| async move { s.db_info(c).await });
                 }

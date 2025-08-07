@@ -93,7 +93,14 @@ mod tests {
             let server = self.sync_server.clone();
             let db = self
                 .run(genawaiter::sync::Gen::new(|coro| async move {
-                    DatabaseSyncEngine::new(&coro, io, Arc::new(server), &local_path, opts).await
+                    DatabaseSyncEngine::new(
+                        &coro,
+                        io,
+                        Arc::new(server),
+                        local_path.to_str().unwrap(),
+                        opts,
+                    )
+                    .await
                 }))
                 .await
                 .unwrap();

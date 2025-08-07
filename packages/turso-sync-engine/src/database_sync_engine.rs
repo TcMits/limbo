@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
     database_sync_operations::{
@@ -15,8 +15,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct DatabaseSyncEngineOpts {
-    client_name: String,
-    wal_pull_batch_size: u64,
+    pub client_name: String,
+    pub wal_pull_batch_size: u64,
 }
 
 pub struct DatabaseSyncEngine<P: ProtocolIO> {
@@ -70,17 +70,13 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
     pub async fn new(
         coro: &Coro,
         io: Arc<dyn turso_core::IO>,
-        http_client: Arc<C>,
-        path: &Path,
+        protocol: Arc<C>,
+        path: &str,
         opts: DatabaseSyncEngineOpts,
     ) -> Result<Self> {
-        let Some(path) = path.to_str() else {
-            let error = format!("invalid path: {path:?}");
-            return Err(Error::DatabaseSyncEngineError(error));
-        };
         let mut db = Self {
             io,
-            protocol: http_client,
+            protocol,
             draft_path: format!("{path}-draft"),
             synced_path: format!("{path}-synced"),
             meta_path: format!("{path}-info"),
