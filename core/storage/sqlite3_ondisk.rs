@@ -728,24 +728,42 @@ impl PageContent {
     }
 
     /// Get region(start end length) of a cell's payload
+    /// FIXME: make all usages of [cell_get_raw_region] to use the _faster version in cases where the method is called
+    /// repeatedly, since page_type, max_local, min_local are the same for all cells on the page. Also consider whether
+    /// max_local and min_local should be static properties of the page.
     pub fn cell_get_raw_region(&self, idx: usize, usable_size: usize) -> (usize, usize) {
+        let page_type = self.page_type();
+        let max_local = payload_overflow_threshold_max(page_type, usable_size);
+        let min_local = payload_overflow_threshold_min(page_type, usable_size);
+        let cell_count = self.cell_count();
+        self._cell_get_raw_region_faster(
+            idx,
+            usable_size,
+            cell_count,
+            max_local,
+            min_local,
+            page_type,
+        )
+    }
+
+    /// Get region(start end length) of a cell's payload
+    pub fn _cell_get_raw_region_faster(
+        &self,
+        idx: usize,
+        usable_size: usize,
+        cell_count: usize,
+        max_local: usize,
+        min_local: usize,
+        page_type: PageType,
+    ) -> (usize, usize) {
         let buf = self.as_ptr();
-        let ncells = self.cell_count();
-        assert!(idx < ncells, "cell_get: idx out of bounds");
+        assert!(idx < cell_count, "cell_get: idx out of bounds");
         let start = self.cell_get_raw_start_offset(idx);
-        let payload_overflow_threshold_max =
-            payload_overflow_threshold_max(self.page_type(), usable_size);
-        let payload_overflow_threshold_min =
-            payload_overflow_threshold_min(self.page_type(), usable_size);
-        let len = match self.page_type() {
+        let len = match page_type {
             PageType::IndexInterior => {
                 let (len_payload, n_payload) = read_varint(&buf[start + 4..]).unwrap();
-                let (overflows, to_read) = payload_overflows(
-                    len_payload as usize,
-                    payload_overflow_threshold_max,
-                    payload_overflow_threshold_min,
-                    usable_size,
-                );
+                let (overflows, to_read) =
+                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
                 if overflows {
                     4 + to_read + n_payload
                 } else {
@@ -758,12 +776,8 @@ impl PageContent {
             }
             PageType::IndexLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[start..]).unwrap();
-                let (overflows, to_read) = payload_overflows(
-                    len_payload as usize,
-                    payload_overflow_threshold_max,
-                    payload_overflow_threshold_min,
-                    usable_size,
-                );
+                let (overflows, to_read) =
+                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
                 if overflows {
                     to_read + n_payload
                 } else {
@@ -777,12 +791,8 @@ impl PageContent {
             PageType::TableLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[start..]).unwrap();
                 let (_, n_rowid) = read_varint(&buf[start + n_payload..]).unwrap();
-                let (overflows, to_read) = payload_overflows(
-                    len_payload as usize,
-                    payload_overflow_threshold_max,
-                    payload_overflow_threshold_min,
-                    usable_size,
-                );
+                let (overflows, to_read) =
+                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
                 if overflows {
                     to_read + n_payload + n_rowid
                 } else {
