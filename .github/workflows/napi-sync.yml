@@ -99,7 +99,7 @@ jobs:
         if: ${{ matrix.settings.docker }}
         with:
           image: ${{ matrix.settings.docker }}
-          options: "--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build/bindings/javascript"
+          options: "--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build/packages/turso-sync-js"
           run: ${{ matrix.settings.build }}
       - name: Build
         run: ${{ matrix.settings.build }}
@@ -108,13 +108,13 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
+          name: turso-sync-js-${{ matrix.settings.target }}
           path: |
-            packages/turso-sync-js/${{ env.APP_NAME }}.*.node
-            packages/turso-sync-js/${{ env.APP_NAME }}.*.wasm
+            packages/${{ env.APP_NAME }}.*.node
+            packages/${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
   test-macOS-windows-binding:
-    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
+    name: Test turso-sync-js on ${{ matrix.settings.target }} - node@${{ matrix.node }}
     needs:
       - build
     strategy:
@@ -138,15 +138,15 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
-          path: bindings/javascript
+          name: turso-sync-js-${{ matrix.settings.target }}
+          path: packages/turso-sync-js
       - name: List packages
         run: ls -R .
         shell: bash
-      - name: Test bindings
+      - name: Test turso-sync-js
         run: yarn test
   test-linux-x64-gnu-binding:
-    name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
+    name: Test turso-sync-js on Linux-x64-gnu - node@${{ matrix.node }}
     needs:
       - build
     strategy:
@@ -166,12 +166,12 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bindings-x86_64-unknown-linux-gnu
-          path: bindings/javascript
+          name: turso-sync-js-x86_64-unknown-linux-gnu
+          path: packages/turso-sync-js
       - name: List packages
         run: ls -R .
         shell: bash
-      - name: Test bindings
+      - name: Test turso-sync-js
         run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim yarn test
   universal-macOS:
     name: Build universal macOS binary
@@ -189,13 +189,13 @@ jobs:
       - name: Download macOS x64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: bindings-x86_64-apple-darwin
-          path: bindings/javascript
+          name: turso-sync-js-x86_64-apple-darwin
+          path: packages/turso-sync-js
       - name: Download macOS arm64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: bindings-aarch64-apple-darwin
-          path: bindings/javascript
+          name: turso-sync-js-aarch64-apple-darwin
+          path: packages/turso-sync-js
       - name: List packages
         run: ls -R .
         shell: bash
@@ -204,10 +204,10 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-universal-apple-darwin
+          name: turso-sync-js-universal-apple-darwin
           path: |
-            packages/turso-sync-js/${{ env.APP_NAME }}.*.node
-            packages/turso-sync-js/${{ env.APP_NAME }}.*.wasm
+            packages/${{ env.APP_NAME }}.*.node
+            packages/${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
   publish:
     name: Publish
@@ -233,7 +233,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: bindings/javascript/artifacts
+          path: packages/turso-sync-js/artifacts
       - name: Move artifacts
         run: yarn artifacts
       - name: List packages
