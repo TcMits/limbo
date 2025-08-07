@@ -318,7 +318,7 @@ pub unsafe extern "C" fn sqlite3_reset(stmt: *mut sqlite3_stmt) -> ffi::c_int {
 pub unsafe extern "C" fn sqlite3_changes(db: *mut sqlite3) -> ffi::c_int {
     let db: &mut sqlite3 = &mut *db;
     let inner = db.inner.lock().unwrap();
-    return inner.conn.changes() as ffi::c_int;
+    inner.conn.changes() as ffi::c_int
 }
 
 #[no_mangle]
@@ -362,14 +362,14 @@ pub unsafe extern "C" fn sqlite3_get_autocommit(_db: *mut sqlite3) -> ffi::c_int
 pub unsafe extern "C" fn sqlite3_total_changes(db: *mut sqlite3) -> ffi::c_int {
     let db: &mut sqlite3 = &mut *db;
     let inner = db.inner.lock().unwrap();
-    return inner.conn.total_changes() as ffi::c_int;
+    inner.conn.total_changes() as ffi::c_int
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_last_insert_rowid(db: *mut sqlite3) -> ffi::c_int {
     let db: &mut sqlite3 = &mut *db;
     let inner = db.inner.lock().unwrap();
-    return inner.conn.last_insert_rowid() as ffi::c_int;
+    inner.conn.last_insert_rowid() as ffi::c_int
 }
 
 #[no_mangle]
@@ -486,7 +486,7 @@ pub unsafe extern "C" fn sqlite3_data_count(stmt: *mut sqlite3_stmt) -> ffi::c_i
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_parameter_count(stmt: *mut sqlite3_stmt) -> ffi::c_int {
     let stmt = &*stmt;
-    return stmt.stmt.parameters_count() as ffi::c_int;
+    stmt.stmt.parameters_count() as ffi::c_int
 }
 
 #[no_mangle]
@@ -499,10 +499,9 @@ pub unsafe extern "C" fn sqlite3_bind_parameter_name(
 
     if let Some(val) = stmt.stmt.parameters().name(index) {
         let c_string = CString::new(val).expect("CString::new failed");
-        let c_ptr = c_string.into_raw();
-        return c_ptr;
+        c_string.into_raw()
     } else {
-        return std::ptr::null();
+        std::ptr::null()
     }
 }
 
@@ -519,7 +518,7 @@ pub unsafe extern "C" fn sqlite3_bind_null(stmt: *mut sqlite3_stmt, idx: ffi::c_
 
     stmt.stmt
         .bind_at(NonZero::new_unchecked(idx as usize), Value::Null);
-    return SQLITE_OK;
+    SQLITE_OK
 }
 
 #[no_mangle]
@@ -605,7 +604,7 @@ pub unsafe extern "C" fn sqlite3_column_type(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_count(stmt: *mut sqlite3_stmt) -> ffi::c_int {
     let stmt = &mut *stmt;
-    return stmt.stmt.num_columns() as ffi::c_int;
+    stmt.stmt.num_columns() as ffi::c_int
 }
 
 #[no_mangle]
@@ -627,8 +626,7 @@ pub unsafe extern "C" fn sqlite3_column_name(
     let binding = stmt.stmt.get_column_name(idx).into_owned();
     let val = binding.as_str();
     let c_string = CString::new(val).expect("CString::new failed");
-    let c_ptr = c_string.into_raw();
-    c_ptr
+    c_string.into_raw()
 }
 
 #[no_mangle]
