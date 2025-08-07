@@ -38,3 +38,4 @@ testing/*.log
 limbostress.log
 simulator.log
 **/*.txt
+profile.json.gz
