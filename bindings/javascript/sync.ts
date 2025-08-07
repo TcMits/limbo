@@ -34,8 +34,7 @@ function createErrorByName(name, message) {
 /**
  * Database represents a connection that can prepare and execute SQL statements.
  */
-export class Database {
-  static SqliteError = SqliteError;
+class Database {
   db: NativeDB;
   memory: boolean;
   open: boolean;
@@ -93,7 +92,7 @@ export class Database {
     if (!this.open) {
       throw new TypeError("The database connection is not open");
     }
-    
+
     if (!sql) {
       throw new RangeError("The supplied SQL string contains no statements");
     }
@@ -196,7 +195,7 @@ export class Database {
     if (!this.open) {
       throw new TypeError("The database connection is not open");
     }
-    
+
     try {
       this.db.batch(sql);
     } catch (err) {
@@ -323,7 +322,7 @@ class Statement {
   *iterate(...bindParameters) {
     this.stmt.reset();
     bindParams(this.stmt, bindParameters);
-    
+
     while (true) {
       const stepResult = this.stmt.step();
       if (stepResult === STEP_IO) {
@@ -393,3 +392,5 @@ class Statement {
     }
   }
 }
+
+export { Database, SqliteError }

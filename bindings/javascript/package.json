@@ -6,17 +6,12 @@
     "url": "https://github.com/tursodatabase/turso"
   },
   "description": "The Turso database library",
-  "module": "./promise.mjs",
-  "main": "./promise.cjs",
+  "module": "./dist/promise.js",
+  "main": "./dist/promise.js",
+  "type": "module",
   "exports": {
-    ".": {
-      "require": "./promise.cjs",
-      "import": "./promise.mjs"
-    },
-    "./sync": {
-      "require": "./sync.cjs",
-      "import": "./sync.mjs"
-    }
+    ".": "./dist/promise.js",
+    "./sync": "./dist/sync.js"
   },
   "files": [
     "browser.js",
@@ -53,8 +48,8 @@
     "node": ">= 10"
   },
   "scripts": {
-    "artifacts": "napi artifacts && tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json",
-    "build": "napi build --platform --release",
+    "artifacts": "napi artifacts && tsc -p tsconfig.json",
+    "build": "napi build --platform --release --esm",
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "true",
