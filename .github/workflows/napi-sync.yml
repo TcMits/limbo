@@ -12,7 +12,7 @@ on:
 
 env:
   DEBUG: napi:*
-  APP_NAME: sync
+  APP_NAME: turso-sync-js
   MACOSX_DEPLOYMENT_TARGET: "10.13"
 
 defaults:
