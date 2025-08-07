@@ -91,6 +91,10 @@ pub fn pragma_for(pragma: &PragmaName) -> Pragma {
             PragmaFlags::NeedSchema | PragmaFlags::Result0 | PragmaFlags::SchemaReq,
             &["mode", "table"],
         ),
+        QueryOnly => Pragma::new(
+            PragmaFlags::Result0 | PragmaFlags::NoColumns1,
+            &["query_only"],
+        ),
     }
 }
 

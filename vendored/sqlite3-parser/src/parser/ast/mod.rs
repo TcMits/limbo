@@ -1824,6 +1824,8 @@ pub enum PragmaName {
     UserVersion,
     /// trigger a checkpoint to run on database(s) if WAL is enabled
     WalCheckpoint,
+    /// make connection query only
+    QueryOnly,
 }
 
 /// `CREATE TRIGGER` time

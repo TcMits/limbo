@@ -4,7 +4,7 @@
 use chrono::Datelike;
 use std::rc::Rc;
 use std::sync::Arc;
-use turso_sqlite3_parser::ast::{self, ColumnDefinition, Expr};
+use turso_sqlite3_parser::ast::{self, ColumnDefinition, Expr, Literal, Name};
 use turso_sqlite3_parser::ast::{PragmaName, QualifiedName};
 
 use crate::pragma::pragma_for;
@@ -262,6 +262,14 @@ fn update_pragma(
             Ok((program, TransactionMode::Write))
         }
         PragmaName::DatabaseList => unreachable!("database_list cannot be set"),
+        PragmaName::QueryOnly => query_pragma(
+            PragmaName::QueryOnly,
+            schema,
+            Some(value),
+            pager,
+            connection,
+            program,
+        ),
     }
 }
 
@@ -481,6 +489,36 @@ fn query_pragma(
             program.add_pragma_result_column(pragma.columns[0].to_string());
             program.add_pragma_result_column(pragma.columns[1].to_string());
             Ok((program, TransactionMode::Read))
+        }
+        PragmaName::QueryOnly => {
+            if let Some(value_expr) = value {
+                let is_query_only = match value_expr {
+                    ast::Expr::Literal(Literal::Numeric(i)) => i.parse::<i64>().unwrap() != 0,
+                    ast::Expr::Literal(Literal::String(ref s)) => {
+                        let s = s.to_lowercase();
+                        s == "1" || s == "on" || s == "true"
+                    }
+                    ast::Expr::Name(Name::Ident(s)) => {
+                        let s = s.to_lowercase();
+                        s == "1" || s == "on" || s == "true"
+                    }
+                    _ => {
+                        return Err(LimboError::ParseError(format!(
+                            "Invalid value for PRAGMA query_only: {value_expr:?}"
+                        )));
+                    }
+                };
+                connection.set_query_only(is_query_only);
+                return Ok((program, TransactionMode::None));
+            };
+
+            let register = program.alloc_register();
+            let is_query_only = connection.get_query_only();
+            program.emit_int(is_query_only as i64, register);
+            program.emit_result_row(register, 1);
+            program.add_pragma_result_column(pragma.to_string());
+
+            Ok((program, TransactionMode::None))
         }
     }
 }
