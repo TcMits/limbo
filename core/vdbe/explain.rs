@@ -1645,6 +1645,15 @@ pub fn insn_to_str(
                 0,
                 format!("drop_column({table}, {column_index})"),
             ),
+            Insn::AddColumn { table, column } => (
+                "AddColumn",
+                0,
+                0,
+                0,
+                Value::build_text(""),
+                0,
+                format!("add_column({table}, {column:?})"),
+            ),
             Insn::MaxPgcnt { db, dest, new_max } => (
                 "MaxPgcnt",
                 *db as i32,

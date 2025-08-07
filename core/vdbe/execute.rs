@@ -6871,13 +6871,13 @@ pub fn op_drop_column(
     pager: &Rc<Pager>,
     mv_store: Option<&Arc<MvStore>>,
 ) -> Result<InsnFunctionStepResult> {
-    let Insn::DropColumn {
-        table,
-        column_index,
-    } = insn
-    else {
-        unreachable!("unexpected Insn {:?}", insn)
-    };
+    load_insn!(
+        DropColumn {
+            table,
+            column_index
+        },
+        insn
+    );
 
     let conn = program.connection.clone();
 
@@ -6887,16 +6887,45 @@ pub fn op_drop_column(
             .get_mut(table)
             .expect("table being renamed should be in schema");
 
-        {
-            let table = Arc::make_mut(table);
+        let table = Arc::make_mut(table);
 
-            let Table::BTree(btree) = table else {
-                panic!("only btree tables can be renamed");
-            };
+        let Table::BTree(btree) = table else {
+            panic!("only btree tables can be renamed");
+        };
 
-            let btree = Arc::make_mut(btree);
-            btree.columns.remove(*column_index)
-        }
+        let btree = Arc::make_mut(btree);
+        btree.columns.remove(*column_index)
+    });
+
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
+pub fn op_add_column(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    load_insn!(AddColumn { table, column }, insn);
+
+    let conn = program.connection.clone();
+
+    conn.with_schema_mut(|schema| {
+        let table = schema
+            .tables
+            .get_mut(table)
+            .expect("table being renamed should be in schema");
+
+        let table = Arc::make_mut(table);
+
+        let Table::BTree(btree) = table else {
+            panic!("only btree tables can be renamed");
+        };
+
+        let btree = Arc::make_mut(btree);
+        btree.columns.push(column.clone())
     });
 
     state.pc += 1;

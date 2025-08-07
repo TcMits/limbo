@@ -181,7 +181,7 @@ pub fn translate_alter_table(
                 }
             }
 
-            btree.columns.push(column);
+            btree.columns.push(column.clone());
 
             let sql = btree.to_sql();
             let mut escaped = String::with_capacity(sql.len());
@@ -219,9 +219,9 @@ pub fn translate_alter_table(
                         value: schema.schema_version as i32 + 1,
                         p5: 0,
                     });
-                    program.emit_insn(Insn::ParseSchema {
-                        db: usize::MAX, // TODO: This value is unused, change when we do something with it
-                        where_clause: None,
+                    program.emit_insn(Insn::AddColumn {
+                        table: table_name.to_owned(),
+                        column,
                     });
                 },
             )?

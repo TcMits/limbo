@@ -5,7 +5,7 @@ use std::{
 
 use super::{execute, AggFunc, BranchOffset, CursorID, FuncCtx, InsnFunction, PageIdx};
 use crate::{
-    schema::{Affinity, BTreeTable, Index},
+    schema::{Affinity, BTreeTable, Column, Index},
     storage::{pager::CreateBTreeFlags, wal::CheckpointMode},
     translate::collate::CollationSeq,
     Value,
@@ -1034,6 +1034,10 @@ pub enum Insn {
         table: String,
         column_index: usize,
     },
+    AddColumn {
+        table: String,
+        column: Column,
+    },
     /// Try to set the maximum page count for database P1 to the value in P3.
     /// Do not let the maximum page count fall below the current page count and
     /// do not change the maximum page count value if P3==0.
@@ -1182,6 +1186,7 @@ impl Insn {
             Insn::IntegrityCk { .. } => execute::op_integrity_check,
             Insn::RenameTable { .. } => execute::op_rename_table,
             Insn::DropColumn { .. } => execute::op_drop_column,
+            Insn::AddColumn { .. } => execute::op_add_column,
             Insn::MaxPgcnt { .. } => execute::op_max_pgcnt,
             Insn::JournalMode { .. } => execute::op_journal_mode,
         }
