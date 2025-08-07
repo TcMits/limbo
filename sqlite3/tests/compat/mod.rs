@@ -301,8 +301,7 @@ mod tests {
             let param_count = sqlite3_bind_parameter_count(stmt);
             assert_eq!(param_count, 2);
 
-            println!("parameter count {}", param_count);
-
+            println!("parameter count {param_count}");
             let name1 = sqlite3_bind_parameter_name(stmt, 1);
             assert!(!name1.is_null());
             let name1_str = std::ffi::CStr::from_ptr(name1).to_str().unwrap();
@@ -359,9 +358,8 @@ mod tests {
 
             let last_rowid = sqlite3_last_insert_rowid(db);
             assert!(last_rowid > 0);
-            println!("last insert rowid: {}", last_rowid);
-
-            let query = format!("SELECT value FROM test_rowid WHERE rowid = {}", last_rowid);
+            println!("last insert rowid: {last_rowid}");
+            let query = format!("SELECT value FROM test_rowid WHERE rowid = {last_rowid}");
             let query_cstring = std::ffi::CString::new(query).unwrap();
 
             let mut stmt = std::ptr::null_mut();
