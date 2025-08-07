@@ -2136,8 +2136,8 @@ impl BTreeCursor {
         if let CursorState::None = &self.state {
             self.state = CursorState::Write(WriteState::Start);
         }
+        let usable_space = self.usable_space();
         let ret = loop {
-            let usable_space = self.usable_space();
             let CursorState::Write(write_state) = &mut self.state else {
                 panic!("expected write state");
             };
