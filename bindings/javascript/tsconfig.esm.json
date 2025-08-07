@@ -4,6 +4,9 @@
     "module": "esnext",
     "target": "esnext",
     "outDir": "dist/esm",
+    "lib": [
+      "es2020"
+    ],
     "paths": {
       "#entry-point": [
         "./index.js"

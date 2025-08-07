@@ -4,6 +4,9 @@
     "module": "commonjs",
     "target": "es2015",
     "outDir": "dist/cjs",
+    "lib": [
+      "es2020"
+    ],
     "paths": {
       "#entry-point": [
         "./index.js"
