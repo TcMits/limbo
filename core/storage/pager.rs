@@ -2433,7 +2433,8 @@ mod ptrmap_tests {
         ));
 
         //  Construct interfaces for the pager
-        let sz = initial_db_pages + 10;
+        let pages = initial_db_pages + 10;
+        let sz = std::cmp::max(std::cmp::min(pages, 64), pages);
         let buffer_pool = BufferPool::begin_init(&io, (sz * page_size) as usize);
         let page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(sz as usize)));
 

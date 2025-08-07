@@ -131,11 +131,13 @@ impl BufferPool {
     pub const DEFAULT_PAGE_SIZE: usize = 4096;
     /// Maximum size for each Arena (64MB total)
     const MAX_ARENA_SIZE: usize = 32 * 1024 * 1024;
-
+    /// 64kb Minimum arena size
+    const MIN_ARENA_SIZE: usize = 1024 * 64;
     fn new(arena_size: usize) -> Self {
         turso_assert!(
-            arena_size < Self::MAX_ARENA_SIZE,
-            "Arena size cannot exceed {} bytes",
+            (Self::MIN_ARENA_SIZE..Self::MAX_ARENA_SIZE).contains(&arena_size),
+            "Arena size needs to be between {}..{} bytes",
+            Self::MIN_ARENA_SIZE,
             Self::MAX_ARENA_SIZE
         );
         Self {
@@ -416,26 +418,37 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(UNREGISTERED_START);
 
 impl Arena {
     /// Create a new arena with the given size and page size.
+    /// NOTE: Minimum arena size is page_size * 64
     fn new(page_size: usize, arena_size: usize, io: &Arc<dyn IO>) -> Result<Self, String> {
-        let ptr = unsafe { arena::alloc(arena_size) };
+        let min_pages = arena_size.div_ceil(page_size);
+        let rounded_pages = (min_pages.max(64) + 63) & !63;
+        let rounded_bytes = rounded_pages * page_size;
+        // Guard against the global cap
+        if rounded_bytes > BufferPool::MAX_ARENA_SIZE {
+            return Err(format!(
+                "arena size {} B exceeds hard limit of {} B",
+                rounded_bytes,
+                BufferPool::MAX_ARENA_SIZE
+            ));
+        }
+        let ptr = unsafe { arena::alloc(rounded_bytes) };
         let base = NonNull::new(ptr).ok_or("Failed to allocate arena")?;
-        let total_pages = arena_size / page_size;
         let id = io
-            .register_fixed_buffer(base, arena_size)
+            .register_fixed_buffer(base, rounded_bytes)
             .unwrap_or_else(|_| {
                 // Register with io_uring if possible, otherwise use next available ID
                 let next_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
                 tracing::trace!("Allocating arena with id {}", next_id);
                 next_id
             });
-
+        let map = PageBitmap::new(rounded_pages as u32);
         Ok(Self {
             id,
             base,
-            free_pages: SpinLock::new(PageBitmap::new(total_pages as u32)),
+            free_pages: SpinLock::new(map),
             allocated_pages: AtomicUsize::new(0),
             page_size,
-            arena_size,
+            arena_size: rounded_bytes,
         })
     }
 
@@ -463,6 +476,10 @@ impl Arena {
     /// Mark `count` pages starting at `page_idx` as free.
     pub fn free(&self, page_idx: u32, count: usize) {
         let mut bm = self.free_pages.lock();
+        turso_assert!(
+            !bm.check_run_free(page_idx, count as u32),
+            "must not already be marked free"
+        );
         bm.free_run(page_idx, count as u32);
         self.allocated_pages.fetch_sub(count, Ordering::Relaxed);
     }

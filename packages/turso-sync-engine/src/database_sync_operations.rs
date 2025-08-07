@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use turso_core::{types::Text, Buffer, Completion, LimboError, Value};
 
@@ -48,7 +48,7 @@ pub async fn db_bootstrap<C: ProtocolIO>(
             let content_len = chunk.len();
             // todo(sivukhin): optimize allocations here
             #[allow(clippy::arc_with_non_send_sync)]
-            let buffer = Arc::new(Buffer::allocate(chunk.len(), Rc::new(|_| {})));
+            let buffer = Arc::new(Buffer::new_temporary(chunk.len()));
             buffer.as_mut_slice().copy_from_slice(chunk);
             let mut completions = Vec::with_capacity(dbs.len());
             for db in dbs {
