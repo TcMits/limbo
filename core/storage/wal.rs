@@ -1279,11 +1279,12 @@ impl WalFile {
         let shared = self.get_shared();
         {
             let mut frame_cache = shared.frame_cache.lock();
-            let frames = frame_cache.get_mut(&page_id);
-            match frames.filter(|frames| !frames.is_empty()) {
+            match frame_cache.get_mut(&page_id) {
                 Some(frames) => {
-                    let pages_in_frames = shared.pages_in_frames.lock();
-                    turso_assert!(pages_in_frames.contains(&page_id), "page_id={page_id} must be in pages_in_frames if it's also already in frame_cache: pages_in_frames={:?}, frames={:?}", *pages_in_frames, frames);
+                    if frames.is_empty() {
+                        let mut pages_in_frames = shared.pages_in_frames.lock();
+                        pages_in_frames.push(page_id);
+                    }
                     frames.push(frame_id);
                 }
                 None => {
