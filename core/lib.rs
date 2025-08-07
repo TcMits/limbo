@@ -1841,8 +1841,6 @@ impl Connection {
     }
 
     pub fn get_used_vtab_mods(&self) -> std::collections::HashSet<String> {
-        let mut mods: std::collections::HashSet<String> = std::collections::HashSet::new();
-
         let schema = self._db.schema.lock().unwrap();
 
         schema
