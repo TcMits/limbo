@@ -2559,8 +2559,8 @@ impl BTreeCursor {
                         // Hence: when we enter this branch with overflow_cells.len() == 1, we know that left-shifting has happened and we need to subtract 1.
                         let actual_cell_idx = first_cell_divider + sibling_pointer
                             - parent_contents.overflow_cells.len();
-                        let (start_of_cell, _) =
-                            parent_contents.cell_get_raw_region(actual_cell_idx, usable_space);
+                        let start_of_cell =
+                            parent_contents.cell_get_raw_start_offset(actual_cell_idx);
                         let buf = parent_contents.as_ptr().as_mut_ptr();
                         unsafe { buf.add(start_of_cell) }
                     };

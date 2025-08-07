@@ -720,6 +720,13 @@ impl PageContent {
         self.offset + self.header_size()
     }
 
+    /// Get the start offset of a cell's payload, not taking into account the 100-byte offset that is present on page 1.
+    pub fn cell_get_raw_start_offset(&self, idx: usize) -> usize {
+        let cell_pointer_array_start = self.cell_pointer_array_offset();
+        let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
+        self.read_u16_no_offset(cell_pointer) as usize
+    }
+
     /// Get region(start end length) of a cell's payload
     pub fn cell_get_raw_region(&self, idx: usize, usable_size: usize) -> (usize, usize) {
         let buf = self.as_ptr();
