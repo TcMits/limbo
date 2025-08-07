@@ -319,7 +319,22 @@ class Statement {
    * @param bindParameters - The bind parameters for executing the statement.
    */
   *iterate(...bindParameters) {
-    throw new Error("not implemented");
+    this.stmt.reset();
+    bindParams(this.stmt, bindParameters);
+    
+    while (true) {
+      const stepResult = this.stmt.step();
+      if (stepResult === STEP_IO) {
+        this.db.db.ioLoopSync();
+        continue;
+      }
+      if (stepResult === STEP_DONE) {
+        break;
+      }
+      if (stepResult === STEP_ROW) {
+        yield this.stmt.row();
+      }
+    }
   }
 
   /**
