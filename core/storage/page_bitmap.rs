@@ -67,14 +67,13 @@ impl PageBitmap {
     /// If `n_pages` is not a multiple of 64, the trailing bits in the last
     /// word are marked as allocated to prevent out-of-bounds allocations.
     pub fn new(n_pages: u32) -> Self {
-        turso_assert!(n_pages > 0, "PageBitmap must have at least one page");
-        let n_words = n_pages.div_ceil(Self::WORD_BITS) as usize;
-        let mut words = vec![Self::ALL_FREE; n_words].into_boxed_slice();
+        turso_assert!(
+            n_pages % 64 == 0,
+            "number of pages in map must be a multiple of 64"
+        );
+        let n_words = (n_pages / Self::WORD_BITS) as usize;
+        let words = vec![Self::ALL_FREE; n_words].into_boxed_slice();
 
-        let trailing_bits = n_pages % Self::WORD_BITS;
-        if trailing_bits != 0 {
-            words[n_words - 1] &= (1u64 << trailing_bits) - 1;
-        }
         Self {
             words,
             n_pages,
@@ -196,37 +195,6 @@ impl PageBitmap {
         None
     }
 
-    #[inline]
-    fn masked_word(&self, idx: usize) -> u64 {
-        let word = self.words[idx];
-        if idx + 1 != self.words.len() {
-            // fast path, if it's not the last word we can use it as-is
-            return word;
-        }
-        // otherwise keep invalid tail bits treated as allocated
-        let trailing = self.n_pages % Self::WORD_BITS;
-        if trailing == 0 {
-            word
-        } else {
-            word & ((1u64 << trailing) - 1)
-        }
-    }
-
-    #[inline]
-    fn is_full_free(&self, idx: usize) -> bool {
-        if idx + 1 != self.words.len() {
-            return self.words[idx] == Self::ALL_FREE;
-        }
-
-        // handle the case where the last word has some bits that we dont include
-        let trailing = self.n_pages % Self::WORD_BITS;
-        if trailing == 0 {
-            self.words[idx] == Self::ALL_FREE
-        } else {
-            self.masked_word(idx) == ((1u64 << trailing) - 1)
-        }
-    }
-
     /// Find an unallocated sequence of `need` pages, scanning *upward* from `start`
     ///
     /// Overview:
@@ -257,7 +225,7 @@ impl PageBitmap {
             let (word_idx, bit_offset) = Self::page_to_word_and_bit(pos);
 
             // Current word from bit_offset onward
-            let current_word = self.masked_word(word_idx) & Self::mask_from(bit_offset);
+            let current_word = self.words[word_idx] & Self::mask_from(bit_offset);
             if current_word == 0 {
                 // Jump to next word boundary
                 pos = ((word_idx + 1) as u32) << Self::WORD_SHIFT;
@@ -269,7 +237,7 @@ impl PageBitmap {
             let run_start = ((word_idx as u32) << Self::WORD_SHIFT) + first_free_bit;
 
             // Free span within this word
-            let free_in_cur = Self::run_len_from(self.masked_word(word_idx), first_free_bit);
+            let free_in_cur = Self::run_len_from(self.words[word_idx], first_free_bit);
             if free_in_cur >= need {
                 return Some(run_start);
             }
@@ -286,7 +254,7 @@ impl PageBitmap {
 
             while pages_found + Self::WORD_BITS <= need
                 && wi < self.words.len()
-                && self.is_full_free(wi)
+                && self.words[wi] == Self::ALL_FREE
             {
                 pages_found += Self::WORD_BITS;
                 wi += 1;
@@ -298,7 +266,7 @@ impl PageBitmap {
             // Tail in the next partial word
             if wi < self.words.len() {
                 let remaining = need - pages_found;
-                let w = self.masked_word(wi);
+                let w = self.words[wi];
                 let tail = (!w).trailing_zeros();
                 if tail >= remaining {
                     return Some(run_start);
@@ -346,7 +314,7 @@ impl PageBitmap {
     ///
     /// Word 1: ...11111111_11110000  (bits 60-63 must be checked)
     /// Word 2: 00000000_01111111...  (bits 0-6 must be checked)
-    pub fn check_run_free(&self, start: u32, len: u32) -> bool {
+    fn check_run_free(&self, start: u32, len: u32) -> bool {
         if start + len > self.n_pages {
             return false;
         }
@@ -405,13 +373,6 @@ impl PageBitmap {
             word_idx += 1;
             bit_offset = 0;
         }
-        // keep last-word tail clamped to the proper amount of pages
-        let last = self.words.len() - 1;
-        self.words[last] &= if (self.n_pages % Self::WORD_BITS) == 0 {
-            Self::ALL_FREE
-        } else {
-            (1u64 << (self.n_pages % Self::WORD_BITS)) - 1
-        };
     }
 }
 
@@ -465,29 +426,9 @@ pub mod tests {
     }
 
     #[test]
-    fn new_masks_trailing_bits() {
-        for n_pages in [1, 63, 64, 65, 127, 128, 129, 255, 256, 1023] {
-            let pb = PageBitmap::new(n_pages);
-            let free = pb_free_vec(&pb);
-            assert_eq!(free.len(), n_pages as usize);
-            assert!(free.iter().all(|&b| b), "all pages should start free");
-
-            if n_pages > 0 {
-                let words_len = pb.words.len();
-                let valid_bits = (n_pages as usize) & 63;
-                if valid_bits != 0 {
-                    let last = pb.words[words_len - 1];
-                    let mask = (1u64 << valid_bits) - 1;
-                    assert_eq!(last & !mask, 0, "bits beyond n_pages must be 0");
-                }
-            }
-        }
-    }
-
-    #[test]
     fn alloc_one_exhausts_all() {
-        let mut pb = PageBitmap::new(257);
-        let mut model = vec![true; 257];
+        let mut pb = PageBitmap::new(256);
+        let mut model = vec![true; 256];
 
         let mut count = 0;
         while let Some(idx) = pb.alloc_one() {
@@ -495,15 +436,15 @@ pub mod tests {
             model[idx as usize] = false;
             count += 1;
         }
-        assert_eq!(count, 257, "should allocate all pages once");
+        assert_eq!(count, 256, "should allocate all pages once");
         assert!(pb.alloc_one().is_none(), "no pages left");
         assert_equivalent(&pb, &model);
     }
 
     #[test]
     fn alloc_run_basic_and_free() {
-        let mut pb = PageBitmap::new(200);
-        let mut model = vec![true; 200];
+        let mut pb = PageBitmap::new(128);
+        let mut model = vec![true; 128];
 
         let need = 70;
         let start = pb.alloc_run(need).expect("expected a run");
@@ -575,14 +516,7 @@ pub mod tests {
         ];
         for &seed in seeds {
             let mut rng = StdRng::seed_from_u64(seed);
-            let n_pages = match rng.gen_range(0..6) {
-                0 => 777,
-                1 => 1,
-                2 => 63,
-                3 => 64,
-                4 => 65,
-                _ => rng.gen_range(1..=2048),
-            } as u32;
+            let n_pages = rng.gen_range(1..10) * 64;
 
             let mut pb = PageBitmap::new(n_pages);
             let mut model = vec![true; n_pages as usize];
@@ -658,10 +592,10 @@ pub mod tests {
             assert!(pb.check_run_free(start, len));
         }
 
-        let mut pb = PageBitmap::new(100);
-        assert_eq!(pb.alloc_run(100), Some(0));
-        pb.free_run(0, 100);
-        assert_eq!(pb.alloc_run(101), None);
+        let mut pb = PageBitmap::new(128);
+        assert_eq!(pb.alloc_run(128), Some(0));
+        pb.free_run(0, 128);
+        assert_eq!(pb.alloc_run(129), None);
 
         for i in (10..100).step_by(20) {
             pb.mark_run(i, 10, false);
@@ -669,7 +603,7 @@ pub mod tests {
         assert_eq!(pb.alloc_run(10), Some(0));
         assert_eq!(pb.alloc_run(10), Some(20));
         assert_eq!(pb.alloc_run(10), Some(40));
-        assert_eq!(pb.alloc_run(11), None);
+        assert_eq!(pb.alloc_run(11), Some(100));
     }
 
     #[test]
