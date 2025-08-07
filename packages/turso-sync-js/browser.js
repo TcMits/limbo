@@ -1,1 +1,1 @@
-export * from 'turso-sync-js-wasm32-wasi'
+export * from '@tursodatabase/sync-wasm32-wasi'

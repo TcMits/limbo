@@ -1,101 +1,63 @@
 {
-  "name": "turso-sync-js",
-  "version": "1.0.0",
-  "description": "Template project for writing node package with napi-rs",
-  "main": "index.js",
-  "repository": "git@github.com:napi-rs/package-template.git",
-  "license": "MIT",
-  "keywords": [
-    "napi-rs",
-    "NAPI",
-    "N-API",
-    "Rust",
-    "node-addon",
-    "node-addon-api"
-  ],
+  "name": "@tursodatabase/sync",
+  "version": "0.1.4-pre.2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tursodatabase/turso"
+  },
+  "description": "Sync engine for the Turso database library",
+  "module": "./dist/sync_engine.js",
+  "main": "./dist/sync_engine.js",
+  "type": "module",
+  "exports": "./dist/sync_engine.js",
   "files": [
-    "index.d.ts",
-    "index.js"
+    "browser.js",
+    "index.js",
+    "dist/**"
   ],
+  "types": "./dist/sync_engine.d.ts",
   "napi": {
     "binaryName": "turso-sync-js",
     "targets": [
-      "x86_64-pc-windows-msvc",
       "x86_64-unknown-linux-gnu",
-      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "universal-apple-darwin",
       "wasm32-wasip1-threads"
     ]
   },
-  "engines": {
-    "node": ">= 6.14.2 < 7 || >= 8.11.2 < 9 || >= 9.11.0 < 10 || >= 10.0.0"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
-  },
-  "scripts": {
-    "artifacts": "napi artifacts",
-    "bench": "node --import @oxc-node/core/register benchmark/bench.ts && tsc -p tsconfig.json",
-    "build": "napi build --platform --release --esm",
-    "build:debug": "napi build --platform",
-    "format": "run-p format:prettier format:rs format:toml",
-    "format:prettier": "prettier . -w",
-    "format:toml": "taplo format",
-    "format:rs": "cargo fmt",
-    "lint": "oxlint .",
-    "prepublishOnly": "napi prepublish -t npm",
-    "test": "ava",
-    "version": "napi version",
-    "prepare": "husky"
-  },
+  "license": "MIT",
   "devDependencies": {
-    "@emnapi/core": "^1.4.5",
-    "@emnapi/runtime": "^1.4.5",
-    "@napi-rs/cli": "^3.0.3",
-    "@oxc-node/core": "^0.0.30",
-    "@taplo/cli": "^0.7.0",
-    "@tybys/wasm-util": "^0.10.0",
-    "ava": "^6.4.1",
-    "chalk": "^5.4.1",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.1.2",
-    "npm-run-all2": "^8.0.4",
-    "oxlint": "^1.8.0",
-    "prettier": "^3.6.2",
-    "tinybench": "^4.0.1",
-    "typescript": "^5.8.3"
-  },
-  "lint-staged": {
-    "*.@(js|ts|tsx)": [
-      "oxlint --fix"
-    ],
-    "*.@(js|ts|tsx|yml|yaml|md|json)": [
-      "prettier --write"
-    ],
-    "*.toml": [
-      "taplo format"
-    ]
+    "@napi-rs/cli": "^3.0.4",
+    "@napi-rs/wasm-runtime": "^1.0.1",
+    "@types/node": "^24.2.0",
+    "ava": "^6.0.1",
+    "tsc": "^2.0.4",
+    "typescript": "^5.9.2"
   },
   "ava": {
-    "extensions": {
-      "ts": "module"
-    },
-    "timeout": "2m",
-    "workerThreads": false,
-    "environmentVariables": {
-      "OXC_TSCONFIG_PATH": "./__test__/tsconfig.json"
-    },
-    "nodeArguments": [
-      "--import",
-      "@oxc-node/core/register"
-    ]
+    "timeout": "3m"
   },
-  "prettier": {
-    "printWidth": 120,
-    "semi": false,
-    "trailingComma": "all",
-    "singleQuote": true,
-    "arrowParens": "always"
+  "engines": {
+    "node": ">= 10"
   },
-  "packageManager": "yarn@4.9.2"
+  "scripts": {
+    "artifacts": "napi artifacts && tsc -p tsconfig.json",
+    "build": "napi build --platform --release --esm",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "true",
+    "universal": "napi universalize",
+    "version": "napi version"
+  },
+  "packageManager": "yarn@4.9.2",
+  "imports": {
+    "#entry-point": {
+      "types": "./index.d.ts",
+      "browser": "./browser.js",
+      "node": "./index.js"
+    }
+  },
+  "dependencies": {
+    "@tursodatabase/turso": "^0.1.3"
+  }
 }

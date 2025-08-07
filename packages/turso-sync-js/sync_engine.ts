@@ -1,8 +1,8 @@
 "use strict";
 
-const { SyncEngine } = require("./index.js");
-const Database = require("../../bindings/javascript/promise.js")
-const fs = require('node:fs');
+import { SyncEngine } from '#entry-point';
+import { Database } from '@tursodatabase/turso';
+import * as fs from 'fs';
 
 const GENERATOR_RESUME_IO = 0;
 const GENERATOR_RESUME_DONE = 1;
@@ -66,12 +66,26 @@ async function run(httpOpts, engine, generator) {
     }
 }
 
-export async function connect(opts) {
+interface ConnectOpts {
+    path: string;
+    clientName?: string;
+    url: string;
+    authToken?: string;
+    encryptionKey?: string;
+}
+
+interface Sync {
+    sync(): Promise<void>;
+    push(): Promise<void>;
+    pull(): Promise<void>;
+}
+
+export async function connect(opts: ConnectOpts): Database & Sync {
     const engine = new SyncEngine({ path: opts.path, clientName: opts.clientName });
     const httpOpts = {
         url: opts.url,
         headers: {
-            "Authorization": `Bearer ${opts.authToken}`,
+            ...(opts.authToken != null && { "Authorization": `Bearer ${opts.authToken}` }),
             ...(opts.encryptionKey != null && { "x-turso-encryption-key": opts.encryptionKey })
         }
     };
