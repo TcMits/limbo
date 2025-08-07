@@ -2,6 +2,7 @@
 #![allow(non_camel_case_types)]
 
 use std::ffi::{self, CStr, CString};
+use std::num::NonZero;
 use tracing::trace;
 use turso_core::{CheckpointMode, LimboError, Value};
 
@@ -22,6 +23,7 @@ pub const SQLITE_INTERRUPT: ffi::c_int = 9;
 pub const SQLITE_NOTFOUND: ffi::c_int = 12;
 pub const SQLITE_CANTOPEN: ffi::c_int = 14;
 pub const SQLITE_MISUSE: ffi::c_int = 21;
+pub const SQLITE_RANGE: ffi::c_int = 25;
 pub const SQLITE_ROW: ffi::c_int = 100;
 pub const SQLITE_DONE: ffi::c_int = 101;
 pub const SQLITE_ABORT_ROLLBACK: ffi::c_int = SQLITE_ABORT | (2 << 8);
@@ -313,8 +315,10 @@ pub unsafe extern "C" fn sqlite3_reset(stmt: *mut sqlite3_stmt) -> ffi::c_int {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_changes(_db: *mut sqlite3) -> ffi::c_int {
-    stub!();
+pub unsafe extern "C" fn sqlite3_changes(db: *mut sqlite3) -> ffi::c_int {
+    let db: &mut sqlite3 = &mut *db;
+    let inner = db.inner.lock().unwrap();
+    return inner.conn.changes() as ffi::c_int;
 }
 
 #[no_mangle]
@@ -355,13 +359,17 @@ pub unsafe extern "C" fn sqlite3_get_autocommit(_db: *mut sqlite3) -> ffi::c_int
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_total_changes(_db: *mut sqlite3) -> ffi::c_int {
-    stub!();
+pub unsafe extern "C" fn sqlite3_total_changes(db: *mut sqlite3) -> ffi::c_int {
+    let db: &mut sqlite3 = &mut *db;
+    let inner = db.inner.lock().unwrap();
+    return inner.conn.total_changes() as ffi::c_int;
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_last_insert_rowid(_db: *mut sqlite3) -> i64 {
-    stub!();
+pub unsafe extern "C" fn sqlite3_last_insert_rowid(db: *mut sqlite3) -> ffi::c_int {
+    let db: &mut sqlite3 = &mut *db;
+    let inner = db.inner.lock().unwrap();
+    return inner.conn.last_insert_rowid() as ffi::c_int;
 }
 
 #[no_mangle]
@@ -476,42 +484,92 @@ pub unsafe extern "C" fn sqlite3_data_count(stmt: *mut sqlite3_stmt) -> ffi::c_i
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_bind_parameter_count(_stmt: *mut sqlite3_stmt) -> ffi::c_int {
-    stub!();
+pub unsafe extern "C" fn sqlite3_bind_parameter_count(stmt: *mut sqlite3_stmt) -> ffi::c_int {
+    let stmt = &*stmt;
+    return stmt.stmt.parameters_count() as ffi::c_int;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_parameter_name(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
 ) -> *const ffi::c_char {
-    stub!();
+    let stmt = &*stmt;
+    let index = NonZero::new_unchecked(idx as usize);
+
+    if let Some(val) = stmt.stmt.parameters().name(index) {
+        let c_string = CString::new(val).expect("CString::new failed");
+        let c_ptr = c_string.into_raw();
+        return c_ptr;
+    } else {
+        return std::ptr::null();
+    }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_bind_null(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
+pub unsafe extern "C" fn sqlite3_bind_null(stmt: *mut sqlite3_stmt, idx: ffi::c_int) -> ffi::c_int {
+    if stmt.is_null() {
+        return SQLITE_MISUSE;
+    }
+
+    if idx <= 0 {
+        return SQLITE_RANGE;
+    }
+    let stmt = &mut *stmt;
+
+    stmt.stmt
+        .bind_at(NonZero::new_unchecked(idx as usize), Value::Null);
+    return SQLITE_OK;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_bind_int(
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
+    val: i64,
 ) -> ffi::c_int {
-    stub!();
+    sqlite3_bind_int64(stmt, idx, val)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_int64(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
-    _val: i64,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
+    val: i64,
 ) -> ffi::c_int {
-    stub!();
+    if stmt.is_null() {
+        return SQLITE_MISUSE;
+    }
+    if idx <= 0 {
+        return SQLITE_RANGE;
+    }
+    let stmt = &mut *stmt;
+
+    stmt.stmt
+        .bind_at(NonZero::new_unchecked(idx as usize), Value::Integer(val));
+
+    SQLITE_OK
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_double(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
-    _val: f64,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
+    val: f64,
 ) -> ffi::c_int {
-    stub!();
+    println!("Bind Double Rust");
+    if stmt.is_null() {
+        return SQLITE_MISUSE;
+    }
+    if idx <= 0 {
+        return SQLITE_RANGE;
+    }
+    let stmt = &mut *stmt;
+
+    stmt.stmt
+        .bind_at(NonZero::new_unchecked(idx as usize), Value::Float(val));
+
+    SQLITE_OK
 }
 
 #[no_mangle]
@@ -545,8 +603,9 @@ pub unsafe extern "C" fn sqlite3_column_type(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_column_count(_stmt: *mut sqlite3_stmt) -> ffi::c_int {
-    stub!();
+pub unsafe extern "C" fn sqlite3_column_count(stmt: *mut sqlite3_stmt) -> ffi::c_int {
+    let stmt = &mut *stmt;
+    return stmt.stmt.num_columns() as ffi::c_int;
 }
 
 #[no_mangle]
@@ -559,10 +618,17 @@ pub unsafe extern "C" fn sqlite3_column_decltype(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_name(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
 ) -> *const ffi::c_char {
-    stub!();
+    let idx = idx.try_into().unwrap();
+    let stmt = &mut *stmt;
+
+    let binding = stmt.stmt.get_column_name(idx).into_owned();
+    let val = binding.as_str();
+    let c_string = CString::new(val).expect("CString::new failed");
+    let c_ptr = c_string.into_raw();
+    c_ptr
 }
 
 #[no_mangle]
@@ -578,8 +644,19 @@ pub unsafe extern "C" fn sqlite3_column_int64(stmt: *mut sqlite3_stmt, idx: ffi:
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_column_double(_stmt: *mut sqlite3_stmt, _idx: ffi::c_int) -> f64 {
-    stub!();
+pub unsafe extern "C" fn sqlite3_column_int(stmt: *mut sqlite3_stmt, idx: ffi::c_int) -> i64 {
+    sqlite3_column_int64(stmt, idx)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_column_double(stmt: *mut sqlite3_stmt, idx: ffi::c_int) -> f64 {
+    let idx = idx.try_into().unwrap();
+    let stmt = &mut *stmt;
+    let row = stmt
+        .stmt
+        .row()
+        .expect("Function should only be called after `SQLITE_ROW`");
+    row.get(idx).unwrap()
 }
 
 #[no_mangle]

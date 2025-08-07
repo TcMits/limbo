@@ -1,6 +1,5 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
-
 use std::ptr;
 
 #[repr(C)]
@@ -46,6 +45,12 @@ extern "C" {
         frame_len: u32,
     ) -> i32;
     fn libsql_wal_disable_checkpoint(db: *mut sqlite3) -> i32;
+    fn sqlite3_column_int(stmt: *mut sqlite3_stmt, idx: i32) -> i64;
+    fn sqlite3_bind_int(stmt: *mut sqlite3_stmt, idx: i32, val: i64) -> i32;
+    fn sqlite3_bind_parameter_count(stmt: *mut sqlite3_stmt) -> i32;
+    fn sqlite3_bind_parameter_name(stmt: *mut sqlite3_stmt, idx: i32) -> *const libc::c_char;
+    fn sqlite3_column_name(stmt: *mut sqlite3_stmt, idx: i32) -> *const libc::c_char;
+    fn sqlite3_last_insert_rowid(db: *mut sqlite3) -> i32;
 }
 
 const SQLITE_OK: i32 = 0;
@@ -201,6 +206,181 @@ mod tests {
                 SQLITE_OK
             );
 
+            assert_eq!(sqlite3_close(db), SQLITE_OK);
+        }
+    }
+    #[test]
+    fn test_sqlite3_bind_int() {
+        unsafe {
+            let temp_file = tempfile::NamedTempFile::with_suffix(".db").unwrap();
+            let path = std::ffi::CString::new(temp_file.path().to_str().unwrap()).unwrap();
+            let mut db = ptr::null_mut();
+            assert_eq!(sqlite3_open(path.as_ptr(), &mut db), SQLITE_OK);
+
+            let mut stmt = ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"CREATE TABLE test_bind (id INTEGER PRIMARY KEY, value INTEGER)".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+            assert_eq!(sqlite3_step(stmt), SQLITE_DONE);
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+
+            let mut stmt = ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"INSERT INTO test_bind (value) VALUES (?)".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+            assert_eq!(sqlite3_bind_int(stmt, 1, 42), SQLITE_OK);
+            assert_eq!(sqlite3_step(stmt), SQLITE_DONE);
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+
+            let mut stmt = ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"SELECT value FROM test_bind LIMIT 1".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+            assert_eq!(sqlite3_step(stmt), SQLITE_ROW);
+            assert_eq!(sqlite3_column_int(stmt, 0), 42);
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+
+            assert_eq!(sqlite3_close(db), SQLITE_OK);
+        }
+    }
+    #[test]
+    fn test_sqlite3_bind_parameter_name_and_count() {
+        unsafe {
+            let temp_file = tempfile::NamedTempFile::with_suffix(".db").unwrap();
+            let path = std::ffi::CString::new(temp_file.path().to_str().unwrap()).unwrap();
+            let mut db = ptr::null_mut();
+            assert_eq!(sqlite3_open(path.as_ptr(), &mut db), SQLITE_OK);
+
+            let mut stmt = ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"CREATE TABLE test_params (id INTEGER PRIMARY KEY, value TEXT)".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+            assert_eq!(sqlite3_step(stmt), SQLITE_DONE);
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+
+            let mut stmt = ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"INSERT INTO test_params (id, value) VALUES (?1, ?2)".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+
+            let param_count = sqlite3_bind_parameter_count(stmt);
+            assert_eq!(param_count, 2);
+
+            println!("parameter count {}", param_count);
+
+            let name1 = sqlite3_bind_parameter_name(stmt, 1);
+            assert!(!name1.is_null());
+            let name1_str = std::ffi::CStr::from_ptr(name1).to_str().unwrap();
+            assert_eq!(name1_str, "?1");
+
+            let name2 = sqlite3_bind_parameter_name(stmt, 2);
+            assert!(!name2.is_null());
+            let name2_str = std::ffi::CStr::from_ptr(name2).to_str().unwrap();
+            assert_eq!(name2_str, "?2");
+
+            let invalid_name = sqlite3_bind_parameter_name(stmt, 99);
+            assert!(invalid_name.is_null());
+
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+            assert_eq!(sqlite3_close(db), SQLITE_OK);
+        }
+    }
+
+    #[test]
+    fn test_sqlite3_last_insert_rowid() {
+        unsafe {
+            let temp_file = tempfile::NamedTempFile::with_suffix(".db").unwrap();
+            let path = std::ffi::CString::new(temp_file.path().to_str().unwrap()).unwrap();
+            let mut db = std::ptr::null_mut();
+            assert_eq!(sqlite3_open(path.as_ptr(), &mut db), SQLITE_OK);
+
+            let mut stmt = std::ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"CREATE TABLE test_rowid (value INTEGER)".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    std::ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+            assert_eq!(sqlite3_step(stmt), SQLITE_DONE);
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+
+            let mut stmt = std::ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    c"INSERT INTO test_rowid (value) VALUES (6)".as_ptr(),
+                    -1,
+                    &mut stmt,
+                    std::ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+            assert_eq!(sqlite3_step(stmt), SQLITE_DONE);
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
+
+            let last_rowid = sqlite3_last_insert_rowid(db);
+            assert!(last_rowid > 0);
+            println!("last insert rowid: {}", last_rowid);
+
+            let query = format!("SELECT value FROM test_rowid WHERE rowid = {}", last_rowid);
+            let query_cstring = std::ffi::CString::new(query).unwrap();
+
+            let mut stmt = std::ptr::null_mut();
+            assert_eq!(
+                sqlite3_prepare_v2(
+                    db,
+                    query_cstring.as_ptr(),
+                    -1,
+                    &mut stmt,
+                    std::ptr::null_mut(),
+                ),
+                SQLITE_OK
+            );
+
+            assert_eq!(sqlite3_step(stmt), SQLITE_ROW);
+            let value_int = sqlite3_column_int(stmt, 0);
+            assert_eq!(value_int, 6);
+
+            assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
             assert_eq!(sqlite3_close(db), SQLITE_OK);
         }
     }
