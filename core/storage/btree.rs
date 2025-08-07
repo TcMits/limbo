@@ -6498,9 +6498,9 @@ fn defragment_page_fast(
     turso_assert!(freeblock_1st <= usable_space as usize - FREEBLOCK_SIZE_MIN, "1st freeblock beyond usable space: freeblock_1st={freeblock_1st} usable_space={usable_space}");
     turso_assert!(freeblock_2nd <= usable_space as usize - FREEBLOCK_SIZE_MIN, "2nd freeblock beyond usable space: freeblock_2nd={freeblock_2nd} usable_space={usable_space}");
 
-    let freeblock_1st_size = page.read_u16(freeblock_1st + 2) as usize;
+    let freeblock_1st_size = page.read_u16_no_offset(freeblock_1st + 2) as usize;
     let freeblock_2nd_size = if freeblock_2nd > 0 {
-        page.read_u16(freeblock_2nd + 2) as usize
+        page.read_u16_no_offset(freeblock_2nd + 2) as usize
     } else {
         0
     };
@@ -6552,19 +6552,19 @@ fn defragment_page_fast(
     let cell_pointer_array_offset = page.cell_pointer_array_offset_and_size().0;
     for i in 0..cell_count {
         let ptr_offset = cell_pointer_array_offset + (i * CELL_PTR_SIZE_BYTES);
-        let cell_ptr = page.read_u16(ptr_offset) as usize;
+        let cell_ptr = page.read_u16_no_offset(ptr_offset) as usize;
         if cell_ptr < freeblock_1st {
             // If the cell pointer was located before the first freeblock, we need to shift it right by the size of the merged freeblock
             // since the space occupied by both the 1st and 2nd freeblocks was now moved to its left.
             let new_offset = cell_ptr + freeblocks_total_size;
             turso_assert!(new_offset <= usable_space as usize, "new offset beyond usable space: new_offset={new_offset} usable_space={usable_space}");
-            page.write_u16(ptr_offset, (cell_ptr + freeblocks_total_size) as u16);
+            page.write_u16_no_offset(ptr_offset, (cell_ptr + freeblocks_total_size) as u16);
         } else if freeblock_2nd > 0 && cell_ptr < freeblock_2nd {
             // If the cell pointer was located between the first and second freeblock, we need to shift it right by the size of only the second freeblock,
             // since the first one was already on its left.
             let new_offset = cell_ptr + freeblock_2nd_size;
             turso_assert!(new_offset <= usable_space as usize, "new offset beyond usable space: new_offset={new_offset} usable_space={usable_space}");
-            page.write_u16(ptr_offset, (cell_ptr + freeblock_2nd_size) as u16);
+            page.write_u16_no_offset(ptr_offset, (cell_ptr + freeblock_2nd_size) as u16);
         }
     }
 
@@ -6606,11 +6606,11 @@ fn defragment_page(page: &PageContent, usable_space: u16, max_frag_bytes: isize)
             // No freeblocks and very little if any fragmented free bytes -> no need to defragment.
             return Ok(());
         }
-        let freeblock_2nd = page.read_u16(freeblock_1st) as usize;
+        let freeblock_2nd = page.read_u16_no_offset(freeblock_1st) as usize;
         if freeblock_2nd == 0 {
             return defragment_page_fast(page, usable_space, freeblock_1st, 0);
         }
-        let freeblock_3rd = page.read_u16(freeblock_2nd) as usize;
+        let freeblock_3rd = page.read_u16_no_offset(freeblock_2nd) as usize;
         if freeblock_3rd == 0 {
             return defragment_page_fast(page, usable_space, freeblock_1st, freeblock_2nd);
         }
