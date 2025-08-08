@@ -1001,12 +1001,6 @@ impl std::fmt::Debug for ImmutableRecord {
     }
 }
 
-#[derive(PartialEq)]
-pub enum ParseRecordState {
-    Init,
-    Parsing { payload: Vec<u8> },
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Record {
     values: Vec<Value>,

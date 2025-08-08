@@ -17,8 +17,8 @@ use crate::{
     translate::plan::IterationDirection,
     turso_assert,
     types::{
-        find_compare, get_tie_breaker_from_seek_op, IndexInfo, ParseRecordState, RecordCompare,
-        RecordCursor, SeekResult,
+        find_compare, get_tie_breaker_from_seek_op, IndexInfo, RecordCompare, RecordCursor,
+        SeekResult,
     },
     util::IOExt,
     Completion, MvCursor,
@@ -512,8 +512,6 @@ pub struct BTreeCursor {
     stack: PageStack,
     /// Reusable immutable record, used to allow better allocation strategy.
     reusable_immutable_record: RefCell<Option<ImmutableRecord>>,
-    /// Reusable immutable record, used to allow better allocation strategy.
-    parse_record_state: RefCell<ParseRecordState>,
     /// Information about the index key structure (sort order, collation, etc)
     pub index_info: Option<IndexInfo>,
     /// Maintain count of the number of records in the btree. Used for the `Count` opcode
@@ -610,7 +608,6 @@ impl BTreeCursor {
             valid_state: CursorValidState::Valid,
             seek_state: CursorSeekState::Start,
             read_overflow_state: RefCell::new(None),
-            parse_record_state: RefCell::new(ParseRecordState::Init),
             record_cursor: RefCell::new(RecordCursor::with_capacity(num_columns)),
             is_empty_table_state: RefCell::new(EmptyTableState::Start),
             move_to_right_state: (MoveToRightState::Start, None),
@@ -4340,7 +4337,6 @@ impl BTreeCursor {
             .as_ref()
             .is_none_or(|record| record.is_invalidated());
         if !invalidated {
-            *self.parse_record_state.borrow_mut() = ParseRecordState::Init;
             let record_ref =
                 Ref::filter_map(self.reusable_immutable_record.borrow(), |opt| opt.as_ref())
                     .unwrap();
@@ -4364,11 +4360,6 @@ impl BTreeCursor {
             return Ok(IOResult::Done(Some(record_ref)));
         }
 
-        if *self.parse_record_state.borrow() == ParseRecordState::Init {
-            *self.parse_record_state.borrow_mut() = ParseRecordState::Parsing {
-                payload: Vec::new(),
-            };
-        }
         let page = self.stack.top();
         return_if_locked_maybe_load!(self.pager, page);
         let page = page.get();
@@ -4409,7 +4400,6 @@ impl BTreeCursor {
             self.record_cursor.borrow_mut().invalidate();
         };
 
-        *self.parse_record_state.borrow_mut() = ParseRecordState::Init;
         let record_ref =
             Ref::filter_map(self.reusable_immutable_record.borrow(), |opt| opt.as_ref()).unwrap();
         Ok(IOResult::Done(Some(record_ref)))
