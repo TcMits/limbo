@@ -10,7 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@tursodatabase/turso": "../..",
+    "@tursodatabase/database": "../..",
     "better-sqlite3": "^12.2.0",
     "drizzle-orm": "^0.44.3"
   }

@@ -484,7 +484,7 @@ const connect = async (path, options = {}) => {
   }
   const provider = process.env.PROVIDER;
   if (provider === "turso") {
-    const { Database, SqliteError } = await import("@tursodatabase/turso");
+    const { Database, SqliteError } = await import("@tursodatabase/database");
     const db = new Database(path, options);
     return [db, path, SqliteError];
   }

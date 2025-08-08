@@ -79,7 +79,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-android-arm64')
+        return require('@tursodatabase/database-android-arm64')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -90,7 +90,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-android-arm-eabi')
+        return require('@tursodatabase/database-android-arm-eabi')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -105,7 +105,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-win32-x64-msvc')
+        return require('@tursodatabase/database-win32-x64-msvc')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -116,7 +116,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-win32-ia32-msvc')
+        return require('@tursodatabase/database-win32-ia32-msvc')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -127,7 +127,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-win32-arm64-msvc')
+        return require('@tursodatabase/database-win32-arm64-msvc')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -141,7 +141,7 @@ function requireNative() {
       loadErrors.push(e)
     }
     try {
-      return require('@tursodatabase/turso-darwin-universal')
+      return require('@tursodatabase/database-darwin-universal')
     } catch (e) {
       loadErrors.push(e)
     }
@@ -152,7 +152,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-darwin-x64')
+        return require('@tursodatabase/database-darwin-x64')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -163,7 +163,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-darwin-arm64')
+        return require('@tursodatabase/database-darwin-arm64')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -178,7 +178,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-freebsd-x64')
+        return require('@tursodatabase/database-freebsd-x64')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -189,7 +189,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-freebsd-arm64')
+        return require('@tursodatabase/database-freebsd-arm64')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -205,7 +205,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-x64-musl')
+          return require('@tursodatabase/database-linux-x64-musl')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -216,7 +216,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-x64-gnu')
+          return require('@tursodatabase/database-linux-x64-gnu')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -229,7 +229,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-arm64-musl')
+          return require('@tursodatabase/database-linux-arm64-musl')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -240,7 +240,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-arm64-gnu')
+          return require('@tursodatabase/database-linux-arm64-gnu')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -253,7 +253,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-arm-musleabihf')
+          return require('@tursodatabase/database-linux-arm-musleabihf')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -264,7 +264,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-arm-gnueabihf')
+          return require('@tursodatabase/database-linux-arm-gnueabihf')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -277,7 +277,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-riscv64-musl')
+          return require('@tursodatabase/database-linux-riscv64-musl')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -288,7 +288,7 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          return require('@tursodatabase/turso-linux-riscv64-gnu')
+          return require('@tursodatabase/database-linux-riscv64-gnu')
         } catch (e) {
           loadErrors.push(e)
         }
@@ -300,7 +300,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-linux-ppc64-gnu')
+        return require('@tursodatabase/database-linux-ppc64-gnu')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -311,7 +311,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-linux-s390x-gnu')
+        return require('@tursodatabase/database-linux-s390x-gnu')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -326,7 +326,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-linux-arm64-ohos')
+        return require('@tursodatabase/database-linux-arm64-ohos')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -337,7 +337,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-linux-x64-ohos')
+        return require('@tursodatabase/database-linux-x64-ohos')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -348,7 +348,7 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        return require('@tursodatabase/turso-linux-arm-ohos')
+        return require('@tursodatabase/database-linux-arm-ohos')
       } catch (e) {
         loadErrors.push(e)
       }
@@ -372,7 +372,7 @@ if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
   }
   if (!nativeBinding) {
     try {
-      nativeBinding = require('@tursodatabase/turso-wasm32-wasi')
+      nativeBinding = require('@tursodatabase/database-wasm32-wasi')
     } catch (err) {
       if (process.env.NAPI_RS_FORCE_WASI) {
         loadErrors.push(err)

@@ -1,4 +1,4 @@
-# @tursodatabase/turso
+# @tursodatabase/database
 
 The next evolution of SQLite: A high-performance, SQLite-compatible database library for Node.js
 
@@ -15,7 +15,7 @@ The next evolution of SQLite: A high-performance, SQLite-compatible database lib
 ## Installation
 
 ```bash
-npm install @tursodatabase/turso
+npm install @tursodatabase/database
 ```
 
 ## Quick Start
@@ -23,7 +23,7 @@ npm install @tursodatabase/turso
 ### In-Memory Database
 
 ```javascript
-import Database from '@tursodatabase/turso';
+import Database from '@tursodatabase/database';
 
 // Create an in-memory database
 const db = new Database(':memory:');
@@ -48,7 +48,7 @@ console.log(users);
 ### File-Based Database
 
 ```javascript
-import Database from '@tursodatabase/turso';
+import Database from '@tursodatabase/database';
 
 // Create or open a database file
 const db = new Database('my-database.db');

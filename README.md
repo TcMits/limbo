@@ -11,7 +11,7 @@
   <a title="Build Status" target="_blank" href="https://github.com/tursodatabase/turso/actions/workflows/rust.yml"><img src="https://img.shields.io/github/actions/workflow/status/tursodatabase/turso/rust.yml?style=flat-square"></a>
   <a title="Releases" target="_blank" href="https://github.com/tursodatabase/turso/releases"><img src="https://img.shields.io/github/release/tursodatabase/turso?style=flat-square&color=9CF"></a>
   <a title="Rust" target="_blank" href="https://crates.io/crates/turso"><img alt="PyPI" src="https://img.shields.io/crates/v/turso"></a>
-  <a title="JavaScript" target="_blank" href="https://www.npmjs.com/package/@tursodatabase/turso"><img alt="PyPI" src="https://img.shields.io/npm/v/@tursodatabase/turso"></a>
+  <a title="JavaScript" target="_blank" href="https://www.npmjs.com/package/@tursodatabase/database"><img alt="PyPI" src="https://img.shields.io/npm/v/@tursodatabase/database"></a>
   <a title="Python" target="_blank" href="https://pypi.org/project/pyturso/"><img alt="PyPI" src="https://img.shields.io/pypi/v/pyturso"></a>
   <a title="MIT" target="_blank" href="https://github.com/tursodatabase/turso/blob/main/LICENSE.md"><img src="http://img.shields.io/badge/license-MIT-orange.svg?style=flat-square"></a>
   <br>
@@ -165,13 +165,13 @@ let res = conn.query("SELECT * FROM users", ()).await?;
 <br>
 
 ```console
-npm i @tursodatabase/turso
+npm i @tursodatabase/database
 ```
 
 Example usage:
 
 ```js
-import { Database } from '@tursodatabase/turso';
+import { Database } from '@tursodatabase/database';
 
 const db = new Database('sqlite.db');
 const stmt = db.prepare('SELECT * FROM users');

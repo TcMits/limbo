@@ -1,1 +1,1 @@
-export * from '@tursodatabase/turso-wasm32-wasi'
+export * from '@tursodatabase/database-wasm32-wasi'

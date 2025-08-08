@@ -39,9 +39,9 @@ if (__nodeFs.existsSync(__wasmDebugFilePath)) {
   __wasmFilePath = __wasmDebugFilePath
 } else if (!__nodeFs.existsSync(__wasmFilePath)) {
   try {
-    __wasmFilePath = __nodePath.resolve('@tursodatabase/turso-wasm32-wasi')
+    __wasmFilePath = __nodePath.resolve('@tursodatabase/database-wasm32-wasi')
   } catch {
-    throw new Error('Cannot find turso.wasm32-wasi.wasm file, and @tursodatabase/turso-wasm32-wasi package is not installed.')
+    throw new Error('Cannot find turso.wasm32-wasi.wasm file, and @tursodatabase/database-wasm32-wasi package is not installed.')
   }
 }
 

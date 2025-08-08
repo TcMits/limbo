@@ -1068,9 +1068,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tursodatabase/turso@workspace:.":
+"@tursodatabase/database@workspace:.":
   version: 0.0.0-use.local
-  resolution: "@tursodatabase/turso@workspace:."
+  resolution: "@tursodatabase/database@workspace:."
   dependencies:
     "@napi-rs/cli": "npm:^3.0.4"
     "@napi-rs/wasm-runtime": "npm:^1.0.1"

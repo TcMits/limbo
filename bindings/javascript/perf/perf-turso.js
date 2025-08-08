@@ -1,6 +1,6 @@
 import { run, bench, group, baseline } from 'mitata';
 
-import Database from '@tursodatabase/turso';
+import Database from '@tursodatabase/database';
 
 const db = new Database(':memory:');
 

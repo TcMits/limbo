@@ -4,7 +4,7 @@
   "private": true,
   "dependencies": {
     "better-sqlite3": "^9.5.0",
-    "@tursodatabase/turso": "..",
+    "@tursodatabase/database": "..",
     "mitata": "^0.1.11"
   }
 }
