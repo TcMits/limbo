@@ -69,6 +69,18 @@ pub async fn db_bootstrap<C: ProtocolIO>(
         coro.yield_(ProtocolCommand::IO).await?;
     }
 
+    // sync files in the end
+    let mut completions = Vec::with_capacity(dbs.len());
+    for db in dbs {
+        let c = Completion::new_sync(move |_| {
+            // todo(sivukhin): we need to error out in case of failed sync
+        });
+        completions.push(db.sync(c)?);
+    }
+    while !completions.iter().all(|x| x.is_completed()) {
+        coro.yield_(ProtocolCommand::IO).await?;
+    }
+
     let elapsed = std::time::Instant::now().duration_since(start_time);
     tracing::debug!("db_bootstrap: finished: bytes={pos}, elapsed={:?}", elapsed);
 
