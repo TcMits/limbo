@@ -44,8 +44,8 @@
     "node": ">= 10"
   },
   "scripts": {
-    "artifacts": "napi artifacts && tsc -p tsconfig.json",
-    "build": "napi build --platform --release --esm",
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release --esm && tsc",
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "true",
