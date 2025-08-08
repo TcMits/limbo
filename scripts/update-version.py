@@ -21,6 +21,7 @@ NPM_PACKAGES = [
     "bindings/javascript/npm/linux-x64-gnu",
     "bindings/javascript/npm/win32-x64-msvc",
     "bindings/javascript/npm/wasm32-wasip1-threads",
+    "packages/turso-sync-js",
 ]
 
 
