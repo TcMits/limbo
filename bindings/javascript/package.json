@@ -34,7 +34,6 @@
     "@napi-rs/wasm-runtime": "^1.0.1",
     "ava": "^6.0.1",
     "better-sqlite3": "^11.9.1",
-    "tsc": "^2.0.4",
     "typescript": "^5.9.2"
   },
   "ava": {
@@ -45,7 +44,7 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --esm && tsc",
+    "build": "napi build --platform --release --esm && npm exec tsc",
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "true",
