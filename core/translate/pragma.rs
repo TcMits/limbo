@@ -494,11 +494,8 @@ fn query_pragma(
             if let Some(value_expr) = value {
                 let is_query_only = match value_expr {
                     ast::Expr::Literal(Literal::Numeric(i)) => i.parse::<i64>().unwrap() != 0,
-                    ast::Expr::Literal(Literal::String(ref s)) => {
-                        let s = s.to_lowercase();
-                        s == "1" || s == "on" || s == "true"
-                    }
-                    ast::Expr::Name(Name::Ident(s)) => {
+                    ast::Expr::Literal(Literal::String(ref s))
+                    | ast::Expr::Name(Name::Ident(ref s)) => {
                         let s = s.to_lowercase();
                         s == "1" || s == "on" || s == "true"
                     }
