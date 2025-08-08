@@ -491,6 +491,11 @@ pub struct BTreeCursor {
     mv_cursor: Option<Rc<RefCell<MvCursor>>>,
     /// The pager that is used to read and write to the database file.
     pager: Rc<Pager>,
+    /// Cached value of the usable space of a BTree page, since it is very expensive to call in a hot loop via pager.usable_space().
+    /// This is OK to cache because both 'PRAGMA page_size' and '.filectrl reserve_bytes' only have an effect on:
+    /// 1. an uninitialized database,
+    /// 2. an initialized database when the command is immediately followed by VACUUM.
+    usable_space_cached: usize,
     /// Page id of the root page used to go back up fast.
     root_page: usize,
     /// Rowid and record are stored before being consumed.
@@ -583,10 +588,12 @@ impl BTreeCursor {
         root_page: usize,
         num_columns: usize,
     ) -> Self {
+        let usable_space = pager.usable_space();
         Self {
             mv_cursor,
             pager,
             root_page,
+            usable_space_cached: usable_space,
             has_record: Cell::new(false),
             null_flag: false,
             going_upwards: false,
@@ -4126,8 +4133,11 @@ impl BTreeCursor {
         Ok(IOResult::Done(()))
     }
 
+    #[inline(always)]
+    /// Returns the usable space of the current page (which is computed as: page_size - reserved_bytes).
+    /// This is cached to avoid calling `pager.usable_space()` in a hot loop.
     fn usable_space(&self) -> usize {
-        self.pager.usable_space()
+        self.usable_space_cached
     }
 
     pub fn seek_end(&mut self) -> Result<IOResult<()>> {
