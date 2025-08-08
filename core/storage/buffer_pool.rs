@@ -357,18 +357,14 @@ impl PoolInner {
         // allocations of size `page_size` are more common, so we check that arena first.
         if let Some(arena) = self.page_arena.as_ref() {
             if arena_id == arena.id {
-                let pages = size.div_ceil(arena.page_size);
-                tracing::trace!("Freeing {} pages from arena {}", pages, arena_id);
-                arena.free(page_idx, pages);
+                arena.free(page_idx, size);
                 return;
             }
         }
         // check WAL frame arena
         if let Some(wal_arena) = self.wal_frame_arena.as_ref() {
             if arena_id == wal_arena.id {
-                let pages = size.div_ceil(wal_arena.page_size);
-                tracing::trace!("Freeing {} pages from WAL frame arena {}", pages, arena_id);
-                wal_arena.free(page_idx, pages);
+                wal_arena.free(page_idx, size);
                 return;
             }
         }
@@ -473,9 +469,10 @@ impl Arena {
         Some(FreeEntry { ptr, first_idx })
     }
 
-    /// Mark `count` pages starting at `page_idx` as free.
-    pub fn free(&self, page_idx: u32, count: usize) {
+    /// Mark all relevant pages that include `size` starting at `page_idx` as free.
+    pub fn free(&self, page_idx: u32, size: usize) {
         let mut bm = self.free_pages.lock();
+        let count = size.div_ceil(self.page_size);
         turso_assert!(
             !bm.check_run_free(page_idx, count as u32),
             "must not already be marked free"
