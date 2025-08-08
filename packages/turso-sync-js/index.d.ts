@@ -154,7 +154,7 @@ export interface DatabaseOpts {
 export type JsProtocolRequest =
   | { type: 'Http', method: string, path: string, body?: Buffer }
   | { type: 'FullRead', path: string }
-  | { type: 'FullWrite', path: string, content: Buffer }
+  | { type: 'FullWrite', path: string, content: Array<number> }
 
 export interface SyncEngineOpts {
   path: string

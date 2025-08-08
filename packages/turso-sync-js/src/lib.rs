@@ -45,17 +45,23 @@ pub struct SyncEngineOpts {
 impl SyncEngine {
     #[napi(constructor)]
     pub fn new(opts: SyncEngineOpts) -> napi::Result<Self> {
+        let is_memory = opts.path == ":memory:";
+        let io: Arc<dyn turso_core::IO> = if is_memory {
+            Arc::new(turso_core::MemoryIO::new())
+        } else {
+            Arc::new(turso_core::PlatformIO::new().map_err(|e| {
+                napi::Error::new(
+                    napi::Status::GenericFailure,
+                    format!("Failed to create IO: {e}"),
+                )
+            })?)
+        };
         Ok(SyncEngine {
             path: opts.path,
             client_name: opts.client_name.unwrap_or("turso-sync-js".to_string()),
             wal_pull_batch_size: opts.wal_pull_batch_size.unwrap_or(100),
             sync_engine: Arc::new(Mutex::new(None)),
-            io: Arc::new(turso_core::PlatformIO::new().map_err(|e| {
-                napi::Error::new(
-                    napi::Status::GenericFailure,
-                    format!("Failed to create IO: {e}"),
-                )
-            })?),
+            io,
             protocol: Arc::new(JsProtocolIo::default()),
             #[allow(clippy::arc_with_non_send_sync)]
             opened: Arc::new(Mutex::new(None)),

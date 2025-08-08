@@ -2,19 +2,60 @@
 
 import { SyncEngine } from '#entry-point';
 import { Database } from '@tursodatabase/turso';
-import * as fs from 'fs';
 
 const GENERATOR_RESUME_IO = 0;
 const GENERATOR_RESUME_DONE = 1;
 
-async function process(httpOpts, request) {
+async function read(opts, path: string): Promise<Buffer | Uint8Array | null> {
+    if (opts.isMemory) {
+        return opts.value;
+    }
+    if (typeof window === 'undefined') {
+        const { promises } = await import('node:fs');
+        try {
+            return await promises.readFile(path);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                return null;
+            }
+            throw error;
+        }
+    } else {
+        const data = localStorage.getItem(path);
+        if (data != null) {
+            return new TextEncoder().encode(data);
+        } else {
+            return null;
+        }
+    }
+}
+
+async function write(opts, path: string, content: number[]): Promise<void> {
+    if (opts.isMemory) {
+        opts.value = content;
+        return;
+    }
+    const data = new Uint8Array(content);
+    if (typeof window === 'undefined') {
+        const { promises } = await import('node:fs');
+        const unix = Math.floor(Date.now() / 1000);
+        const nonce = Math.floor(Math.random() * 1000000000);
+        const tmp = `${path}.tmp.${unix}.${nonce}`;
+        await promises.writeFile(tmp, data);
+        await promises.rename(tmp, path);
+    } else {
+        localStorage.setItem(path, new TextDecoder().decode(data));
+    }
+}
+
+async function process(opts, request) {
     const requestType = request.request();
     const completion = request.completion();
     if (requestType.type == 'Http') {
         try {
-            const response = await fetch(`${httpOpts.url}${requestType.path}`, {
+            const response = await fetch(`${opts.url}${requestType.path}`, {
                 method: requestType.method,
-                headers: httpOpts.headers,
+                headers: opts.headers,
                 body: requestType.body
             });
             completion.status(response.status);
@@ -32,23 +73,17 @@ async function process(httpOpts, request) {
         }
     } else if (requestType.type == 'FullRead') {
         try {
-            const metadata = await fs.promises.readFile(requestType.path);
-            completion.push(metadata);
+            const metadata = await read(opts.metadata, requestType.path);
+            if (metadata != null) {
+                completion.push(metadata);
+            }
             completion.done();
         } catch (error) {
-            if (error.code === 'ENOENT') {
-                completion.done();
-            } else {
-                completion.poison(`metadata read error: ${error}`);
-            }
+            completion.poison(`metadata read error: ${error}`);
         }
     } else if (requestType.type == 'FullWrite') {
         try {
-            const unix = Math.floor(Date.now() / 1000);
-            const nonce = Math.floor(Math.random() * 1000000000);
-            const tmp = `${requestType.path}.tmp.${unix}.${nonce}`;
-            await fs.promises.writeFile(tmp, requestType.content);
-            await fs.promises.rename(tmp, requestType.path);
+            await write(opts.metadata, requestType.path, requestType.content);
             completion.done();
         } catch (error) {
             completion.poison(`metadata write error: ${error}`);
@@ -87,7 +122,8 @@ export async function connect(opts: ConnectOpts): Database & Sync {
         headers: {
             ...(opts.authToken != null && { "Authorization": `Bearer ${opts.authToken}` }),
             ...(opts.encryptionKey != null && { "x-turso-encryption-key": opts.encryptionKey })
-        }
+        },
+        metadata: opts.path == ':memory:' ? { isMemory: true, value: null } : { isMemory: false }
     };
     await run(httpOpts, engine, engine.init());
     const nativeDb = engine.open();

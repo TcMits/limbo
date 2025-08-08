@@ -21,7 +21,7 @@ pub enum JsProtocolRequest {
     },
     FullWrite {
         path: String,
-        content: Buffer,
+        content: Vec<u8>,
     },
 }
 
@@ -151,7 +151,7 @@ impl ProtocolIO for JsProtocolIo {
     ) -> turso_sync_engine::Result<Self::DataCompletion> {
         Ok(self.add_request(JsProtocolRequest::FullWrite {
             path: path.to_string(),
-            content: Buffer::from(content),
+            content,
         }))
     }
 }
