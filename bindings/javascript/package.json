@@ -44,8 +44,8 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --esm && npm exec tsc",
-    "build:debug": "napi build --platform",
+    "build": "npm exec tsc && napi build --platform --release --esm",
+    "build:debug": "npm exec tsc && napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "true",
     "universal": "napi universalize",
