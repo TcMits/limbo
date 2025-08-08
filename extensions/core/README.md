@@ -4,7 +4,7 @@ The `turso_ext` crate simplifies the creation and registration of libraries mean
 like traditional `sqlite3` extensions, but are able to be written in much more ergonomic Rust.
 
 **Attention**
-If you wish to dynamic linking, currently you need to set your global_allocator to `MiMalloc` for non-wasm targets. Or you can clone the repo and change `macros/src/ext/mod.rs` to use your custom allocator:
+If you wish to link with extensions dynamically, you will need to coordinate the allocator with each extension you would like to load at runtime by either using `MiMalloc` (the default) or setting your global allocator of choice in `macros/src/ext/mod.rs`. 
 
 E.g
 ```diff
