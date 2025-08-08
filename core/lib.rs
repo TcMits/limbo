@@ -6,6 +6,7 @@ mod ext;
 mod fast_lock;
 mod function;
 mod functions;
+mod incremental;
 mod info;
 mod io;
 #[cfg(feature = "json")]
