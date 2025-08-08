@@ -1,10 +1,20 @@
 "use strict";
 
 import { SyncEngine } from '#entry-point';
-import { Database } from '@tursodatabase/turso';
+import { Database } from '@tursodatabase/database';
 
 const GENERATOR_RESUME_IO = 0;
 const GENERATOR_RESUME_DONE = 1;
+
+function trackPromise<T>(p: Promise<T>): { promise: Promise<T>, finished: boolean } {
+    let status = { promise: null, finished: false };
+    status.promise = p.finally(() => status.finished = true);
+    return status;
+}
+
+function timeoutMs(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms,))
+}
 
 async function read(opts, path: string): Promise<Buffer | Uint8Array | null> {
     if (opts.isMemory) {
@@ -91,13 +101,17 @@ async function process(opts, request) {
     }
 }
 
-async function run(httpOpts, engine, generator) {
+async function run(opts, engine, generator) {
+    let tasks = [];
     while (generator.resume(null) !== GENERATOR_RESUME_DONE) {
-        const tasks = [engine.ioLoopAsync()];
         for (let request = engine.protocolIo(); request != null; request = engine.protocolIo()) {
-            tasks.push(process(httpOpts, request));
+            tasks.push(trackPromise(process(opts, request)));
         }
-        await Promise.all(tasks);
+
+        const tasksRace = tasks.length == 0 ? Promise.resolve() : Promise.race([timeoutMs(opts.preemptionMs), ...tasks.map(t => t.promise)]);
+        await Promise.all([engine.ioLoopAsync(), tasksRace]);
+
+        tasks = tasks.filter(t => !t.finished);
     }
 }
 
@@ -123,7 +137,8 @@ export async function connect(opts: ConnectOpts): Database & Sync {
             ...(opts.authToken != null && { "Authorization": `Bearer ${opts.authToken}` }),
             ...(opts.encryptionKey != null && { "x-turso-encryption-key": opts.encryptionKey })
         },
-        metadata: opts.path == ':memory:' ? { isMemory: true, value: null } : { isMemory: false }
+        metadata: opts.path == ':memory:' ? { isMemory: true, value: null } : { isMemory: false },
+        preemptionMs: 1,
     };
     await run(httpOpts, engine, engine.init());
     const nativeDb = engine.open();

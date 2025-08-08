@@ -1,6 +1,6 @@
 {
   "name": "@tursodatabase/sync",
-  "version": "0.1.4-pre.2",
+  "version": "0.1.4-pre.5",
   "repository": {
     "type": "git",
     "url": "https://github.com/tursodatabase/turso"
@@ -31,7 +31,6 @@
     "@napi-rs/wasm-runtime": "^1.0.1",
     "@types/node": "^24.2.0",
     "ava": "^6.0.1",
-    "tsc": "^2.0.4",
     "typescript": "^5.9.2"
   },
   "ava": {
@@ -44,7 +43,7 @@
     "artifacts": "napi artifacts",
     "build": "npm exec tsc && napi build --platform --release --esm",
     "build:debug": "npm exec tsc && napi build --platform",
-    "prepublishOnly": "napi prepublish -t npm",
+    "prepublishOnly": "npm exec tsc && napi prepublish -t npm",
     "test": "true",
     "universal": "napi universalize",
     "version": "napi version"
@@ -58,6 +57,6 @@
     }
   },
   "dependencies": {
-    "@tursodatabase/turso": "^0.1.3"
+    "@tursodatabase/database": "~0.1.4-pre.5"
   }
 }
