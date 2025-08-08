@@ -628,25 +628,15 @@ pub fn open_loop(
             }
         }
 
-        for cond in predicates
-            .iter()
-            .filter(|cond| cond.should_eval_at_loop(join_index, join_order))
-        {
-            let jump_target_when_true = program.allocate_label();
-            let condition_metadata = ConditionMetadata {
-                jump_if_condition_is_true: false,
-                jump_target_when_true,
-                jump_target_when_false: next,
-            };
-            translate_condition_expr(
-                program,
-                table_references,
-                &cond.expr,
-                condition_metadata,
-                &t_ctx.resolver,
-            )?;
-            program.preassign_label_to_next_insn(jump_target_when_true);
-        }
+        emit_conditions(
+            program,
+            &t_ctx,
+            table_references,
+            join_order,
+            predicates,
+            join_index,
+            next,
+        )?;
 
         // Set the match flag to true if this is a LEFT JOIN.
         // At this point of execution we are going to emit columns for the left table,
@@ -662,6 +652,38 @@ pub fn open_loop(
                 });
             }
         }
+    }
+
+    Ok(())
+}
+
+fn emit_conditions(
+    program: &mut ProgramBuilder,
+    t_ctx: &&mut TranslateCtx,
+    table_references: &TableReferences,
+    join_order: &[JoinOrderMember],
+    predicates: &[WhereTerm],
+    join_index: usize,
+    next: BranchOffset,
+) -> Result<()> {
+    for cond in predicates
+        .iter()
+        .filter(|cond| cond.should_eval_at_loop(join_index, join_order))
+    {
+        let jump_target_when_true = program.allocate_label();
+        let condition_metadata = ConditionMetadata {
+            jump_if_condition_is_true: false,
+            jump_target_when_true,
+            jump_target_when_false: next,
+        };
+        translate_condition_expr(
+            program,
+            table_references,
+            &cond.expr,
+            condition_metadata,
+            &t_ctx.resolver,
+        )?;
+        program.preassign_label_to_next_insn(jump_target_when_true);
     }
 
     Ok(())
