@@ -706,6 +706,7 @@ fn test_wal_bad_frame() -> anyhow::Result<()> {
                 turso_core::OpenFlags::default(),
                 false,
                 false,
+                false,
             )
             .unwrap();
             let tmp_db = TempDatabase {

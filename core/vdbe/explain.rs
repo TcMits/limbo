@@ -1280,6 +1280,15 @@ pub fn insn_to_str(
                 0,
                 format!("DROP TABLE {table_name}"),
             ),
+            Insn::DropView { db, view_name } => (
+                "DropView",
+                *db as i32,
+                0,
+                0,
+                Value::build_text(view_name),
+                0,
+                format!("DROP VIEW {view_name}"),
+            ),
             Insn::DropIndex { db: _, index } => (
                 "DropIndex",
                 0,
@@ -1327,6 +1336,15 @@ pub fn insn_to_str(
                 Value::build_text(where_clause.clone().unwrap_or("NULL".to_string())),
                 0,
                 where_clause.clone().unwrap_or("NULL".to_string()),
+            ),
+            Insn::PopulateViews => (
+                "PopulateViews",
+                0,
+                0,
+                0,
+                Value::Null,
+                0,
+                "".to_string(),
             ),
             Insn::Prev {
                 cursor_id,

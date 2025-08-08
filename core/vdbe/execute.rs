@@ -5120,7 +5120,7 @@ pub fn op_insert(
             key_reg,
             record_reg,
             flag,
-            table_name: _,
+            table_name,
         },
         insn
     );
@@ -5162,6 +5162,72 @@ pub fn op_insert(
             }
             Register::Aggregate(..) => unreachable!("Cannot insert an aggregate value."),
         };
+
+        // Update dependent views for incremental computation
+        let schema = program.connection.schema.borrow();
+        let dependent_views = schema.get_dependent_views(table_name);
+
+        if !dependent_views.is_empty() {
+            // If this is an UPDATE operation, first capture and delete the old row data
+            if flag.has(InsertFlags::UPDATE) {
+                // Get the old record before it's overwritten
+                let old_record_values = if let Some(old_record) = return_if_io!(cursor.record()) {
+                    let mut values = old_record
+                        .get_values()
+                        .into_iter()
+                        .map(|v| v.to_owned())
+                        .collect::<Vec<_>>();
+
+                    // Fix rowid alias columns: replace Null with actual rowid value
+                    let schema = program.connection.schema.borrow();
+                    if let Some(table) = schema.get_table(table_name) {
+                        for (i, col) in table.columns().iter().enumerate() {
+                            if col.is_rowid_alias && i < values.len() {
+                                values[i] = Value::Integer(key);
+                            }
+                        }
+                    }
+                    drop(schema);
+
+                    Some(values)
+                } else {
+                    None
+                };
+
+                // Add deletion of old row to view deltas
+                if let Some(old_values) = old_record_values {
+                    let mut tx_states = program.connection.view_transaction_states.borrow_mut();
+                    for view_name in &dependent_views {
+                        let tx_state = tx_states.entry(view_name.clone()).or_default();
+                        tx_state.delta.delete(key, old_values.clone());
+                    }
+                }
+            }
+
+            // Add insertion of new row to view deltas
+            let mut new_values = record
+                .get_values()
+                .into_iter()
+                .map(|v| v.to_owned())
+                .collect::<Vec<_>>();
+
+            // Fix rowid alias columns: replace Null with actual rowid value
+            let schema = program.connection.schema.borrow();
+            if let Some(table) = schema.get_table(table_name) {
+                for (i, col) in table.columns().iter().enumerate() {
+                    if col.is_rowid_alias && i < new_values.len() {
+                        new_values[i] = Value::Integer(key);
+                    }
+                }
+            }
+            drop(schema);
+
+            let mut tx_states = program.connection.view_transaction_states.borrow_mut();
+            for view_name in dependent_views {
+                let tx_state = tx_states.entry(view_name.clone()).or_default();
+                tx_state.delta.insert(key, new_values.clone());
+            }
+        }
 
         // In a table insert, if the caller does not pass InsertFlags::REQUIRE_SEEK, they must ensure that a seek has already happened to the correct location.
         // This typically happens by invoking either Insn::NewRowid or Insn::NotExists, because:
@@ -5219,14 +5285,59 @@ pub fn op_delete(
     load_insn!(
         Delete {
             cursor_id,
-            table_name: _
+            table_name
         },
         insn
     );
-    {
+
+    // Capture row data before deletion for view updates
+    let (key, record_values) = {
         let mut cursor = state.get_cursor(*cursor_id);
         let cursor = cursor.as_btree_mut();
+
+        // Get the current key
+        let maybe_key = return_if_io!(cursor.rowid());
+        let key = maybe_key.ok_or_else(|| {
+            LimboError::InternalError("Cannot delete: no current row".to_string())
+        })?;
+
+        // Get the current record before deletion and extract values
+        let record_values = if let Some(record) = return_if_io!(cursor.record()) {
+            let mut values = record
+                .get_values()
+                .into_iter()
+                .map(|v| v.to_owned())
+                .collect::<Vec<_>>();
+
+            // Fix rowid alias columns: replace Null with actual rowid value
+            let schema = program.connection.schema.borrow();
+            if let Some(table) = schema.get_table(table_name) {
+                for (i, col) in table.columns().iter().enumerate() {
+                    if col.is_rowid_alias && i < values.len() {
+                        values[i] = Value::Integer(key);
+                    }
+                }
+            }
+            Some(values)
+        } else {
+            None
+        };
+
+        // Now perform the deletion
         return_if_io!(cursor.delete());
+
+        (key, record_values)
+    };
+
+    // Update dependent views for incremental computation
+    if let Some(values) = record_values {
+        let schema = program.connection.schema.borrow();
+        let dependent_views = schema.get_dependent_views(table_name);
+        let mut tx_states = program.connection.view_transaction_states.borrow_mut();
+        for view_name in dependent_views {
+            let tx_state = tx_states.entry(view_name).or_default();
+            tx_state.delta.delete(key, values.clone());
+        }
     }
     let prev_changes = program.n_change.get();
     program.n_change.set(prev_changes + 1);
@@ -6039,6 +6150,26 @@ pub fn op_drop_table(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub fn op_drop_view(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    _pager: &Rc<Pager>,
+    _mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    load_insn!(DropView { db, view_name }, insn);
+    if *db > 0 {
+        todo!("temp databases not implemented yet");
+    }
+    let conn = program.connection.clone();
+    conn.with_schema_mut(|schema| {
+        schema.remove_view(view_name);
+        Ok::<(), crate::LimboError>(())
+    })?;
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 pub fn op_close(
     program: &Program,
     state: &mut ProgramState,
@@ -6139,19 +6270,56 @@ pub fn op_parse_schema(
 
         conn.with_schema_mut(|schema| {
             // TODO: This function below is synchronous, make it async
-            parse_schema_rows(stmt, schema, &conn.syms.borrow(), state.mv_tx_id)
+            let existing_views = schema.views.clone();
+            parse_schema_rows(
+                stmt,
+                schema,
+                &conn.syms.borrow(),
+                state.mv_tx_id,
+                existing_views,
+            )
         })?;
     } else {
         let stmt = conn.prepare("SELECT * FROM sqlite_schema")?;
 
         conn.with_schema_mut(|schema| {
             // TODO: This function below is synchronous, make it async
-            parse_schema_rows(stmt, schema, &conn.syms.borrow(), state.mv_tx_id)
+            let existing_views = schema.views.clone();
+            parse_schema_rows(
+                stmt,
+                schema,
+                &conn.syms.borrow(),
+                state.mv_tx_id,
+                existing_views,
+            )
         })?;
     }
     conn.auto_commit.set(previous_auto_commit);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
+}
+
+pub fn op_populate_views(
+    program: &Program,
+    state: &mut ProgramState,
+    _insn: &Insn,
+    _pager: &Rc<Pager>,
+    _mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    let conn = program.connection.clone();
+    let schema = conn.schema.borrow();
+
+    match schema.populate_views(&conn)? {
+        IOResult::Done(()) => {
+            // All views populated, advance to next instruction
+            state.pc += 1;
+            Ok(InsnFunctionStepResult::Step)
+        }
+        IOResult::IO => {
+            // Need more IO, stay on this instruction
+            Ok(InsnFunctionStepResult::IO)
+        }
+    }
 }
 
 pub fn op_read_cookie(

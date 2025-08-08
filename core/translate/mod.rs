@@ -34,6 +34,7 @@ pub(crate) mod subquery;
 pub(crate) mod transaction;
 pub(crate) mod update;
 mod values;
+pub(crate) mod view;
 
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
@@ -127,6 +128,7 @@ pub fn translate_inner(
             | ast::Stmt::Delete(..)
             | ast::Stmt::DropIndex { .. }
             | ast::Stmt::DropTable { .. }
+            | ast::Stmt::DropView { .. }
             | ast::Stmt::Reindex { .. }
             | ast::Stmt::Update(..)
             | ast::Stmt::Insert(..)
@@ -186,7 +188,16 @@ pub fn translate_inner(
             program,
         )?,
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
-        ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
+        ast::Stmt::CreateView {
+            view_name, select, ..
+        } => view::translate_create_view(
+            schema,
+            view_name.name.as_str(),
+            &select,
+            connection.clone(),
+            syms,
+            program,
+        )?,
         ast::Stmt::CreateVirtualTable(vtab) => {
             translate_create_virtual_table(*vtab, schema, syms, program)?
         }
@@ -230,7 +241,16 @@ pub fn translate_inner(
             tbl_name,
         } => translate_drop_table(tbl_name, if_exists, schema, syms, program)?,
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
-        ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
+        ast::Stmt::DropView {
+            if_exists,
+            view_name,
+        } => view::translate_drop_view(
+            schema,
+            view_name.name.as_str(),
+            if_exists,
+            connection.clone(),
+            program,
+        )?,
         ast::Stmt::Pragma(..) => {
             bail_parse_error!("PRAGMA statement cannot be evaluated in a nested context")
         }

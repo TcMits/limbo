@@ -4,8 +4,8 @@ use super::{
     expr::walk_expr,
     plan::{
         Aggregate, ColumnUsedMask, Distinctness, EvalAt, JoinInfo, JoinOrderMember, JoinedTable,
-        Operation, OuterQueryReference, Plan, QueryDestination, ResultSetColumn, TableReferences,
-        WhereTerm,
+        Operation, OuterQueryReference, Plan, QueryDestination, ResultSetColumn, Scan,
+        TableReferences, WhereTerm,
     },
     select::prepare_select_plan,
     SymbolTable,
@@ -469,6 +469,35 @@ fn parse_table(
         });
         return Ok(());
     };
+
+    let view = connection.with_schema(database_id, |schema| schema.get_view(table_name.as_str()));
+    if let Some(view) = view {
+        // Create a virtual table wrapper for the view
+        // We'll use the view's columns from the schema
+        let vtab = crate::vtab_view::create_view_virtual_table(table_name.as_str(), view.clone())?;
+
+        let alias = maybe_alias
+            .map(|a| match a {
+                ast::As::As(id) => id,
+                ast::As::Elided(id) => id,
+            })
+            .map(|a| a.as_str().to_string());
+
+        table_references.add_joined_table(JoinedTable {
+            op: Operation::Scan(Scan::VirtualTable {
+                idx_num: -1,
+                idx_str: None,
+                constraints: Vec::new(),
+            }),
+            table: Table::Virtual(vtab),
+            identifier: alias.unwrap_or(normalized_qualified_name),
+            internal_id: table_ref_counter.next(),
+            join_info: None,
+            col_used_mask: ColumnUsedMask::default(),
+            database_id,
+        });
+        return Ok(());
+    }
 
     // CTEs are transformed into FROM clause subqueries.
     // If we find a CTE with this name in our outer query references,

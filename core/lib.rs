@@ -32,6 +32,7 @@ mod uuid;
 mod vdbe;
 mod vector;
 mod vtab;
+mod vtab_view;
 
 #[cfg(feature = "fuzz")]
 pub mod numeric;
@@ -39,6 +40,7 @@ pub mod numeric;
 #[cfg(not(feature = "fuzz"))]
 mod numeric;
 
+use crate::incremental::view::ViewTransactionState;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::pragma::TURSO_CDC_DEFAULT_TABLE_NAME;
 #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
@@ -130,6 +132,7 @@ pub struct Database {
     init_lock: Arc<Mutex<()>>,
     open_flags: OpenFlags,
     builtin_syms: RefCell<SymbolTable>,
+    experimental_views: bool,
 }
 
 unsafe impl Send for Database {}
@@ -190,7 +193,14 @@ impl Database {
         enable_mvcc: bool,
         enable_indexes: bool,
     ) -> Result<Arc<Database>> {
-        Self::open_file_with_flags(io, path, OpenFlags::default(), enable_mvcc, enable_indexes)
+        Self::open_file_with_flags(
+            io,
+            path,
+            OpenFlags::default(),
+            enable_mvcc,
+            enable_indexes,
+            false,
+        )
     }
 
     #[cfg(feature = "fs")]
@@ -200,10 +210,19 @@ impl Database {
         flags: OpenFlags,
         enable_mvcc: bool,
         enable_indexes: bool,
+        enable_views: bool,
     ) -> Result<Arc<Database>> {
         let file = io.open_file(path, flags, true)?;
         let db_file = Arc::new(DatabaseFile::new(file));
-        Self::open_with_flags(io, path, db_file, flags, enable_mvcc, enable_indexes)
+        Self::open_with_flags(
+            io,
+            path,
+            db_file,
+            flags,
+            enable_mvcc,
+            enable_indexes,
+            enable_views,
+        )
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
@@ -221,6 +240,7 @@ impl Database {
             OpenFlags::default(),
             enable_mvcc,
             enable_indexes,
+            false,
         )
     }
 
@@ -232,9 +252,18 @@ impl Database {
         flags: OpenFlags,
         enable_mvcc: bool,
         enable_indexes: bool,
+        enable_views: bool,
     ) -> Result<Arc<Database>> {
         if path == ":memory:" {
-            return Self::do_open_with_flags(io, path, db_file, flags, enable_mvcc, enable_indexes);
+            return Self::do_open_with_flags(
+                io,
+                path,
+                db_file,
+                flags,
+                enable_mvcc,
+                enable_indexes,
+                enable_views,
+            );
         }
 
         let mut registry = DATABASE_MANAGER.lock().unwrap();
@@ -247,7 +276,15 @@ impl Database {
         if let Some(db) = registry.get(&canonical_path).and_then(Weak::upgrade) {
             return Ok(db);
         }
-        let db = Self::do_open_with_flags(io, path, db_file, flags, enable_mvcc, enable_indexes)?;
+        let db = Self::do_open_with_flags(
+            io,
+            path,
+            db_file,
+            flags,
+            enable_mvcc,
+            enable_indexes,
+            enable_views,
+        )?;
         registry.insert(canonical_path, Arc::downgrade(&db));
         Ok(db)
     }
@@ -260,6 +297,7 @@ impl Database {
         flags: OpenFlags,
         enable_mvcc: bool,
         enable_indexes: bool,
+        enable_views: bool,
     ) -> Result<Arc<Database>> {
         let wal_path = format!("{path}-wal");
         let maybe_shared_wal = WalFileShared::open_shared_if_exists(&io, wal_path.as_str())?;
@@ -294,6 +332,7 @@ impl Database {
             open_flags: flags,
             db_state: Arc::new(AtomicDbState::new(db_state)),
             init_lock: Arc::new(Mutex::new(())),
+            experimental_views: enable_views,
         });
         db.register_global_builtin_extensions()
             .expect("unable to register global extensions");
@@ -325,6 +364,13 @@ impl Database {
                 Ok(())
             })?;
         }
+        // FIXME: the correct way to do this is to just materialize the view.
+        // But this will allow us to keep going.
+        let conn = db.connect()?;
+        let pager = conn.pager.borrow().clone();
+        pager
+            .io
+            .block(|| conn.schema.borrow().populate_views(&conn))?;
         Ok(db)
     }
 
@@ -369,6 +415,7 @@ impl Database {
             closed: Cell::new(false),
             attached_databases: RefCell::new(DatabaseCatalog::new()),
             query_only: Cell::new(false),
+            view_transaction_states: RefCell::new(HashMap::new()),
         });
         let builtin_syms = self.builtin_syms.borrow();
         // add built-in extensions symbols to the connection to prevent having to load each time
@@ -465,6 +512,7 @@ impl Database {
         flags: OpenFlags,
         indexes: bool,
         mvcc: bool,
+        views: bool,
     ) -> Result<(Arc<dyn IO>, Arc<Database>)>
     where
         S: AsRef<str> + std::fmt::Display,
@@ -491,7 +539,7 @@ impl Database {
                         }
                     },
                 };
-                let db = Self::open_file_with_flags(io.clone(), path, flags, mvcc, indexes)?;
+                let db = Self::open_file_with_flags(io.clone(), path, flags, mvcc, indexes, views)?;
                 Ok((io, db))
             }
             None => {
@@ -499,7 +547,7 @@ impl Database {
                     MEMORY_PATH => Arc::new(MemoryIO::new()),
                     _ => Arc::new(PlatformIO::new()?),
                 };
-                let db = Self::open_file_with_flags(io.clone(), path, flags, mvcc, indexes)?;
+                let db = Self::open_file_with_flags(io.clone(), path, flags, mvcc, indexes, views)?;
                 Ok((io, db))
             }
         }
@@ -537,6 +585,10 @@ impl Database {
 
     pub fn get_mv_store(&self) -> Option<&Arc<MvStore>> {
         self.mv_store.as_ref()
+    }
+
+    pub fn experimental_views_enabled(&self) -> bool {
+        self.experimental_views
     }
 }
 
@@ -730,6 +782,10 @@ pub struct Connection {
     /// Attached databases
     attached_databases: RefCell<DatabaseCatalog>,
     query_only: Cell<bool>,
+
+    /// Per-connection view transaction states for uncommitted changes. This represents
+    /// one entry per view that was touched in the transaction.
+    view_transaction_states: RefCell<HashMap<String, ViewTransactionState>>,
 }
 
 impl Connection {
@@ -832,6 +888,10 @@ impl Connection {
             let mut fresh = Schema::new(self.schema.borrow().indexes_enabled);
             fresh.schema_version = cookie;
 
+            // Preserve existing views to avoid expensive repopulation.
+            // TODO: We may not need to do this if we materialize our views.
+            let existing_views = self.schema.borrow().views.clone();
+
             // TODO: this is hack to avoid a cyclical problem with schema reprepare
             // The problem here is that we prepare a statement here, but when the statement tries
             // to execute it, it first checks the schema cookie to see if it needs to reprepare the statement.
@@ -844,11 +904,16 @@ impl Connection {
             let stmt = self.prepare("SELECT * FROM sqlite_schema")?;
 
             // TODO: This function below is synchronous, make it async
-            parse_schema_rows(stmt, &mut fresh, &self.syms.borrow(), None)?;
+            parse_schema_rows(stmt, &mut fresh, &self.syms.borrow(), None, existing_views)?;
 
             self.with_schema_mut(|schema| {
                 *schema = fresh;
             });
+
+            {
+                let schema = self.schema.borrow();
+                pager.io.block(|| schema.populate_views(self))?;
+            }
             Result::Ok(())
         };
 
@@ -1074,18 +1139,32 @@ impl Connection {
         uri: &str,
         use_indexes: bool,
         mvcc: bool,
+        views: bool,
     ) -> Result<(Arc<dyn IO>, Arc<Connection>)> {
         use crate::util::MEMORY_PATH;
         let opts = OpenOptions::parse(uri)?;
         let flags = opts.get_flags()?;
         if opts.path == MEMORY_PATH || matches!(opts.mode, OpenMode::Memory) {
             let io = Arc::new(MemoryIO::new());
-            let db =
-                Database::open_file_with_flags(io.clone(), MEMORY_PATH, flags, mvcc, use_indexes)?;
+            let db = Database::open_file_with_flags(
+                io.clone(),
+                MEMORY_PATH,
+                flags,
+                mvcc,
+                use_indexes,
+                views,
+            )?;
             let conn = db.connect()?;
             return Ok((io, conn));
         }
-        let (io, db) = Database::open_new(&opts.path, opts.vfs.as_ref(), flags, use_indexes, mvcc)?;
+        let (io, db) = Database::open_new(
+            &opts.path,
+            opts.vfs.as_ref(),
+            flags,
+            use_indexes,
+            mvcc,
+            views,
+        )?;
         if let Some(modeof) = opts.modeof {
             let perms = std::fs::metadata(modeof)?;
             std::fs::set_permissions(&opts.path, perms.permissions())?;
@@ -1095,13 +1174,24 @@ impl Connection {
     }
 
     #[cfg(feature = "fs")]
-    fn from_uri_attached(uri: &str, use_indexes: bool, use_mvcc: bool) -> Result<Arc<Database>> {
+    fn from_uri_attached(
+        uri: &str,
+        use_indexes: bool,
+        use_mvcc: bool,
+        use_views: bool,
+    ) -> Result<Arc<Database>> {
         let mut opts = OpenOptions::parse(uri)?;
         // FIXME: for now, only support read only attach
         opts.mode = OpenMode::ReadOnly;
         let flags = opts.get_flags()?;
-        let (_io, db) =
-            Database::open_new(&opts.path, opts.vfs.as_ref(), flags, use_indexes, use_mvcc)?;
+        let (_io, db) = Database::open_new(
+            &opts.path,
+            opts.vfs.as_ref(),
+            flags,
+            use_indexes,
+            use_mvcc,
+            use_views,
+        )?;
         if let Some(modeof) = opts.modeof {
             let perms = std::fs::metadata(modeof)?;
             std::fs::set_permissions(&opts.path, perms.permissions())?;
@@ -1423,7 +1513,9 @@ impl Connection {
             .expect("query must be parsed to statement");
         let syms = self.syms.borrow();
         self.with_schema_mut(|schema| {
-            if let Err(LimboError::ExtensionError(e)) = parse_schema_rows(rows, schema, &syms, None)
+            let existing_views = schema.views.clone();
+            if let Err(LimboError::ExtensionError(e)) =
+                parse_schema_rows(rows, schema, &syms, None, existing_views)
             {
                 // this means that a vtab exists and we no longer have the module loaded. we print
                 // a warning to the user to load the module
@@ -1487,6 +1579,10 @@ impl Connection {
         }
 
         Ok(results)
+    }
+
+    pub fn experimental_views_enabled(&self) -> bool {
+        self._db.experimental_views_enabled()
     }
 
     /// Query the current value(s) of `pragma_name` associated to
@@ -1584,8 +1680,9 @@ impl Connection {
             .map_err(|_| LimboError::SchemaLocked)?
             .indexes_enabled();
         let use_mvcc = self._db.mv_store.is_some();
+        let use_views = self._db.experimental_views_enabled();
 
-        let db = Self::from_uri_attached(path, use_indexes, use_mvcc)?;
+        let db = Self::from_uri_attached(path, use_indexes, use_mvcc, use_views)?;
         let pager = Rc::new(db.init_pager(None)?);
 
         self.attached_databases

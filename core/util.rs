@@ -2,17 +2,21 @@
 use crate::translate::expr::WalkControl;
 use crate::types::IOResult;
 use crate::{
-    schema::{self, Column, Schema, Type},
+    schema::{self, Column, Schema, Type, ViewsMap},
     translate::{collate::CollationSeq, expr::walk_expr, plan::JoinOrderMember},
     types::{Value, ValueType},
     LimboError, OpenFlags, Result, Statement, StepResult, SymbolTable,
 };
 use crate::{Connection, IO};
-use std::{rc::Rc, sync::Arc};
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 use tracing::{instrument, Level};
 use turso_sqlite3_parser::ast::{
-    self, CreateTableBody, Expr, FunctionTail, Literal, UnaryOperator,
+    self, fmt::ToTokens, Cmd, CreateTableBody, Expr, FunctionTail, Literal, Stmt, UnaryOperator,
 };
+use turso_sqlite3_parser::lexer::sql::Parser;
 
 pub trait IOExt {
     fn block<T>(&self, f: impl FnMut() -> Result<IOResult<T>>) -> Result<T>;
@@ -73,18 +77,22 @@ pub fn parse_schema_rows(
     schema: &mut Schema,
     syms: &SymbolTable,
     mv_tx_id: Option<u64>,
+    mut existing_views: ViewsMap,
 ) -> Result<()> {
     rows.set_mv_tx_id(mv_tx_id);
     // TODO: if we IO, this unparsed indexes is lost. Will probably need some state between
     // IO runs
     let mut from_sql_indexes = Vec::with_capacity(10);
     let mut automatic_indices = std::collections::HashMap::with_capacity(10);
+
+    // Collect views for second pass to populate table_to_views mapping
+    let mut views_to_process: Vec<(String, Vec<String>)> = Vec::new();
     loop {
         match rows.step()? {
             StepResult::Row => {
                 let row = rows.row().unwrap();
                 let ty = row.get::<&str>(0)?;
-                if !["table", "index"].contains(&ty) {
+                if !["table", "index", "view"].contains(&ty) {
                     continue;
                 }
                 match ty {
@@ -141,6 +149,65 @@ pub fn parse_schema_rows(
                             }
                         }
                     }
+                    "view" => {
+                        use crate::incremental::view::IncrementalView;
+                        use fallible_iterator::FallibleIterator;
+
+                        let name: &str = row.get::<&str>(1)?;
+                        let sql: &str = row.get::<&str>(4)?;
+                        let view_name = name.to_string();
+
+                        // Try to remove and potentially reuse an existing view with this name.
+                        // Note: After this function completes, any views not reused are discarded,
+                        // as they are no longer relevant in the new schema.
+                        let should_create_new =
+                            if let Some(existing_view) = existing_views.remove(&view_name) {
+                                // Check if we can reuse this view (same SQL definition)
+                                let can_reuse = if let Ok(view_guard) = existing_view.lock() {
+                                    view_guard.has_same_sql(sql)
+                                } else {
+                                    false
+                                };
+
+                                if can_reuse {
+                                    // Reuse the existing view - it's already populated!
+                                    let referenced_tables =
+                                        if let Ok(view_guard) = existing_view.lock() {
+                                            view_guard.get_referenced_table_names()
+                                        } else {
+                                            vec![]
+                                        };
+
+                                    // Add the existing view to the new schema
+                                    schema.views.insert(view_name.clone(), existing_view);
+
+                                    // Store for second pass processing
+                                    views_to_process.push((view_name.clone(), referenced_tables));
+                                    false // Don't create new
+                                } else {
+                                    true // SQL changed, need to create new
+                                }
+                            } else {
+                                true // No existing view, need to create new
+                            };
+
+                        if should_create_new {
+                            // Create a new IncrementalView
+                            match IncrementalView::from_sql(sql, schema) {
+                                Ok(incremental_view) => {
+                                    let referenced_tables =
+                                        incremental_view.get_referenced_table_names();
+                                    schema.add_view(incremental_view);
+                                    views_to_process.push((view_name, referenced_tables));
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Warning: Could not create incremental view for {name}: {e:?}"
+                                    );
+                                }
+                            }
+                        }
+                    }
                     _ => continue,
                 }
             }
@@ -183,6 +250,15 @@ pub fn parse_schema_rows(
             }
         }
     }
+
+    // Second pass: populate table_to_views mapping
+    for (view_name, referenced_tables) in views_to_process {
+        // Register this view as dependent on each referenced table
+        for table_name in referenced_tables {
+            schema.add_view_dependency(&table_name, &view_name);
+        }
+    }
+
     Ok(())
 }
 
@@ -1092,6 +1168,151 @@ pub fn parse_pragma_bool(expr: &Expr) -> Result<bool> {
         "boolean pragma value must be either 0|1 integer or yes|true|on|no|false|off token"
             .to_string(),
     ))
+}
+
+/// Extract column name from an expression (e.g., for SELECT clauses)
+pub fn extract_column_name_from_expr(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::Id(name) => Some(name.as_str().to_string()),
+        ast::Expr::Qualified(_, name) => Some(name.as_str().to_string()),
+        _ => None,
+    }
+}
+
+/// Extract column information from a SELECT statement for view creation
+pub fn extract_view_columns(select_stmt: &ast::Select, schema: &Schema) -> Vec<Column> {
+    let mut columns = Vec::new();
+    // Navigate to the first SELECT in the statement
+    if let ast::OneSelect::Select(select_core) = select_stmt.body.select.as_ref() {
+        // First, we need to figure out which table(s) are being selected from
+        let table_name = if let Some(from) = &select_core.from {
+            if let Some(ast::SelectTable::Table(qualified_name, _, _)) = from.select.as_deref() {
+                Some(normalize_ident(qualified_name.name.as_str()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // Get the table for column resolution
+        let _table = table_name.as_ref().and_then(|name| schema.get_table(name));
+        // Process each column in the SELECT list
+        for (i, result_col) in select_core.columns.iter().enumerate() {
+            match result_col {
+                ast::ResultColumn::Expr(expr, alias) => {
+                    let name = alias
+                        .as_ref()
+                        .map(|a| match a {
+                            ast::As::Elided(name) => name.as_str().to_string(),
+                            ast::As::As(name) => name.as_str().to_string(),
+                        })
+                        .or_else(|| extract_column_name_from_expr(expr))
+                        .unwrap_or_else(|| {
+                            // If we can't extract a simple column name, use the expression itself
+                            expr.format().unwrap_or_else(|_| format!("column_{i}"))
+                        });
+                    columns.push(Column {
+                        name: Some(name),
+                        ty: Type::Text, // Default to TEXT, could be refined with type analysis
+                        ty_str: "TEXT".to_string(),
+                        primary_key: false, // Views don't have primary keys
+                        is_rowid_alias: false,
+                        notnull: false, // Views typically don't enforce NOT NULL
+                        default: None,  // Views don't have default values
+                        unique: false,
+                        collation: None,
+                        hidden: false,
+                    });
+                }
+                ast::ResultColumn::Star => {
+                    // For SELECT *, expand to all columns from the table
+                    if let Some(ref table_name) = table_name {
+                        if let Some(table) = schema.get_table(table_name) {
+                            // Copy all columns from the table, but adjust for view constraints
+                            for table_column in table.columns() {
+                                columns.push(Column {
+                                    name: table_column.name.clone(),
+                                    ty: table_column.ty,
+                                    ty_str: table_column.ty_str.clone(),
+                                    primary_key: false, // Views don't have primary keys
+                                    is_rowid_alias: false,
+                                    notnull: false, // Views typically don't enforce NOT NULL
+                                    default: None,  // Views don't have default values
+                                    unique: false,
+                                    collation: table_column.collation,
+                                    hidden: false,
+                                });
+                            }
+                        } else {
+                            // Table not found, create placeholder
+                            columns.push(Column {
+                                name: Some("*".to_string()),
+                                ty: Type::Text,
+                                ty_str: "TEXT".to_string(),
+                                primary_key: false,
+                                is_rowid_alias: false,
+                                notnull: false,
+                                default: None,
+                                unique: false,
+                                collation: None,
+                                hidden: false,
+                            });
+                        }
+                    } else {
+                        // No FROM clause or couldn't determine table, create placeholder
+                        columns.push(Column {
+                            name: Some("*".to_string()),
+                            ty: Type::Text,
+                            ty_str: "TEXT".to_string(),
+                            primary_key: false,
+                            is_rowid_alias: false,
+                            notnull: false,
+                            default: None,
+                            unique: false,
+                            collation: None,
+                            hidden: false,
+                        });
+                    }
+                }
+                ast::ResultColumn::TableStar(table_name) => {
+                    // For table.*, expand to all columns from the specified table
+                    let table_name_str = normalize_ident(table_name.as_str());
+                    if let Some(table) = schema.get_table(&table_name_str) {
+                        // Copy all columns from the table, but adjust for view constraints
+                        for table_column in table.columns() {
+                            columns.push(Column {
+                                name: table_column.name.clone(),
+                                ty: table_column.ty,
+                                ty_str: table_column.ty_str.clone(),
+                                primary_key: false,
+                                is_rowid_alias: false,
+                                notnull: false,
+                                default: None,
+                                unique: false,
+                                collation: table_column.collation,
+                                hidden: false,
+                            });
+                        }
+                    } else {
+                        // Table not found, create placeholder
+                        columns.push(Column {
+                            name: Some(format!("{table_name_str}.*")),
+                            ty: Type::Text,
+                            ty_str: "TEXT".to_string(),
+                            primary_key: false,
+                            is_rowid_alias: false,
+                            notnull: false,
+                            default: None,
+                            unique: false,
+                            collation: None,
+                            hidden: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    columns
 }
 
 #[cfg(test)]

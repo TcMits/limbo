@@ -60,6 +60,8 @@ pub struct Opts {
     pub readonly: bool,
     #[clap(long, help = "Enable experimental MVCC feature")]
     pub experimental_mvcc: bool,
+    #[clap(long, help = "Enable experimental views feature")]
+    pub experimental_views: bool,
     #[clap(long, help = "Enable experimental indexing feature")]
     pub experimental_indexes: Option<bool>,
     #[clap(short = 't', long, help = "specify output file for log traces")]
@@ -121,7 +123,12 @@ impl Limbo {
             .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string());
         let indexes_enabled = opts.experimental_indexes.unwrap_or(true);
         let (io, conn) = if db_file.contains([':', '?', '&', '#']) {
-            Connection::from_uri(&db_file, indexes_enabled, opts.experimental_mvcc)?
+            Connection::from_uri(
+                &db_file,
+                indexes_enabled,
+                opts.experimental_mvcc,
+                opts.experimental_views,
+            )?
         } else {
             let flags = if opts.readonly {
                 OpenFlags::ReadOnly
@@ -134,6 +141,7 @@ impl Limbo {
                 flags,
                 indexes_enabled,
                 opts.experimental_mvcc,
+                opts.experimental_views,
             )?;
             let conn = db.connect()?;
             (io, conn)
@@ -951,7 +959,11 @@ impl Limbo {
     }
 
     fn print_schema_entry(&mut self, db_display_name: &str, row: &turso_core::Row) -> bool {
-        if let Ok(Value::Text(schema)) = row.get::<&Value>(0) {
+        if let (Ok(Value::Text(schema)), Ok(Value::Text(obj_type)), Ok(Value::Text(obj_name))) = (
+            row.get::<&Value>(0),
+            row.get::<&Value>(1),
+            row.get::<&Value>(2),
+        ) {
             let modified_schema = if db_display_name == "main" {
                 schema.as_str().to_string()
             } else {
@@ -982,9 +994,61 @@ impl Limbo {
                 }
             };
             let _ = self.write_fmt(format_args!("{modified_schema};"));
+            // For views, add the column comment like SQLite does
+            if obj_type.as_str() == "view" {
+                let columns = self
+                    .get_view_columns(obj_name.as_str())
+                    .unwrap_or_else(|_| "x".to_string());
+                let _ = self.write_fmt(format_args!("/* {}({}) */", obj_name.as_str(), columns));
+            }
             true
         } else {
             false
+        }
+    }
+
+    /// Get column names for a view to generate the SQLite-compatible comment
+    fn get_view_columns(&mut self, view_name: &str) -> anyhow::Result<String> {
+        // Get column information using PRAGMA table_info
+        let pragma_sql = format!("PRAGMA table_info({view_name})");
+
+        match self.conn.query(&pragma_sql) {
+            Ok(Some(ref mut rows)) => {
+                let mut columns = Vec::new();
+                loop {
+                    match rows.step()? {
+                        StepResult::Row => {
+                            let row = rows.row().unwrap();
+                            // Column name is in the second column (index 1) of PRAGMA table_info
+                            if let Ok(Value::Text(col_name)) = row.get::<&Value>(1) {
+                                columns.push(col_name.as_str().to_string());
+                            }
+                        }
+                        StepResult::IO => {
+                            rows.run_once()?;
+                        }
+                        StepResult::Done => break,
+                        StepResult::Interrupt => break,
+                        StepResult::Busy => break,
+                    }
+                }
+
+                if columns.is_empty() {
+                    anyhow::bail!("PRAGMA table_info returned no columns for view '{}'. The view may be corrupted or the database schema is invalid.", view_name);
+                }
+
+                Ok(columns.join(","))
+            }
+            Ok(None) => {
+                anyhow::bail!("PRAGMA table_info('{}') returned no results. The view may not exist or the database schema is invalid.", view_name);
+            }
+            Err(e) => {
+                anyhow::bail!(
+                    "Failed to execute PRAGMA table_info for view '{}': {}",
+                    view_name,
+                    e
+                );
+            }
         }
     }
 
@@ -995,7 +1059,7 @@ impl Limbo {
         table_name: &str,
     ) -> anyhow::Result<bool> {
         let sql = format!(
-            "SELECT sql FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index') AND tbl_name = '{table_name}' AND name NOT LIKE 'sqlite_%'"
+            "SELECT sql FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index', 'view') AND tbl_name = '{table_name}' OR name = '{table_name}' AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
         );
 
         let mut found = false;
@@ -1028,9 +1092,7 @@ impl Limbo {
         db_prefix: &str,
         db_display_name: &str,
     ) -> anyhow::Result<()> {
-        let sql = format!(
-            "SELECT sql FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
-        );
+        let sql = format!("SELECT sql, type, name FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 1 WHEN 'view' THEN 2 WHEN 'index' THEN 3 END, name");
 
         match self.conn.query(&sql) {
             Ok(Some(ref mut rows)) => loop {

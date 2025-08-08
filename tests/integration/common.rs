@@ -31,6 +31,7 @@ impl TempDatabase {
             turso_core::OpenFlags::default(),
             false,
             enable_indexes,
+            false,
         )
         .unwrap();
         Self { path, io, db }
@@ -56,6 +57,7 @@ impl TempDatabase {
             flags,
             false,
             enable_indexes,
+            false,
         )
         .unwrap();
         Self {
@@ -85,6 +87,7 @@ impl TempDatabase {
             turso_core::OpenFlags::default(),
             false,
             enable_indexes,
+            false,
         )
         .unwrap();
 

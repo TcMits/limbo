@@ -1,3 +1,8 @@
+use crate::incremental::view::IncrementalView;
+use crate::types::IOResult;
+
+/// Type alias for the views collection
+pub type ViewsMap = HashMap<String, Arc<Mutex<IncrementalView>>>;
 use crate::result::LimboResult;
 use crate::storage::btree::BTreeCursor;
 use crate::translate::collate::CollationSeq;
@@ -13,6 +18,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use tracing::trace;
 use turso_sqlite3_parser::ast::{self, ColumnDefinition, Expr, Literal, SortOrder, TableOptions};
 use turso_sqlite3_parser::{
@@ -26,11 +32,16 @@ const SCHEMA_TABLE_NAME_ALT: &str = "sqlite_master";
 #[derive(Debug)]
 pub struct Schema {
     pub tables: HashMap<String, Arc<Table>>,
+    pub views: ViewsMap,
+
     /// table_name to list of indexes for the table
     pub indexes: HashMap<String, Vec<Arc<Index>>>,
     pub has_indexes: std::collections::HashSet<String>,
     pub indexes_enabled: bool,
     pub schema_version: u32,
+
+    /// Mapping from table names to the views that depend on them
+    pub table_to_views: HashMap<String, Vec<String>>,
 }
 
 impl Schema {
@@ -49,12 +60,16 @@ impl Schema {
                 Arc::new(Table::Virtual(Arc::new((*function).clone()))),
             );
         }
+        let views: ViewsMap = HashMap::new();
+        let table_to_views: HashMap<String, Vec<String>> = HashMap::new();
         Self {
             tables,
+            views,
             indexes,
             has_indexes,
             indexes_enabled,
             schema_version: 0,
+            table_to_views,
         }
     }
 
@@ -63,6 +78,68 @@ impl Schema {
             .indexes
             .iter()
             .any(|idx| idx.1.iter().any(|i| i.name == name))
+    }
+    pub fn add_view(&mut self, view: IncrementalView) {
+        let name = normalize_ident(view.name());
+        self.views.insert(name, Arc::new(Mutex::new(view)));
+    }
+
+    pub fn get_view(&self, name: &str) -> Option<Arc<Mutex<IncrementalView>>> {
+        let name = normalize_ident(name);
+        self.views.get(&name).cloned()
+    }
+
+    pub fn remove_view(&mut self, name: &str) -> Option<Arc<Mutex<IncrementalView>>> {
+        let name = normalize_ident(name);
+
+        // Remove from table_to_views dependencies
+        for views in self.table_to_views.values_mut() {
+            views.retain(|v| v != &name);
+        }
+
+        // Remove the view itself
+        self.views.remove(&name)
+    }
+
+    /// Register that a view depends on a table
+    pub fn add_view_dependency(&mut self, table_name: &str, view_name: &str) {
+        let table_name = normalize_ident(table_name);
+        let view_name = normalize_ident(view_name);
+
+        self.table_to_views
+            .entry(table_name)
+            .or_default()
+            .push(view_name);
+    }
+
+    /// Get all views that depend on a given table
+    pub fn get_dependent_views(&self, table_name: &str) -> Vec<String> {
+        let table_name = normalize_ident(table_name);
+        self.table_to_views
+            .get(&table_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Populate all views by scanning their source tables
+    /// Returns IOResult to support async execution
+    pub fn populate_views(&self, conn: &Arc<crate::Connection>) -> Result<IOResult<()>> {
+        for view in self.views.values() {
+            let mut view = view
+                .lock()
+                .map_err(|_| LimboError::InternalError("Failed to lock view".to_string()))?;
+            match view.populate_from_table(conn)? {
+                IOResult::Done(()) => {
+                    // This view is done, continue to next
+                    continue;
+                }
+                IOResult::IO => {
+                    // This view needs more IO, return early
+                    return Ok(IOResult::IO);
+                }
+            }
+        }
+        Ok(IOResult::Done(()))
     }
 
     pub fn add_btree_table(&mut self, table: Arc<BTreeTable>) {
@@ -159,6 +236,9 @@ impl Schema {
         let mut from_sql_indexes = Vec::with_capacity(10);
         let mut automatic_indices: HashMap<String, Vec<(String, usize)>> =
             HashMap::with_capacity(10);
+
+        // Collect views for second pass to populate table_to_views mapping
+        let mut views_to_process: Vec<(String, Vec<String>)> = Vec::new();
 
         if matches!(pager.begin_read_tx()?, LimboResult::Busy) {
             return Err(LimboError::Busy);
@@ -271,6 +351,35 @@ impl Schema {
                         }
                     }
                 }
+                "view" => {
+                    let name_value = record_cursor.get_value(&row, 1)?;
+                    let RefValue::Text(name_text) = name_value else {
+                        return Err(LimboError::ConversionError("Expected text value".into()));
+                    };
+                    let name = name_text.as_str();
+
+                    let sql_value = record_cursor.get_value(&row, 4)?;
+                    let RefValue::Text(sql_text) = sql_value else {
+                        return Err(LimboError::ConversionError("Expected text value".into()));
+                    };
+                    let sql = sql_text.as_str();
+
+                    // Create IncrementalView directly
+                    if let Ok(incremental_view) = IncrementalView::from_sql(sql, self) {
+                        // Get referenced table names before moving the view
+                        let referenced_tables = incremental_view.get_referenced_table_names();
+                        let view_name = name.to_string();
+
+                        // Add to schema (moves incremental_view)
+                        self.add_view(incremental_view);
+
+                        // Store for second pass processing
+                        views_to_process.push((view_name, referenced_tables));
+                    } else {
+                        eprintln!("Warning: Could not create incremental view for: {name}");
+                    }
+                }
+
                 _ => {}
             };
             drop(record_cursor);
@@ -280,6 +389,14 @@ impl Schema {
         }
 
         pager.end_read_tx()?;
+
+        // Second pass: populate table_to_views mapping
+        for (view_name, referenced_tables) in views_to_process {
+            // Register this view as dependent on each referenced table
+            for table_name in referenced_tables {
+                self.add_view_dependency(&table_name, &view_name);
+            }
+        }
 
         for unparsed_sql_from_index in from_sql_indexes {
             if !self.indexes_enabled() {
@@ -357,12 +474,19 @@ impl Clone for Schema {
                 (name.clone(), indexes)
             })
             .collect();
+        let views = self
+            .views
+            .iter()
+            .map(|(name, view)| (name.clone(), view.clone()))
+            .collect();
         Self {
             tables,
+            views,
             indexes,
             has_indexes: self.has_indexes.clone(),
             indexes_enabled: self.indexes_enabled,
             schema_version: self.schema_version,
+            table_to_views: self.table_to_views.clone(),
         }
     }
 }

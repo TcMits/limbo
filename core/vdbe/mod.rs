@@ -443,6 +443,21 @@ impl Program {
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
+    fn apply_view_deltas(&self, rollback: bool) {
+        let tx_states = self.connection.view_transaction_states.take();
+
+        if !rollback {
+            let schema = self.connection.schema.borrow();
+
+            for (view_name, tx_state) in tx_states.iter() {
+                if let Some(view_mutex) = schema.get_view(view_name) {
+                    let mut view = view_mutex.lock().unwrap();
+                    view.merge_delta(&tx_state.delta);
+                }
+            }
+        }
+    }
+
     pub fn commit_txn(
         &self,
         pager: Rc<Pager>,
@@ -450,6 +465,8 @@ impl Program {
         mv_store: Option<&Arc<MvStore>>,
         rollback: bool,
     ) -> Result<StepResult> {
+        self.apply_view_deltas(rollback);
+
         if self.connection.transaction_state.get() == TransactionState::None && mv_store.is_none() {
             // No need to do any work here if not in tx. Current MVCC logic doesn't work with this assumption,
             // hence the mv_store.is_none() check.
