@@ -194,12 +194,16 @@ fn prepare_one_select_plan(
                 where_clause,
                 group_by,
                 distinctness,
+                window_clause,
                 ..
             } = *select_inner;
             if !schema.indexes_enabled() && distinctness.is_some() {
                 crate::bail_parse_error!(
                     "SELECT with DISTINCT is not allowed without indexes enabled"
                 );
+            }
+            if window_clause.is_some() {
+                crate::bail_parse_error!("WINDOW clause is not supported yet");
             }
             let col_count = columns.len();
             if col_count == 0 {
@@ -342,9 +346,17 @@ fn prepare_one_select_plan(
                                 name,
                                 distinctness,
                                 args,
-                                filter_over: _,
-                                order_by: _,
+                                filter_over,
+                                order_by,
                             } => {
+                                if filter_over.is_some() {
+                                    crate::bail_parse_error!(
+                                        "FILTER clause is not supported yet in aggregate functions"
+                                    );
+                                }
+                                if order_by.is_some() {
+                                    crate::bail_parse_error!("ORDER BY clause is not supported yet in aggregate functions");
+                                }
                                 let args_count = if let Some(args) = &args {
                                     args.len()
                                 } else {
@@ -465,47 +477,53 @@ fn prepare_one_select_plan(
                                     }
                                 }
                             }
-                            ast::Expr::FunctionCallStar {
-                                name,
-                                filter_over: _,
-                            } => match Func::resolve_function(name.as_str(), 0) {
-                                Ok(Func::Agg(f)) => {
-                                    let agg = Aggregate {
-                                        func: f,
-                                        args: vec![ast::Expr::Literal(ast::Literal::Numeric(
-                                            "1".to_string(),
-                                        ))],
-                                        original_expr: expr.clone(),
-                                        distinctness: Distinctness::NonDistinct,
-                                    };
-                                    aggregate_expressions.push(agg.clone());
-                                    plan.result_columns.push(ResultSetColumn {
-                                        alias: maybe_alias.as_ref().map(|alias| match alias {
-                                            ast::As::Elided(alias) => alias.as_str().to_string(),
-                                            ast::As::As(alias) => alias.as_str().to_string(),
-                                        }),
-                                        expr: expr.clone(),
-                                        contains_aggregates: true,
-                                    });
-                                }
-                                Ok(_) => {
+                            ast::Expr::FunctionCallStar { name, filter_over } => {
+                                if filter_over.is_some() {
                                     crate::bail_parse_error!(
-                                        "Invalid aggregate function: {}",
-                                        name.as_str()
+                                        "FILTER clause is not supported yet in aggregate functions"
                                     );
                                 }
-                                Err(e) => match e {
-                                    crate::LimboError::ParseError(e) => {
-                                        crate::bail_parse_error!("{}", e);
+                                match Func::resolve_function(name.as_str(), 0) {
+                                    Ok(Func::Agg(f)) => {
+                                        let agg = Aggregate {
+                                            func: f,
+                                            args: vec![ast::Expr::Literal(ast::Literal::Numeric(
+                                                "1".to_string(),
+                                            ))],
+                                            original_expr: expr.clone(),
+                                            distinctness: Distinctness::NonDistinct,
+                                        };
+                                        aggregate_expressions.push(agg.clone());
+                                        plan.result_columns.push(ResultSetColumn {
+                                            alias: maybe_alias.as_ref().map(|alias| match alias {
+                                                ast::As::Elided(alias) => {
+                                                    alias.as_str().to_string()
+                                                }
+                                                ast::As::As(alias) => alias.as_str().to_string(),
+                                            }),
+                                            expr: expr.clone(),
+                                            contains_aggregates: true,
+                                        });
                                     }
-                                    _ => {
+                                    Ok(_) => {
                                         crate::bail_parse_error!(
                                             "Invalid aggregate function: {}",
                                             name.as_str()
                                         );
                                     }
-                                },
-                            },
+                                    Err(e) => match e {
+                                        crate::LimboError::ParseError(e) => {
+                                            crate::bail_parse_error!("{}", e);
+                                        }
+                                        _ => {
+                                            crate::bail_parse_error!(
+                                                "Invalid aggregate function: {}",
+                                                name.as_str()
+                                            );
+                                        }
+                                    },
+                                }
+                            }
                             expr => {
                                 let contains_aggregates =
                                     resolve_aggregates(schema, expr, &mut aggregate_expressions)?;

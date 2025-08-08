@@ -51,7 +51,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use tracing::{instrument, Level};
 use transaction::{translate_tx_begin, translate_tx_commit};
-use turso_sqlite3_parser::ast::{self, Delete, Insert};
+use turso_sqlite3_parser::ast::{self, Delete, Indexed, Insert};
 use update::translate_update;
 
 #[instrument(skip_all, level = Level::DEBUG)]
@@ -156,16 +156,21 @@ pub fn translate_inner(
             idx_name,
             tbl_name,
             columns,
-            ..
-        } => translate_create_index(
-            (unique, if_not_exists),
-            idx_name.name.as_str(),
-            tbl_name.as_str(),
-            &columns,
-            schema,
-            syms,
-            program,
-        )?,
+            where_clause,
+        } => {
+            if where_clause.is_some() {
+                bail_parse_error!("Partial indexes are not supported");
+            }
+            translate_create_index(
+                (unique, if_not_exists),
+                idx_name.name.as_str(),
+                tbl_name.as_str(),
+                &columns,
+                schema,
+                syms,
+                program,
+            )?
+        }
         ast::Stmt::CreateTable {
             temporary,
             if_not_exists,
@@ -191,8 +196,19 @@ pub fn translate_inner(
                 where_clause,
                 limit,
                 returning,
-                ..
+                indexed,
+                order_by,
+                with,
             } = *delete;
+            if with.is_some() {
+                bail_parse_error!("WITH clause is not supported in DELETE");
+            }
+            if indexed.is_some_and(|i| matches!(i, Indexed::IndexedBy(_))) {
+                bail_parse_error!("INDEXED BY clause is not supported in DELETE");
+            }
+            if order_by.is_some() {
+                bail_parse_error!("ORDER BY clause is not supported in DELETE");
+            }
             translate_delete(
                 schema,
                 &tbl_name,

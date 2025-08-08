@@ -46,8 +46,19 @@ pub fn resolve_aggregates(
                 name,
                 args,
                 distinctness,
-                ..
+                filter_over,
+                order_by,
             } => {
+                if filter_over.is_some() {
+                    crate::bail_parse_error!(
+                        "FILTER clause is not supported yet in aggregate functions"
+                    );
+                }
+                if order_by.is_some() {
+                    crate::bail_parse_error!(
+                        "ORDER BY clause is not supported yet in aggregate functions"
+                    );
+                }
                 let args_count = if let Some(args) = &args {
                     args.len()
                 } else {
@@ -84,7 +95,12 @@ pub fn resolve_aggregates(
                     }
                 }
             }
-            Expr::FunctionCallStar { name, .. } => {
+            Expr::FunctionCallStar { name, filter_over } => {
+                if filter_over.is_some() {
+                    crate::bail_parse_error!(
+                        "FILTER clause is not supported yet in aggregate functions"
+                    );
+                }
                 if let Ok(Func::Agg(f)) = Func::resolve_function(name.as_str(), 0) {
                     aggs.push(Aggregate {
                         func: f,

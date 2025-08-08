@@ -12,7 +12,7 @@ use crate::{
     vdbe::builder::{ProgramBuilder, ProgramBuilderOpts},
     SymbolTable,
 };
-use turso_sqlite3_parser::ast::{Expr, SortOrder, Update};
+use turso_sqlite3_parser::ast::{Expr, Indexed, SortOrder, Update};
 
 use super::emitter::emit_program;
 use super::expr::process_returning_clause;
@@ -100,10 +100,17 @@ pub fn prepare_update_plan(
     connection: &Arc<crate::Connection>,
 ) -> crate::Result<Plan> {
     if body.with.is_some() {
-        bail_parse_error!("WITH clause is not supported");
+        bail_parse_error!("WITH clause is not supported in UPDATE");
     }
     if body.or_conflict.is_some() {
-        bail_parse_error!("ON CONFLICT clause is not supported");
+        bail_parse_error!("ON CONFLICT clause is not supported in UPDATE");
+    }
+    if body
+        .indexed
+        .as_ref()
+        .is_some_and(|i| matches!(i, Indexed::IndexedBy(_)))
+    {
+        bail_parse_error!("INDEXED BY clause is not supported in UPDATE");
     }
     let table_name = &body.tbl_name.name;
     if schema.table_has_indexes(&table_name.to_string()) && !schema.indexes_enabled() {
