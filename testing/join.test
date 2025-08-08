@@ -106,6 +106,25 @@ Jamie|coat
 Jamie|accessories
 Cindy|}
 
+# This test verifies that the WHERE clause is evaluated after the LEFT JOIN,
+# effectively filtering out rows where the right table has no match.
+do_execsql_test left-join-with-where-right-table {
+    select users.id, price
+    from users left join products on users.id = products.id
+    where products.price is not null
+    order by users.id;
+} {1|79.0
+2|82.0
+3|18.0
+4|25.0
+5|74.0
+6|70.0
+7|78.0
+8|82.0
+9|1.0
+10|33.0
+11|81.0}
+
 do_execsql_test left-join-row-id {
     select u.rowid, p.rowid from users u left join products as p on u.rowid = p.rowid where u.rowid >= 10 limit 5;
 } {10|10

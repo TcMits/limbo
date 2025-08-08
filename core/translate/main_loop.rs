@@ -628,6 +628,7 @@ pub fn open_loop(
             }
         }
 
+        // First emit outer join conditions, if any.
         emit_conditions(
             program,
             &t_ctx,
@@ -636,6 +637,7 @@ pub fn open_loop(
             predicates,
             join_index,
             next,
+            true,
         )?;
 
         // Set the match flag to true if this is a LEFT JOIN.
@@ -652,11 +654,27 @@ pub fn open_loop(
                 });
             }
         }
+
+        // Now we can emit conditions from the WHERE clause.
+        // If the right table produces a NULL row, control jumps to the point where the match flag is set.
+        // The WHERE clause conditions may reference columns from that row, so they cannot be emitted
+        // before the flag is set — the row may be filtered out by the WHERE clause.
+        emit_conditions(
+            program,
+            &t_ctx,
+            table_references,
+            join_order,
+            predicates,
+            join_index,
+            next,
+            false,
+        )?;
     }
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_conditions(
     program: &mut ProgramBuilder,
     t_ctx: &&mut TranslateCtx,
@@ -665,9 +683,11 @@ fn emit_conditions(
     predicates: &[WhereTerm],
     join_index: usize,
     next: BranchOffset,
+    from_outer_join: bool,
 ) -> Result<()> {
     for cond in predicates
         .iter()
+        .filter(|cond| cond.from_outer_join.is_some() == from_outer_join)
         .filter(|cond| cond.should_eval_at_loop(join_index, join_order))
     {
         let jump_target_when_true = program.allocate_label();
