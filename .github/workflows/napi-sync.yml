@@ -1,4 +1,4 @@
-name: JavaScript
+name: Build & publish @tursodatabase/sync
 
 on:
   push:
