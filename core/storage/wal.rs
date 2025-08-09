@@ -1375,7 +1375,9 @@ impl WalFile {
                         (max_frame, n_backfills)
                     };
                     let needs_backfill = max_frame > nbackfills;
-                    if !needs_backfill && matches!(mode, CheckpointMode::Passive) {
+                    if !needs_backfill
+                        && matches!(mode, CheckpointMode::Passive | CheckpointMode::Full)
+                    {
                         // there are no frames to copy over and we don't need to reset
                         // the log so we can return early success.
                         return Ok(IOResult::Done(self.prev_checkpoint.clone()));
@@ -1387,15 +1389,13 @@ impl WalFile {
                             Err(_) => return Err(LimboError::Busy),
                             Ok(res) => res,
                         };
-                    self.ongoing_checkpoint.state = if matches!(mode, CheckpointMode::Full)
-                        && !self.ongoing_checkpoint.has_work()
-                    {
-                        CheckpointState::Done
-                    } else {
-                        CheckpointState::ReadFrame
-                    };
                     self.ongoing_checkpoint.min_frame = nbackfills + 1;
                     self.ongoing_checkpoint.current_page = 0;
+                    self.ongoing_checkpoint.state = if self.ongoing_checkpoint.has_work() {
+                        CheckpointState::ReadFrame
+                    } else {
+                        CheckpointState::Done
+                    };
                     tracing::trace!(
                         "checkpoint_start(min_frame={}, max_frame={})",
                         self.ongoing_checkpoint.min_frame,
@@ -2863,7 +2863,7 @@ pub mod test {
         let mx_before = unsafe { (&*wal_shared.get()).max_frame.load(Ordering::SeqCst) };
         assert!(mx_before > 0, "expected frames in WAL before FULL");
 
-        // Run FULL checkpoint — must backfill *all* frames up to mx_before
+        // Run FULL checkpoint - must backfill *all* frames up to mx_before
         let result = {
             let pager = conn.pager.borrow();
             let mut wal = pager.wal.as_ref().unwrap().borrow_mut();
@@ -2872,11 +2872,6 @@ pub mod test {
 
         assert_eq!(result.num_wal_frames, mx_before);
         assert_eq!(result.num_checkpointed_frames, mx_before);
-
-        // If your caller does truncation/sync after a full backfill, it may keep a guard.
-        // It's fine to release here to avoid holding locks past the test.
-        let mut result = result;
-        result.release_guard();
     }
 
     #[test]
