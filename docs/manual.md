@@ -52,10 +52,16 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/tursodatabase/turso/releases/latest/download/turso_cli-installer.sh | sh
 ```
 
+Or alternatively, on MacOS, you can use Homebrew:
+
+```
+brew install turso
+```
+
 When you have the software installed, you can start a SQL shell as follows:
 
 ```console
-$ turso
+$ tursodb
 Turso
 Enter ".help" for usage hints.
 Connected to a transient in-memory database.
