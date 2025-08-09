@@ -181,12 +181,11 @@ impl TursoRwLock {
             let cur = self.0.fetch_and(!Self::WRITER, Ordering::Release);
             turso_assert!(!Self::has_readers(cur), "write lock was held with readers");
         } else {
-            // drop one reader, last reader leaves value intact
-            let prev = self.0.fetch_sub(Self::READER_INC, Ordering::Release);
             turso_assert!(
-                (prev & Self::READER_COUNT_MASK) >= Self::READER_INC,
-                "unlock called with no readers"
+                Self::has_readers(cur),
+                "unlock called with no readers or writers"
             );
+            self.0.fetch_sub(Self::READER_INC, Ordering::Release);
         }
     }
 
