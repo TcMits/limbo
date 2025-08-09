@@ -48,7 +48,7 @@ use pack1::{I32BE, U16BE, U32BE};
 use tracing::{instrument, Level};
 
 use super::pager::PageRef;
-use super::wal::LimboRwLock;
+use super::wal::TursoRwLock;
 use crate::error::LimboError;
 use crate::fast_lock::SpinLock;
 use crate::io::{Buffer, Complete, Completion};
@@ -60,7 +60,7 @@ use crate::storage::btree::{payload_overflow_threshold_max, payload_overflow_thr
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::Pager;
-use crate::storage::wal::PendingFlush;
+use crate::storage::wal::{PendingFlush, READMARK_NOT_USED};
 use crate::types::{RawSlice, RefValue, SerialType, SerialTypeKind, TextRef, TextSubtype};
 use crate::{turso_assert, File, Result, WalFileShared};
 use std::cell::{RefCell, UnsafeCell};
@@ -1557,6 +1557,12 @@ pub fn read_entire_wal_dumb(file: &Arc<dyn File>) -> Result<Arc<UnsafeCell<WalFi
     #[allow(clippy::arc_with_non_send_sync)]
     let buf_for_pread = Arc::new(Buffer::new_temporary(size as usize));
     let header = Arc::new(SpinLock::new(WalHeader::default()));
+    let read_locks = std::array::from_fn(|_| TursoRwLock::new());
+    for (i, l) in read_locks.iter().enumerate() {
+        l.write();
+        l.set_value_exclusive(if i < 2 { 0 } else { READMARK_NOT_USED });
+        l.unlock();
+    }
     #[allow(clippy::arc_with_non_send_sync)]
     let wal_file_shared_ret = Arc::new(UnsafeCell::new(WalFileShared {
         wal_header: header.clone(),
@@ -1567,16 +1573,10 @@ pub fn read_entire_wal_dumb(file: &Arc<dyn File>) -> Result<Arc<UnsafeCell<WalFi
         pages_in_frames: Arc::new(SpinLock::new(Vec::new())),
         last_checksum: (0, 0),
         file: file.clone(),
-        read_locks: [
-            LimboRwLock::new(),
-            LimboRwLock::new(),
-            LimboRwLock::new(),
-            LimboRwLock::new(),
-            LimboRwLock::new(),
-        ],
-        write_lock: LimboRwLock::new(),
+        read_locks,
+        write_lock: TursoRwLock::new(),
         loaded: AtomicBool::new(false),
-        checkpoint_lock: LimboRwLock::new(),
+        checkpoint_lock: TursoRwLock::new(),
     }));
     let wal_file_shared_for_completion = wal_file_shared_ret.clone();
 
