@@ -375,11 +375,6 @@ struct OngoingCheckpoint {
     max_frame: u64,
     current_page: u64,
 }
-impl OngoingCheckpoint {
-    fn has_work(&self) -> bool {
-        self.min_frame < self.max_frame
-    }
-}
 
 pub(super) struct PendingFlush {
     // page ids to clear
@@ -1391,11 +1386,7 @@ impl WalFile {
                         };
                     self.ongoing_checkpoint.min_frame = nbackfills + 1;
                     self.ongoing_checkpoint.current_page = 0;
-                    self.ongoing_checkpoint.state = if self.ongoing_checkpoint.has_work() {
-                        CheckpointState::ReadFrame
-                    } else {
-                        CheckpointState::Done
-                    };
+                    self.ongoing_checkpoint.state = CheckpointState::ReadFrame;
                     tracing::trace!(
                         "checkpoint_start(min_frame={}, max_frame={})",
                         self.ongoing_checkpoint.min_frame,
