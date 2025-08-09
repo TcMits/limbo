@@ -88,7 +88,7 @@ pub enum CheckpointMode {
 /// atomically together while sitting in a single cpu cache line.
 ///
 /// # Memory Layout:
-/// ```
+/// ```ignore
 /// [63:32] Value bits    - 32 bits for stored value
 /// [31:1]  Reader count  - 31 bits for reader count
 /// [0]     Writer bit    - 1 bit indicating exclusive write lock
