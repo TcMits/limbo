@@ -534,9 +534,7 @@ mod tests {
             assert_eq!(sqlite3_step(stmt), SQLITE_ROW);
             let col1_ptr = sqlite3_column_text(stmt, 0);
             assert!(!col1_ptr.is_null());
-            let col1_str = std::ffi::CStr::from_ptr(col1_ptr as *const i8)
-                .to_str()
-                .unwrap();
+            let col1_str = std::ffi::CStr::from_ptr(col1_ptr).to_str().unwrap();
             assert_eq!(col1_str, "hello world");
 
             assert_eq!(sqlite3_step(stmt), SQLITE_ROW);
@@ -548,7 +546,6 @@ mod tests {
             let col2_slice = std::slice::from_raw_parts(col2_ptr as *const u8, col2_len as usize);
             let col2_str = std::str::from_utf8(col2_slice).unwrap().to_owned();
 
-            println!("Read row: {:?}", col2_str);
             assert_eq!(col2_str, "abc");
             assert_eq!(sqlite3_finalize(stmt), SQLITE_OK);
             assert_eq!(sqlite3_close(db), SQLITE_OK);
