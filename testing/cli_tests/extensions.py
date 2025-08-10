@@ -1071,6 +1071,40 @@ def _test_hidden_columns(exec_name, ext_path):
 
     limbo.quit()
 
+def test_module_list(exec_name=None, ext_path="target/debug/libturso_ext_tests"):
+    console.info(f"Running test_module_list for {ext_path}")
+
+    limbo = TestTursoShell(
+        exec_name=exec_name,
+    )
+    limbo.run_test_fn(
+        "PRAGMA module_list;",
+        lambda res: len(res) > 0,
+        "lists built in modules",
+    )
+
+    limbo.run_test_fn(
+        "PRAGMA module_list;",
+        lambda res: "kv_store" not in res,
+        "does not include module list"
+    )
+
+    limbo.execute_dot(f".load {ext_path}")
+
+    limbo.run_test_fn(
+        "PRAGMA module_list;",
+        lambda res: "kv_store" in res,
+        "includes kv_store after loading extension",
+    )
+
+    limbo.run_test_fn(
+        "create virtual table t using kv_store;"
+        "pragma module_list;",
+        lambda res: "kv_store" in res,
+        "includes kv_store after virtual table is created with it"
+    )
+
+    limbo.quit()
 
 def main():
     try:
@@ -1088,6 +1122,7 @@ def main():
         test_csv()
         test_tablestats()
         test_hidden_columns()
+        test_module_list()
     except Exception as e:
         console.error(f"Test FAILED: {e}")
         cleanup()
