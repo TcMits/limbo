@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 
 use std::ffi::{self, CStr, CString};
-use std::num::NonZero;
+use std::num::{NonZero, NonZeroUsize};
 use tracing::trace;
 use turso_core::{CheckpointMode, LimboError, Value};
 
@@ -76,11 +76,20 @@ impl sqlite3 {
 pub struct sqlite3_stmt {
     pub(crate) db: *mut sqlite3,
     pub(crate) stmt: turso_core::Statement,
+    pub(crate) destructors: Vec<(
+        usize,
+        Option<unsafe extern "C" fn(*mut ffi::c_void)>,
+        *mut ffi::c_void,
+    )>,
 }
 
 impl sqlite3_stmt {
     pub fn new(db: *mut sqlite3, stmt: turso_core::Statement) -> Self {
-        Self { db, stmt }
+        Self {
+            db,
+            stmt,
+            destructors: Vec::new(),
+        }
     }
 }
 
@@ -246,6 +255,14 @@ pub unsafe extern "C" fn sqlite3_finalize(stmt: *mut sqlite3_stmt) -> ffi::c_int
     if stmt.is_null() {
         return SQLITE_MISUSE;
     }
+    let stmt_ref = &mut *stmt;
+
+    for (_idx, destructor_opt, ptr) in stmt_ref.destructors.drain(..) {
+        if let Some(destructor_fn) = destructor_opt {
+            destructor_fn(ptr);
+        }
+    }
+
     let _ = Box::from_raw(stmt);
     SQLITE_OK
 }
@@ -573,24 +590,109 @@ pub unsafe extern "C" fn sqlite3_bind_double(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_text(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
-    _text: *const ffi::c_char,
-    _len: ffi::c_int,
-    _destroy: *mut ffi::c_void,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
+    text: *const ffi::c_char,
+    len: ffi::c_int,
+    destructor: Option<unsafe extern "C" fn(*mut ffi::c_void)>,
 ) -> ffi::c_int {
-    stub!();
+    if stmt.is_null() {
+        return SQLITE_MISUSE;
+    }
+    if idx <= 0 {
+        return SQLITE_RANGE;
+    }
+    if text.is_null() {
+        return sqlite3_bind_null(stmt, idx);
+    }
+
+    let stmt_ref = &mut *stmt;
+
+    let static_ptr = std::ptr::null();
+    let transient_ptr = -1isize as usize as *const ffi::c_void;
+    let ptr_val = destructor
+        .map(|f| f as *const ffi::c_void)
+        .unwrap_or(static_ptr);
+
+    let str_value = if len < 0 {
+        match CStr::from_ptr(text).to_str() {
+            Ok(s) => s.to_owned(),
+            Err(_) => return SQLITE_ERROR,
+        }
+    } else {
+        let slice = std::slice::from_raw_parts(text as *const u8, len as usize);
+        match std::str::from_utf8(slice) {
+            Ok(s) => s.to_owned(),
+            Err(_) => return SQLITE_ERROR,
+        }
+    };
+
+    if ptr_val == transient_ptr {
+        let val = Value::from_text(&str_value);
+        stmt_ref
+            .stmt
+            .bind_at(NonZero::new_unchecked(idx as usize), val);
+    } else if ptr_val == static_ptr {
+        let slice = std::slice::from_raw_parts(text as *const u8, str_value.len());
+        let val = Value::from_text(std::str::from_utf8(slice).unwrap());
+        stmt_ref
+            .stmt
+            .bind_at(NonZero::new_unchecked(idx as usize), val);
+    } else {
+        let slice = std::slice::from_raw_parts(text as *const u8, str_value.len());
+        let val = Value::from_text(std::str::from_utf8(slice).unwrap());
+        stmt_ref
+            .stmt
+            .bind_at(NonZero::new_unchecked(idx as usize), val);
+
+        stmt_ref
+            .destructors
+            .push((idx as usize, destructor, text as *mut ffi::c_void));
+    }
+
+    SQLITE_OK
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_blob(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
-    _blob: *const ffi::c_void,
-    _len: ffi::c_int,
-    _destroy: *mut ffi::c_void,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
+    blob: *const ffi::c_void,
+    len: ffi::c_int,
+    destructor: Option<unsafe extern "C" fn(*mut ffi::c_void)>,
 ) -> ffi::c_int {
-    stub!();
+    if stmt.is_null() {
+        return SQLITE_MISUSE;
+    }
+    if idx <= 0 {
+        return SQLITE_RANGE;
+    }
+    if blob.is_null() {
+        return sqlite3_bind_null(stmt, idx);
+    }
+
+    let slice_blob = std::slice::from_raw_parts(blob as *const u8, len as usize).to_vec();
+
+    let stmt_ref = &mut *stmt;
+    let val_blob = Value::from_blob(slice_blob);
+
+    if let Some(nz_idx) = NonZeroUsize::new(idx as usize) {
+        stmt_ref.stmt.bind_at(nz_idx, val_blob);
+    } else {
+        return SQLITE_RANGE;
+    }
+
+    if let Some(destructor_fn) = destructor {
+        let ptr_val = destructor_fn as *const ffi::c_void;
+        let static_ptr = std::ptr::null();
+        let transient_ptr = usize::MAX as *const ffi::c_void;
+
+        if ptr_val != static_ptr && ptr_val != transient_ptr {
+            destructor_fn(blob as *mut _);
+        }
+    }
+
+    SQLITE_OK
 }
 
 #[no_mangle]
@@ -625,6 +727,11 @@ pub unsafe extern "C" fn sqlite3_column_name(
 
     let binding = stmt.stmt.get_column_name(idx).into_owned();
     let val = binding.as_str();
+
+    if val.is_empty() {
+        return std::ptr::null();
+    }
+
     let c_string = CString::new(val).expect("CString::new failed");
     c_string.into_raw()
 }
@@ -659,18 +766,37 @@ pub unsafe extern "C" fn sqlite3_column_double(stmt: *mut sqlite3_stmt, idx: ffi
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_blob(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
 ) -> *const ffi::c_void {
-    stub!();
+    let stmt = &mut *stmt;
+    let row = stmt.stmt.row();
+    let row = match row.as_ref() {
+        Some(row) => row,
+        None => return std::ptr::null(),
+    };
+    match row.get::<&Value>(idx as usize) {
+        Ok(turso_core::Value::Blob(blob)) => blob.as_ptr() as *const ffi::c_void,
+        _ => std::ptr::null(),
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_bytes(
-    _stmt: *mut sqlite3_stmt,
-    _idx: ffi::c_int,
+    stmt: *mut sqlite3_stmt,
+    idx: ffi::c_int,
 ) -> ffi::c_int {
-    stub!();
+    let stmt = &mut *stmt;
+    let row = stmt.stmt.row();
+    let row = match row.as_ref() {
+        Some(row) => row,
+        None => return 0,
+    };
+    match row.get::<&Value>(idx as usize) {
+        Ok(turso_core::Value::Text(text)) => text.as_str().len() as ffi::c_int,
+        Ok(turso_core::Value::Blob(blob)) => blob.len() as ffi::c_int,
+        _ => 0,
+    }
 }
 
 #[no_mangle]

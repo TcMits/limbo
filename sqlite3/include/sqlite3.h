@@ -41,6 +41,10 @@
 
 #define SQLITE_CHECKPOINT_TRUNCATE 3
 
+typedef void (*sqlite3_destructor_type)(void*);
+#define SQLITE_STATIC    ((sqlite3_destructor_type)0)
+#define SQLITE_TRANSIENT ((sqlite3_destructor_type)-1)
+
 typedef struct sqlite3 sqlite3;
 
 typedef struct sqlite3_stmt sqlite3_stmt;
