@@ -634,6 +634,7 @@ fn emit_delete_insns(
 
         program.emit_insn(Insn::Delete {
             cursor_id: main_table_cursor_id,
+            table_name: table_reference.table.get_name().to_string(),
         });
     }
     if let Some(limit_ctx) = t_ctx.limit_ctx {
@@ -1175,7 +1176,10 @@ fn emit_update_insns(
         // Insert instruction to update the cell. We need to first delete the current cell
         // and later insert the updated record
         if has_user_provided_rowid {
-            program.emit_insn(Insn::Delete { cursor_id });
+            program.emit_insn(Insn::Delete {
+                cursor_id,
+                table_name: table_ref.table.get_name().to_string(),
+            });
         }
 
         program.emit_insn(Insn::Insert {

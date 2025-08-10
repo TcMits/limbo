@@ -779,6 +779,7 @@ pub fn translate_drop_table(
     }
     program.emit_insn(Insn::Delete {
         cursor_id: sqlite_schema_cursor_id_0,
+        table_name: SQLITE_TABLEID.to_string(),
     });
 
     program.resolve_label(next_label, program.offset());
@@ -978,6 +979,7 @@ pub fn translate_drop_table(
         });
         program.emit_insn(Insn::Delete {
             cursor_id: sqlite_schema_cursor_id_1,
+            table_name: SQLITE_TABLEID.to_string(),
         });
         program.emit_insn(Insn::Insert {
             cursor: sqlite_schema_cursor_id_1,

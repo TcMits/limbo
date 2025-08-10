@@ -745,6 +745,7 @@ pub enum Insn {
 
     Delete {
         cursor_id: CursorID,
+        table_name: String,
     },
 
     /// If P5 is not zero, then raise an SQLITE_CORRUPT_INDEX error if no matching index entry
