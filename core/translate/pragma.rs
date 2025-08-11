@@ -300,6 +300,14 @@ fn update_pragma(
             connection,
             program,
         ),
+        PragmaName::FreelistCount => query_pragma(
+            PragmaName::FreelistCount,
+            schema,
+            Some(value),
+            pager,
+            connection,
+            program,
+        ),
     }
 }
 
@@ -533,6 +541,14 @@ fn query_pragma(
             program.emit_result_row(register, 1);
             program.add_pragma_result_column(pragma.to_string());
 
+            Ok((program, TransactionMode::None))
+        }
+        PragmaName::FreelistCount => {
+            let value = pager.freepage_list();
+            let register = program.alloc_register();
+            program.emit_int(value as i64, register);
+            program.emit_result_row(register, 1);
+            program.add_pragma_result_column(pragma.to_string());
             Ok((program, TransactionMode::None))
         }
     }

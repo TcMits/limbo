@@ -102,6 +102,7 @@ pub fn pragma_for(pragma: &PragmaName) -> Pragma {
             PragmaFlags::Result0 | PragmaFlags::NoColumns1,
             &["query_only"],
         ),
+        FreelistCount => Pragma::new(PragmaFlags::Result0, &["freelist_count"]),
     }
 }
 
