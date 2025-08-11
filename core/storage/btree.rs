@@ -10,8 +10,8 @@ use crate::{
             LEAF_PAGE_HEADER_SIZE_BYTES, LEFT_CHILD_PTR_SIZE_BYTES,
         },
         state_machines::{
-            AdvanceState, CountState, EmptyTableState, InsertState, MoveToRightState, RewindState,
-            SeekEndState, SeekToLastState,
+            AdvanceState, CountState, EmptyTableState, InsertState, MoveToRightState, MoveToState,
+            RewindState, SeekEndState, SeekToLastState,
         },
     },
     translate::plan::IterationDirection,
@@ -560,6 +560,8 @@ pub struct BTreeCursor {
     seek_end_state: SeekEndState,
     /// State machine for [BTreeCursor::insert]
     insert_state: InsertState,
+    /// State machine for [BTreeCursor::move_to]
+    move_to_state: MoveToState,
 }
 
 /// We store the cell index and cell count for each page in the stack.
@@ -627,6 +629,7 @@ impl BTreeCursor {
             count_state: CountState::Start,
             seek_end_state: SeekEndState::Start,
             insert_state: InsertState::Start,
+            move_to_state: MoveToState::Start,
         }
     }
 
@@ -2116,16 +2119,26 @@ impl BTreeCursor {
         ) {
             self.seek_state = CursorSeekState::Start;
         }
-        if matches!(self.seek_state, CursorSeekState::Start) {
-            let _c = self.move_to_root()?;
+        loop {
+            match self.move_to_state {
+                MoveToState::Start => {
+                    self.move_to_state = MoveToState::MoveToPage;
+                    if matches!(self.seek_state, CursorSeekState::Start) {
+                        let _c = self.move_to_root()?;
+                        return Ok(IOResult::IO);
+                    }
+                }
+                MoveToState::MoveToPage => {
+                    let ret = match key {
+                        SeekKey::TableRowId(rowid_key) => self.tablebtree_move_to(rowid_key, cmp),
+                        SeekKey::IndexKey(index_key) => self.indexbtree_move_to(index_key, cmp),
+                    };
+                    return_if_io!(ret);
+                    self.move_to_state = MoveToState::Start;
+                    return Ok(IOResult::Done(()));
+                }
+            }
         }
-
-        let ret = match key {
-            SeekKey::TableRowId(rowid_key) => self.tablebtree_move_to(rowid_key, cmp),
-            SeekKey::IndexKey(index_key) => self.indexbtree_move_to(index_key, cmp),
-        };
-        return_if_io!(ret);
-        Ok(IOResult::Done(()))
     }
 
     /// Insert a record into the btree.
@@ -4503,7 +4516,6 @@ impl BTreeCursor {
                             }
                             self.context.take(); // we know where we wanted to move so if there was any saved context, discard it.
                             self.valid_state = CursorValidState::Valid;
-                            self.seek_state = CursorSeekState::Start;
                             tracing::debug!(
                                 "seeked to the right place, page is now {:?}",
                                 self.stack.top().get().get().id
@@ -4514,7 +4526,6 @@ impl BTreeCursor {
                             return_if_io!(self.next());
                             self.context.take(); // we know where we wanted to move so if there was any saved context, discard it.
                             self.valid_state = CursorValidState::Valid;
-                            self.seek_state = CursorSeekState::Start;
                             tracing::debug!(
                                 "seeked to the right place, page is now {:?}",
                                 self.stack.top().get().get().id

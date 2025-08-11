@@ -50,3 +50,9 @@ pub enum InsertState {
     Advance,
     InsertIntoPage,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum MoveToState {
+    Start,
+    MoveToPage,
+}
