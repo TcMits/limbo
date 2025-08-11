@@ -70,7 +70,7 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 Then launch the interactive shell:
 
 ```shell
-$ turso
+$ tursodb
 ```
 
 This will start the Turso interactive shell where you can execute SQL statements:
