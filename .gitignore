@@ -23,7 +23,8 @@ dist/
 **/*.db-wal
 **/*.db-shm
 **/*-wal
-
+# perf
+/Mobibench
 # OS
 .DS_Store
 
