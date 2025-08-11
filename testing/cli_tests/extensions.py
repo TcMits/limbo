@@ -701,7 +701,7 @@ def test_create_virtual_table():
     ext_path = "target/debug/libturso_ext_tests"
 
     limbo = TestTursoShell()
-    limbo.execute_dot(f".load {ext_path}")
+    test_module_list(limbo, ext_path, "kv_store")
 
     limbo.run_debug("CREATE VIRTUAL TABLE t1 USING kv_store;")
     limbo.run_test_fn(
@@ -741,8 +741,7 @@ def test_csv():
     # open new empty connection explicitly to test whether we can load an extension
     # with brand new connection/uninitialized database.
     limbo = TestTursoShell(init_commands="")
-    ext_path = "./target/debug/liblimbo_csv"
-    limbo.execute_dot(f".load {ext_path}")
+    test_module_list(limbo, "target/debug/liblimbo_csv", "csv")
 
     limbo.run_test_fn(
         "CREATE VIRTUAL TABLE temp.csv USING csv(filename=./testing/test_files/test.csv);",
@@ -828,6 +827,7 @@ def cleanup():
 def test_tablestats():
     ext_path = "target/debug/libturso_ext_tests"
     limbo = TestTursoShell(use_testing_db=True)
+    test_module_list(limbo, ext_path=ext_path, module_name="tablestats")
     limbo.execute_dot("CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT);")
     limbo.execute_dot("INSERT INTO people(name) VALUES ('Ada'), ('Grace'), ('Linus');")
 
@@ -845,8 +845,6 @@ def test_tablestats():
         lambda res: res == "1",
         "one logs rowverify logs count",
     )
-    # load extension
-    limbo.execute_dot(f".load {ext_path}")
     limbo.execute_dot("CREATE VIRTUAL TABLE stats USING tablestats;")
 
     def _split(res):
@@ -1071,40 +1069,25 @@ def _test_hidden_columns(exec_name, ext_path):
 
     limbo.quit()
 
-def test_module_list(exec_name=None, ext_path="target/debug/libturso_ext_tests"):
+
+def test_module_list(turso_shell, ext_path, module_name):
+    """loads the extension at the provided path and asserts that 'PRAGMA module_list;' displays 'module_name'"""
     console.info(f"Running test_module_list for {ext_path}")
 
-    limbo = TestTursoShell(
-        exec_name=exec_name,
-    )
-    limbo.run_test_fn(
+    turso_shell.run_test_fn(
         "PRAGMA module_list;",
-        lambda res: len(res) > 0,
-        "lists built in modules",
+        lambda res: "generate_series" in res and module_name not in res,
+        "lists built in modules but doesn't contain the module name yet",
     )
 
-    limbo.run_test_fn(
+    turso_shell.run_test_fn("PRAGMA module_list;", lambda res: module_name not in res, "does not include module list")
+    turso_shell.execute_dot(f".load {ext_path}")
+    turso_shell.run_test_fn(
         "PRAGMA module_list;",
-        lambda res: "kv_store" not in res,
-        "does not include module list"
+        lambda res: module_name in res,
+        f"includes {module_name} after loading extension",
     )
 
-    limbo.execute_dot(f".load {ext_path}")
-
-    limbo.run_test_fn(
-        "PRAGMA module_list;",
-        lambda res: "kv_store" in res,
-        "includes kv_store after loading extension",
-    )
-
-    limbo.run_test_fn(
-        "create virtual table t using kv_store;"
-        "pragma module_list;",
-        lambda res: "kv_store" in res,
-        "includes kv_store after virtual table is created with it"
-    )
-
-    limbo.quit()
 
 def main():
     try:
@@ -1122,7 +1105,6 @@ def main():
         test_csv()
         test_tablestats()
         test_hidden_columns()
-        test_module_list()
     except Exception as e:
         console.error(f"Test FAILED: {e}")
         cleanup()
