@@ -66,6 +66,8 @@ pub struct DatabaseChange {
     pub before: Option<Vec<u8>>,
     /// Binary record of the row after the change, if CDC pragma set to either 'after' or 'full'
     pub after: Option<Vec<u8>>,
+    /// Binary record from "updates" column, if CDC pragma set to 'full'
+    pub updates: Option<Vec<u8>>,
 }
 
 impl DatabaseChange {
@@ -86,6 +88,7 @@ impl DatabaseChange {
                 after: self.after.ok_or_else(|| {
                     Error::DatabaseTapeError("cdc_mode must be set to 'full'".to_string())
                 })?,
+                updates: self.updates,
             },
             DatabaseChangeType::Insert => DatabaseTapeRowChangeType::Insert {
                 after: self.after.ok_or_else(|| {
@@ -122,6 +125,7 @@ impl DatabaseChange {
                         "cdc_mode must be set to either 'full' or 'before'".to_string(),
                     )
                 })?,
+                updates: None,
             },
             DatabaseChangeType::Insert => DatabaseTapeRowChangeType::Delete {
                 before: self.after.ok_or_else(|| {
@@ -166,6 +170,7 @@ impl TryFrom<&turso_core::Row> for DatabaseChange {
         let id = get_core_value_i64(row, 4)?;
         let before = get_core_value_blob_or_null(row, 5)?;
         let after = get_core_value_blob_or_null(row, 6)?;
+        let updates = get_core_value_blob_or_null(row, 7)?;
 
         let change_type = match change_type {
             -1 => DatabaseChangeType::Delete,
@@ -185,14 +190,23 @@ impl TryFrom<&turso_core::Row> for DatabaseChange {
             id,
             before,
             after,
+            updates,
         })
     }
 }
 
 pub enum DatabaseTapeRowChangeType {
-    Delete { before: Vec<u8> },
-    Update { before: Vec<u8>, after: Vec<u8> },
-    Insert { after: Vec<u8> },
+    Delete {
+        before: Vec<u8>,
+    },
+    Update {
+        before: Vec<u8>,
+        after: Vec<u8>,
+        updates: Option<Vec<u8>>,
+    },
+    Insert {
+        after: Vec<u8>,
+    },
 }
 
 /// [DatabaseTapeOperation] extends [DatabaseTapeRowChange] by adding information about transaction boundary
@@ -222,10 +236,15 @@ impl std::fmt::Debug for DatabaseTapeRowChangeType {
                 .debug_struct("Delete")
                 .field("before.len()", &before.len())
                 .finish(),
-            Self::Update { before, after } => f
+            Self::Update {
+                before,
+                after,
+                updates,
+            } => f
                 .debug_struct("Update")
                 .field("before.len()", &before.len())
                 .field("after.len()", &after.len())
+                .field("updates.len()", &updates.as_ref().map(|x| x.len()))
                 .finish(),
             Self::Insert { after } => f
                 .debug_struct("Insert")
