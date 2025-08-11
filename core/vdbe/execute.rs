@@ -5226,7 +5226,6 @@ pub fn op_insert(
                     if !dependent_views.is_empty() {
                         state.op_insert_state.sub_state = OpInsertSubState::ApplyViewChange;
                     } else {
-                        state.op_insert_state.sub_state = OpInsertSubState::MaybeCaptureRecord;
                         break;
                     }
                 }
@@ -5249,7 +5248,6 @@ pub fn op_insert(
                     state.op_insert_state.sub_state = OpInsertSubState::ApplyViewChange;
                     continue;
                 }
-                state.op_insert_state.sub_state = OpInsertSubState::MaybeCaptureRecord;
                 break;
             }
             OpInsertSubState::ApplyViewChange => {
@@ -5313,12 +5311,12 @@ pub fn op_insert(
                     tx_state.delta.insert(key, values.clone());
                 }
 
-                state.op_insert_state.sub_state = OpInsertSubState::MaybeCaptureRecord;
                 break;
             }
         }
     }
 
+    state.op_insert_state.sub_state = OpInsertSubState::MaybeCaptureRecord;
     let prev_changes = program.n_change.get();
     program.n_change.set(prev_changes + 1);
     state.pc += 1;
@@ -5445,13 +5443,12 @@ pub fn op_delete(
                         tx_state.delta.delete(key, values.clone());
                     }
                 }
-
-                state.op_delete_state.sub_state = OpDeleteSubState::MaybeCaptureRecord;
                 break;
             }
         }
     }
 
+    state.op_delete_state.sub_state = OpDeleteSubState::MaybeCaptureRecord;
     let prev_changes = program.n_change.get();
     program.n_change.set(prev_changes + 1);
     state.pc += 1;
