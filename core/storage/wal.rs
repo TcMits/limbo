@@ -393,8 +393,18 @@ impl PendingFlush {
             done: Arc::new(AtomicBool::new(true)),
         }
     }
-    fn clear(&mut self) {
+    pub(super) fn new_flush(&self) {
+        turso_assert!(
+            self.is_done(),
+            "should not reset new flush without being in done state"
+        );
+        self.done.store(false, Ordering::Release);
+    }
+    fn clear(&self) {
         self.done.store(true, Ordering::Relaxed);
+    }
+    fn is_done(&self) -> bool {
+        self.done.load(Ordering::Acquire)
     }
 }
 
@@ -1476,12 +1486,7 @@ impl WalFile {
                     self.ongoing_checkpoint.state = CheckpointState::WaitFlush;
                 }
                 CheckpointState::WaitFlush => {
-                    if !self
-                        .ongoing_checkpoint
-                        .pending_flush
-                        .done
-                        .load(Ordering::Acquire)
-                    {
+                    if !self.ongoing_checkpoint.pending_flush.is_done() {
                         return Ok(IOResult::IO);
                     }
                     tracing::debug!("finished checkpoint backfilling batch");
@@ -1503,10 +1508,7 @@ impl WalFile {
                 // Release all locks and return the current num of wal frames and the amount we backfilled
                 CheckpointState::Done => {
                     turso_assert!(
-                        self.ongoing_checkpoint
-                            .pending_flush
-                            .done
-                            .load(Ordering::Relaxed),
+                        self.ongoing_checkpoint.pending_flush.is_done(),
                         "checkpoint pending flush must have finished"
                     );
                     let mut checkpoint_result = {

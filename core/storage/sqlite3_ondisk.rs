@@ -975,8 +975,8 @@ pub fn write_pages_vectored(
 
     // Create the atomic counters
     let runs_left = Arc::new(AtomicUsize::new(run_count));
+    flush.new_flush();
     let done = flush.done.clone();
-    done.store(false, Ordering::Release);
     // we know how many runs, but we don't know how many buffers per run, so we can only give an
     // estimate of the capacity
     const EST_BUFF_CAPACITY: usize = 32;
