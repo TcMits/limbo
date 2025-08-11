@@ -1059,7 +1059,7 @@ impl Limbo {
         table_name: &str,
     ) -> anyhow::Result<bool> {
         let sql = format!(
-            "SELECT sql FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index', 'view') AND tbl_name = '{table_name}' OR name = '{table_name}' AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+            "SELECT sql FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index', 'view') AND tbl_name = '{table_name}' OR name = '{table_name}' AND name NOT LIKE 'sqlite_%' ORDER BY type, rowid"
         );
 
         let mut found = false;
@@ -1092,7 +1092,7 @@ impl Limbo {
         db_prefix: &str,
         db_display_name: &str,
     ) -> anyhow::Result<()> {
-        let sql = format!("SELECT sql, type, name FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 1 WHEN 'view' THEN 2 WHEN 'index' THEN 3 END, name");
+        let sql = format!("SELECT sql, type, name FROM {db_prefix}.sqlite_schema WHERE type IN ('table', 'index', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY CASE type WHEN 'table' THEN 1 WHEN 'view' THEN 2 WHEN 'index' THEN 3 END, rowid");
 
         match self.conn.query(&sql) {
             Ok(Some(ref mut rows)) => loop {
