@@ -456,6 +456,7 @@ pub fn translate_drop_index(
             row_id_reg,
             before_record_reg,
             None,
+            None,
             SQLITE_TABLEID,
         )?;
     }

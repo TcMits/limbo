@@ -99,7 +99,7 @@ pub fn translate(
             connection.clone(),
             program,
         )?,
-        stmt => translate_inner(schema, stmt, syms, program, &connection)?,
+        stmt => translate_inner(schema, stmt, syms, program, &connection, input)?,
     };
 
     program.epilogue(schema);
@@ -116,6 +116,7 @@ pub fn translate_inner(
     syms: &SymbolTable,
     program: ProgramBuilder,
     connection: &Arc<Connection>,
+    input: &str,
 ) -> Result<ProgramBuilder> {
     let is_write = matches!(
         stmt,
@@ -142,7 +143,7 @@ pub fn translate_inner(
 
     let mut program = match stmt {
         ast::Stmt::AlterTable(alter) => {
-            translate_alter_table(*alter, syms, schema, program, connection)?
+            translate_alter_table(*alter, syms, schema, program, connection, input)?
         }
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
         ast::Stmt::Attach { expr, db_name, key } => {

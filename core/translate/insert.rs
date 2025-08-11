@@ -580,6 +580,7 @@ pub fn translate_insert(
             rowid_and_columns_start_register,
             None,
             after_record_reg,
+            None,
             table_name.as_str(),
         )?;
     }

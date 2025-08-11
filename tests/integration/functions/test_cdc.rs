@@ -44,6 +44,7 @@ fn test_cdc_simple_id() {
                 Value::Integer(10),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -51,6 +52,7 @@ fn test_cdc_simple_id() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(5),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ]
@@ -99,6 +101,7 @@ fn test_cdc_simple_before() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -106,6 +109,7 @@ fn test_cdc_simple_before() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(3),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -117,6 +121,7 @@ fn test_cdc_simple_before() {
                 Value::Integer(1),
                 Value::Blob(record([Value::Integer(1), Value::Integer(2)])),
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(4),
@@ -126,6 +131,7 @@ fn test_cdc_simple_before() {
                 Value::Integer(3),
                 Value::Blob(record([Value::Integer(3), Value::Integer(4)])),
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(5),
@@ -134,6 +140,7 @@ fn test_cdc_simple_before() {
                 Value::Text("t".to_string()),
                 Value::Integer(1),
                 Value::Blob(record([Value::Integer(1), Value::Integer(3)])),
+                Value::Null,
                 Value::Null,
             ]
         ]
@@ -165,6 +172,7 @@ fn test_cdc_simple_after() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Blob(record([Value::Integer(1), Value::Integer(2)])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -174,6 +182,7 @@ fn test_cdc_simple_after() {
                 Value::Integer(3),
                 Value::Null,
                 Value::Blob(record([Value::Integer(3), Value::Integer(4)])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -183,6 +192,7 @@ fn test_cdc_simple_after() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Blob(record([Value::Integer(1), Value::Integer(3)])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(4),
@@ -192,6 +202,7 @@ fn test_cdc_simple_after() {
                 Value::Integer(3),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(5),
@@ -199,6 +210,7 @@ fn test_cdc_simple_after() {
                 Value::Integer(-1),
                 Value::Text("t".to_string()),
                 Value::Integer(1),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ]
@@ -231,6 +243,7 @@ fn test_cdc_simple_full() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Blob(record([Value::Integer(1), Value::Integer(2)])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -240,6 +253,7 @@ fn test_cdc_simple_full() {
                 Value::Integer(3),
                 Value::Null,
                 Value::Blob(record([Value::Integer(3), Value::Integer(4)])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -249,6 +263,12 @@ fn test_cdc_simple_full() {
                 Value::Integer(1),
                 Value::Blob(record([Value::Integer(1), Value::Integer(2)])),
                 Value::Blob(record([Value::Integer(1), Value::Integer(3)])),
+                Value::Blob(record([
+                    Value::Integer(0),
+                    Value::Integer(1),
+                    Value::Null,
+                    Value::Integer(3)
+                ])),
             ],
             vec![
                 Value::Integer(4),
@@ -258,6 +278,7 @@ fn test_cdc_simple_full() {
                 Value::Integer(3),
                 Value::Blob(record([Value::Integer(3), Value::Integer(4)])),
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(5),
@@ -266,6 +287,7 @@ fn test_cdc_simple_full() {
                 Value::Text("t".to_string()),
                 Value::Integer(1),
                 Value::Blob(record([Value::Integer(1), Value::Integer(3)])),
+                Value::Null,
                 Value::Null,
             ]
         ]
@@ -307,6 +329,7 @@ fn test_cdc_crud() {
                 Value::Integer(20),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -314,6 +337,7 @@ fn test_cdc_crud() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(10),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -325,6 +349,7 @@ fn test_cdc_crud() {
                 Value::Integer(5),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(4),
@@ -332,6 +357,7 @@ fn test_cdc_crud() {
                 Value::Integer(0),
                 Value::Text("t".to_string()),
                 Value::Integer(5),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -343,6 +369,7 @@ fn test_cdc_crud() {
                 Value::Integer(10),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(6),
@@ -350,6 +377,7 @@ fn test_cdc_crud() {
                 Value::Integer(-1),
                 Value::Text("t".to_string()),
                 Value::Integer(20),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -361,6 +389,7 @@ fn test_cdc_crud() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(8),
@@ -370,6 +399,7 @@ fn test_cdc_crud() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(9),
@@ -377,6 +407,7 @@ fn test_cdc_crud() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(2),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -422,6 +453,7 @@ fn test_cdc_failed_op() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -429,6 +461,7 @@ fn test_cdc_failed_op() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(2),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -440,6 +473,7 @@ fn test_cdc_failed_op() {
                 Value::Integer(6),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(4),
@@ -447,6 +481,7 @@ fn test_cdc_failed_op() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(7),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -508,6 +543,7 @@ fn test_cdc_uncaptured_connection() {
                 Value::Integer(2),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -517,6 +553,7 @@ fn test_cdc_uncaptured_connection() {
                 Value::Integer(4),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -524,6 +561,7 @@ fn test_cdc_uncaptured_connection() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(6),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -564,6 +602,7 @@ fn test_cdc_custom_table() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -571,6 +610,7 @@ fn test_cdc_custom_table() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(2),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -611,6 +651,7 @@ fn test_cdc_ignore_changes_in_cdc_table() {
             Value::Integer(1),
             Value::Text("t".to_string()),
             Value::Integer(2),
+            Value::Null,
             Value::Null,
             Value::Null,
         ],]
@@ -654,6 +695,7 @@ fn test_cdc_transaction() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -663,6 +705,7 @@ fn test_cdc_transaction() {
                 Value::Integer(2),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -670,6 +713,7 @@ fn test_cdc_transaction() {
                 Value::Integer(1),
                 Value::Text("t".to_string()),
                 Value::Integer(3),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -681,6 +725,7 @@ fn test_cdc_transaction() {
                 Value::Integer(1),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(5),
@@ -688,6 +733,7 @@ fn test_cdc_transaction() {
                 Value::Integer(0),
                 Value::Text("q".to_string()),
                 Value::Integer(2),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ],
@@ -731,6 +777,7 @@ fn test_cdc_independent_connections() {
             Value::Integer(1),
             Value::Null,
             Value::Null,
+            Value::Null,
         ]]
     );
     let rows =
@@ -743,6 +790,7 @@ fn test_cdc_independent_connections() {
             Value::Integer(1),
             Value::Text("t".to_string()),
             Value::Integer(2),
+            Value::Null,
             Value::Null,
             Value::Null,
         ]]
@@ -796,6 +844,7 @@ fn test_cdc_independent_connections_different_cdc_not_ignore() {
                 Value::Integer(2),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -803,6 +852,7 @@ fn test_cdc_independent_connections_different_cdc_not_ignore() {
                 Value::Integer(-1),
                 Value::Text("custom_cdc2".to_string()),
                 Value::Integer(1),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ]
@@ -821,6 +871,7 @@ fn test_cdc_independent_connections_different_cdc_not_ignore() {
                 Value::Integer(4),
                 Value::Null,
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -828,6 +879,7 @@ fn test_cdc_independent_connections_different_cdc_not_ignore() {
                 Value::Integer(-1),
                 Value::Text("custom_cdc1".to_string()),
                 Value::Integer(1),
+                Value::Null,
                 Value::Null,
                 Value::Null,
             ]
@@ -914,6 +966,7 @@ fn test_cdc_schema_changes() {
                         "CREATE TABLE t (x, y, z UNIQUE, q, PRIMARY KEY (x, y))".to_string()
                     )
                 ])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -929,6 +982,7 @@ fn test_cdc_schema_changes() {
                     Value::Integer(6),
                     Value::Text("CREATE TABLE q (a, b, c)".to_string())
                 ])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(3),
@@ -944,6 +998,7 @@ fn test_cdc_schema_changes() {
                     Value::Integer(7),
                     Value::Text("CREATE INDEX t_q ON t (q)".to_string())
                 ])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(4),
@@ -959,6 +1014,7 @@ fn test_cdc_schema_changes() {
                     Value::Integer(8),
                     Value::Text("CREATE INDEX q_abc ON q (a, b, c)".to_string())
                 ])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(5),
@@ -976,6 +1032,7 @@ fn test_cdc_schema_changes() {
                     )
                 ])),
                 Value::Null,
+                Value::Null,
             ],
             vec![
                 Value::Integer(6),
@@ -990,6 +1047,7 @@ fn test_cdc_schema_changes() {
                     Value::Integer(8),
                     Value::Text("CREATE INDEX q_abc ON q (a, b, c)".to_string())
                 ])),
+                Value::Null,
                 Value::Null,
             ]
         ]
@@ -1027,6 +1085,7 @@ fn test_cdc_schema_changes_alter_table() {
                         "CREATE TABLE t (x, y, z UNIQUE, q, PRIMARY KEY (x, y))".to_string()
                     )
                 ])),
+                Value::Null,
             ],
             vec![
                 Value::Integer(2),
@@ -1052,6 +1111,18 @@ fn test_cdc_schema_changes_alter_table() {
                         "CREATE TABLE t (x PRIMARY KEY, y PRIMARY KEY, z UNIQUE)".to_string()
                     )
                 ])),
+                Value::Blob(record([
+                    Value::Integer(0),
+                    Value::Integer(0),
+                    Value::Integer(0),
+                    Value::Integer(0),
+                    Value::Integer(1),
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Text("ALTER TABLE t DROP COLUMN q".to_string())
+                ])),
             ],
             vec![
                 Value::Integer(3),
@@ -1076,6 +1147,18 @@ fn test_cdc_schema_changes_alter_table() {
                     Value::Text(
                         "CREATE TABLE t (x PRIMARY KEY, y PRIMARY KEY, z UNIQUE, t)".to_string()
                     )
+                ])),
+                Value::Blob(record([
+                    Value::Integer(0),
+                    Value::Integer(0),
+                    Value::Integer(0),
+                    Value::Integer(0),
+                    Value::Integer(1),
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Text("ALTER TABLE t ADD COLUMN t".to_string())
                 ])),
             ],
         ]

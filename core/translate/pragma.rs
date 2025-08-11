@@ -732,6 +732,14 @@ fn turso_cdc_table_columns() -> Vec<ColumnDefinition> {
             }),
             constraints: vec![],
         },
+        ast::ColumnDefinition {
+            col_name: ast::Name::from_str("updates"),
+            col_type: Some(ast::Type {
+                name: "BLOB".to_string(),
+                size: None,
+            }),
+            constraints: vec![],
+        },
     ]
 }
 

@@ -617,6 +617,9 @@ impl CaptureDataChangesMode {
             ))
         }
     }
+    pub fn has_updates(&self) -> bool {
+        matches!(self, CaptureDataChangesMode::Full { .. })
+    }
     pub fn has_after(&self) -> bool {
         matches!(
             self,

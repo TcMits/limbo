@@ -72,15 +72,23 @@ pub fn translate_update(
     Ok(program)
 }
 
-pub fn translate_update_with_after(
+pub fn translate_update_for_schema_change(
     schema: &Schema,
     body: &mut Update,
     syms: &SymbolTable,
     mut program: ProgramBuilder,
     connection: &Arc<crate::Connection>,
+    ddl_query: &str,
     after: impl FnOnce(&mut ProgramBuilder),
 ) -> crate::Result<ProgramBuilder> {
     let mut plan = prepare_update_plan(&mut program, schema, body, connection)?;
+
+    if let Plan::Update(plan) = &mut plan {
+        if program.capture_data_changes_mode().has_updates() {
+            plan.cdc_update_alter_statement = Some(ddl_query.to_string());
+        }
+    }
+
     optimize_plan(&mut plan, schema)?;
     // TODO: freestyling these numbers
     let opts = ProgramBuilderOpts {
@@ -368,6 +376,7 @@ pub fn prepare_update_plan(
         contains_constant_false_condition: false,
         indexes_to_update,
         ephemeral_plan,
+        cdc_update_alter_statement: None,
     }))
 }
 

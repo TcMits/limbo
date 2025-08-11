@@ -601,6 +601,7 @@ fn emit_delete_insns(
                 rowid_reg,
                 before_record_reg,
                 None,
+                None,
                 table_reference.table.get_name(),
             )?;
         }
@@ -868,6 +869,15 @@ fn emit_update_insns(
 
     // we scan a column at a time, loading either the column's values, or the new value
     // from the Set expression, into registers so we can emit a MakeRecord and update the row.
+
+    // we allocate 2C registers for "updates" as the structure of this column for CDC table is following:
+    // [C boolean values where true set for changed columns] [C values with updates where NULL is set for not-changed columns]
+    let cdc_updates_register = if program.capture_data_changes_mode().has_updates() {
+        Some(program.alloc_registers(2 * table_ref.columns().len()))
+    } else {
+        None
+    };
+
     let start = if is_virtual { beg + 2 } else { beg + 1 };
     for (idx, table_column) in table_ref.columns().iter().enumerate() {
         let target_reg = start + idx;
@@ -914,6 +924,27 @@ fn emit_update_insns(
                     });
                 }
             }
+
+            if let Some(cdc_updates_register) = cdc_updates_register {
+                let change_reg = cdc_updates_register + idx;
+                let value_reg = cdc_updates_register + table_ref.columns().len() + idx;
+                program.emit_bool(true, change_reg);
+                program.mark_last_insn_constant();
+                let mut updated = false;
+                if let Some(ddl_query_for_cdc_update) = &plan.cdc_update_alter_statement {
+                    if table_column.name.as_deref() == Some("sql") {
+                        program.emit_string8(ddl_query_for_cdc_update.clone(), value_reg);
+                        updated = true;
+                    }
+                }
+                if !updated {
+                    program.emit_insn(Insn::Copy {
+                        src_reg: target_reg,
+                        dst_reg: value_reg,
+                        extra_amount: 0,
+                    });
+                }
+            }
         } else {
             let column_idx_in_index = index.as_ref().and_then(|(idx, _)| {
                 idx.columns
@@ -943,6 +974,15 @@ fn emit_update_insns(
                     })
                     .unwrap_or(&cursor_id);
                 program.emit_column(cursor_id, column_idx_in_index.unwrap_or(idx), target_reg);
+            }
+
+            if let Some(cdc_updates_register) = cdc_updates_register {
+                let change_bit_reg = cdc_updates_register + idx;
+                let value_reg = cdc_updates_register + table_ref.columns().len() + idx;
+                program.emit_bool(false, change_bit_reg);
+                program.mark_last_insn_constant();
+                program.emit_null(value_reg, None);
+                program.mark_last_insn_constant();
             }
         }
     }
@@ -1222,6 +1262,19 @@ fn emit_update_insns(
             None
         };
 
+        let cdc_updates_record = if let Some(cdc_updates_register) = cdc_updates_register {
+            let record_reg = program.alloc_register();
+            program.emit_insn(Insn::MakeRecord {
+                start_reg: cdc_updates_register,
+                count: 2 * table_ref.columns().len(),
+                dest_reg: record_reg,
+                index_name: None,
+            });
+            Some(record_reg)
+        } else {
+            None
+        };
+
         // emit actual CDC instructions for write to the CDC table
         if let Some(cdc_cursor_id) = t_ctx.cdc_cursor_id {
             let cdc_rowid_before_reg =
@@ -1235,6 +1288,7 @@ fn emit_update_insns(
                     cdc_rowid_before_reg,
                     cdc_before_reg,
                     None,
+                    None,
                     table_ref.table.get_name(),
                 )?;
                 emit_cdc_insns(
@@ -1244,6 +1298,7 @@ fn emit_update_insns(
                     cdc_cursor_id,
                     cdc_rowid_after_reg,
                     cdc_after_reg,
+                    None,
                     None,
                     table_ref.table.get_name(),
                 )?;
@@ -1256,6 +1311,7 @@ fn emit_update_insns(
                     cdc_rowid_before_reg,
                     cdc_before_reg,
                     cdc_after_reg,
+                    cdc_updates_record,
                     table_ref.table.get_name(),
                 )?;
             }
@@ -1377,10 +1433,11 @@ pub fn emit_cdc_insns(
     rowid_reg: usize,
     before_record_reg: Option<usize>,
     after_record_reg: Option<usize>,
+    updates_record_reg: Option<usize>,
     table_name: &str,
 ) -> Result<()> {
-    // (change_id INTEGER PRIMARY KEY AUTOINCREMENT, change_time INTEGER, change_type INTEGER, table_name TEXT, id, before BLOB, after BLOB)
-    let turso_cdc_registers = program.alloc_registers(7);
+    // (change_id INTEGER PRIMARY KEY AUTOINCREMENT, change_time INTEGER, change_type INTEGER, table_name TEXT, id, before BLOB, after BLOB, updates BLOB)
+    let turso_cdc_registers = program.alloc_registers(8);
     program.emit_insn(Insn::Null {
         dest: turso_cdc_registers,
         dest_end: None,
@@ -1441,6 +1498,17 @@ pub fn emit_cdc_insns(
         program.mark_last_insn_constant();
     }
 
+    if let Some(updates_record_reg) = updates_record_reg {
+        program.emit_insn(Insn::Copy {
+            src_reg: updates_record_reg,
+            dst_reg: turso_cdc_registers + 7,
+            extra_amount: 0,
+        });
+    } else {
+        program.emit_null(turso_cdc_registers + 7, None);
+        program.mark_last_insn_constant();
+    }
+
     let rowid_reg = program.alloc_register();
     program.emit_insn(Insn::NewRowid {
         cursor: cdc_cursor_id,
@@ -1451,7 +1519,7 @@ pub fn emit_cdc_insns(
     let record_reg = program.alloc_register();
     program.emit_insn(Insn::MakeRecord {
         start_reg: turso_cdc_registers,
-        count: 7,
+        count: 8,
         dest_reg: record_reg,
         index_name: None,
     });

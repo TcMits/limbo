@@ -270,6 +270,7 @@ pub fn emit_schema_entry(
             rowid_reg,
             None,
             after_record_reg,
+            None,
             SQLITE_TABLEID,
         )?;
     }
@@ -774,6 +775,7 @@ pub fn translate_drop_table(
             cdc_cursor_id,
             row_id_reg,
             before_record_reg,
+            None,
             None,
             SQLITE_TABLEID,
         )?;

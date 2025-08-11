@@ -397,6 +397,9 @@ pub struct UpdatePlan {
     pub indexes_to_update: Vec<Arc<Index>>,
     // If the table's rowid alias is used, gather all the target rowids into an ephemeral table, and then use that table as the single JoinedTable for the actual UPDATE loop.
     pub ephemeral_plan: Option<SelectPlan>,
+    // For ALTER TABLE turso-db emits appropriate DDL statement in the "updates" cell of CDC table
+    // This field is present only for update plan created for ALTER TABLE when CDC mode has "updates" values
+    pub cdc_update_alter_statement: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

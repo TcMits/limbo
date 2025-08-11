@@ -13,7 +13,7 @@ use crate::{
     LimboError, Result, SymbolTable,
 };
 
-use super::{schema::SQLITE_TABLEID, update::translate_update_with_after};
+use super::{schema::SQLITE_TABLEID, update::translate_update_for_schema_change};
 
 pub fn translate_alter_table(
     alter: (ast::QualifiedName, ast::AlterTableBody),
@@ -21,6 +21,7 @@ pub fn translate_alter_table(
     schema: &Schema,
     mut program: ProgramBuilder,
     connection: &Arc<crate::Connection>,
+    input: &str,
 ) -> Result<ProgramBuilder> {
     program.begin_write_operation();
     let (table_name, alter_table) = alter;
@@ -94,12 +95,13 @@ pub fn translate_alter_table(
                 unreachable!();
             };
 
-            translate_update_with_after(
+            translate_update_for_schema_change(
                 schema,
                 &mut update,
                 syms,
                 program,
                 connection,
+                input,
                 |program| {
                     let column_count = btree.columns.len();
                     let root_page = btree.root_page;
@@ -206,12 +208,13 @@ pub fn translate_alter_table(
                 unreachable!();
             };
 
-            translate_update_with_after(
+            translate_update_for_schema_change(
                 schema,
                 &mut update,
                 syms,
                 program,
                 connection,
+                input,
                 |program| {
                     program.emit_insn(Insn::SetCookie {
                         db: 0,
