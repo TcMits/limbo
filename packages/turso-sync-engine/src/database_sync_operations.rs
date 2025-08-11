@@ -326,6 +326,7 @@ pub async fn transfer_logical_changes(
     let iterate_opts = DatabaseChangesIteratorOpts {
         first_change_id: last_change_id.map(|x| x + 1),
         mode: DatabaseChangesIteratorMode::Apply,
+        ignore_schema_changes: false,
         ..Default::default()
     };
     let mut changes = source.iterate_changes(iterate_opts)?;
@@ -599,7 +600,6 @@ pub mod tests {
             conn1.execute("INSERT INTO t VALUES (1, 2), (3, 4), (5, 6)")?;
 
             let conn2 = db2.connect(&coro).await?;
-            conn2.execute("CREATE TABLE t(x, y)")?;
 
             transfer_logical_changes(&coro, &db1, &db2, "id-1", false).await?;
 
