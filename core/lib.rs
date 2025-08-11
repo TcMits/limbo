@@ -980,15 +980,20 @@ impl Connection {
                         input,
                     )?;
 
-                    let mut state =
-                        vdbe::ProgramState::new(program.max_registers, program.cursor_ref.len());
+                    let mut stmt =
+                        Statement::new(program, self._db.mv_store.clone(), pager.clone());
+
                     loop {
-                        let res =
-                            program.step(&mut state, self._db.mv_store.clone(), pager.clone())?;
-                        if matches!(res, StepResult::Done) {
-                            break;
+                        match stmt.step()? {
+                            vdbe::StepResult::Done => {
+                                break;
+                            }
+                            vdbe::StepResult::IO => stmt.run_once()?,
+                            vdbe::StepResult::Row => {}
+                            vdbe::StepResult::Interrupt | vdbe::StepResult::Busy => {
+                                return Err(LimboError::Busy)
+                            }
                         }
-                        self.run_once()?;
                     }
                 }
                 _ => unreachable!(),
@@ -1110,15 +1115,20 @@ impl Connection {
                         input,
                     )?;
 
-                    let mut state =
-                        vdbe::ProgramState::new(program.max_registers, program.cursor_ref.len());
+                    let mut stmt =
+                        Statement::new(program, self._db.mv_store.clone(), pager.clone());
+
                     loop {
-                        let res =
-                            program.step(&mut state, self._db.mv_store.clone(), pager.clone())?;
-                        if matches!(res, StepResult::Done) {
-                            break;
+                        match stmt.step()? {
+                            vdbe::StepResult::Done => {
+                                break;
+                            }
+                            vdbe::StepResult::IO => stmt.run_once()?,
+                            vdbe::StepResult::Row => {}
+                            vdbe::StepResult::Interrupt | vdbe::StepResult::Busy => {
+                                return Err(LimboError::Busy)
+                            }
                         }
-                        self.run_once()?;
                     }
                 }
             }
