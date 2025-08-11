@@ -7824,7 +7824,7 @@ mod tests {
                 )
                 .unwrap();
                 loop {
-                    match pager.end_tx(false, false, &conn, false).unwrap() {
+                    match pager.end_tx(false, &conn, false).unwrap() {
                         IOResult::Done(_) => break,
                         IOResult::IO => {
                             pager.io.run_once().unwrap();
@@ -7982,7 +7982,7 @@ mod tests {
                 .unwrap();
                 let _c = cursor.move_to_root().unwrap();
                 loop {
-                    match pager.end_tx(false, false, &conn, false).unwrap() {
+                    match pager.end_tx(false, &conn, false).unwrap() {
                         IOResult::Done(_) => break,
                         IOResult::IO => {
                             pager.io.run_once().unwrap();
@@ -8200,7 +8200,7 @@ mod tests {
 
                 let _c = cursor.move_to_root().unwrap();
                 loop {
-                    match pager.end_tx(false, false, &conn, false).unwrap() {
+                    match pager.end_tx(false, &conn, false).unwrap() {
                         IOResult::Done(_) => break,
                         IOResult::IO => {
                             pager.io.run_once().unwrap();

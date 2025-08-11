@@ -1009,7 +1009,6 @@ impl Pager {
     pub fn end_tx(
         &self,
         rollback: bool,
-        schema_did_change: bool,
         connection: &Connection,
         wal_checkpoint_disabled: bool,
     ) -> Result<IOResult<PagerCommitResult>> {
@@ -1018,11 +1017,11 @@ impl Pager {
             // TODO: Unsure what the semantics of "end_tx" is for in-memory databases, ephemeral tables and ephemeral indexes.
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
         };
+        let (is_write, schema_did_change) = match connection.transaction_state.get() {
+            TransactionState::Write { schema_did_change } => (true, schema_did_change),
+            _ => (false, false),
+        };
         if rollback {
-            let is_write = matches!(
-                connection.transaction_state.get(),
-                TransactionState::Write { .. }
-            );
             if is_write {
                 wal.borrow().end_write_tx();
             }

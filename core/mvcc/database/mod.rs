@@ -514,7 +514,6 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
                         .pager
                         .end_tx(
                             false, // rollback = false since we're committing
-                            false, // schema_did_change = false for now (could be improved)
                             &self.connection,
                             self.connection.wal_checkpoint_disabled.get(),
                         )

@@ -420,8 +420,8 @@ impl Program {
             if self.connection.closed.get() {
                 // Connection is closed for whatever reason, rollback the transaction.
                 let state = self.connection.transaction_state.get();
-                if let TransactionState::Write { schema_did_change } = state {
-                    match pager.end_tx(true, schema_did_change, &self.connection, false)? {
+                if let TransactionState::Write { .. } = state {
+                    match pager.end_tx(true, &self.connection, false)? {
                         IOResult::IO => return Ok(StepResult::IO),
                         IOResult::Done(_) => {}
                     }
@@ -510,9 +510,7 @@ impl Program {
                 program_state.commit_state
             );
             if program_state.commit_state == CommitState::Committing {
-                let TransactionState::Write { schema_did_change } =
-                    connection.transaction_state.get()
-                else {
+                let TransactionState::Write { .. } = connection.transaction_state.get() else {
                     unreachable!("invalid state for write commit step")
                 };
                 self.step_end_write_txn(
@@ -520,18 +518,16 @@ impl Program {
                     &mut program_state.commit_state,
                     &connection,
                     rollback,
-                    schema_did_change,
                 )
             } else if auto_commit {
                 let current_state = connection.transaction_state.get();
                 tracing::trace!("Auto-commit state: {:?}", current_state);
                 match current_state {
-                    TransactionState::Write { schema_did_change } => self.step_end_write_txn(
+                    TransactionState::Write { .. } => self.step_end_write_txn(
                         &pager,
                         &mut program_state.commit_state,
                         &connection,
                         rollback,
-                        schema_did_change,
                     ),
                     TransactionState::Read => {
                         connection.transaction_state.replace(TransactionState::None);
@@ -559,11 +555,9 @@ impl Program {
         commit_state: &mut CommitState,
         connection: &Connection,
         rollback: bool,
-        schema_did_change: bool,
     ) -> Result<StepResult> {
         let cacheflush_status = pager.end_tx(
             rollback,
-            schema_did_change,
             connection,
             connection.wal_checkpoint_disabled.get(),
         )?;
@@ -817,20 +811,15 @@ pub fn handle_program_error(
         // Table locked errors, e.g. trying to checkpoint in an interactive transaction, do not cause a rollback.
         LimboError::TableLocked => {}
         _ => {
-            let state = connection.transaction_state.get();
-            if let TransactionState::Write { schema_did_change } = state {
-                loop {
-                    match pager.end_tx(true, schema_did_change, connection, false) {
-                        Ok(IOResult::IO) => connection.run_once()?,
-                        Ok(IOResult::Done(_)) => break,
-                        Err(e) => {
-                            tracing::error!("end_tx failed: {e}");
-                            break;
-                        }
+            loop {
+                match pager.end_tx(true, connection, false) {
+                    Ok(IOResult::IO) => connection.run_once()?,
+                    Ok(IOResult::Done(_)) => break,
+                    Err(e) => {
+                        tracing::error!("end_tx failed: {e}");
+                        break;
                     }
                 }
-            } else if let Err(e) = pager.end_read_tx() {
-                tracing::error!("end_read_tx failed: {e}");
             }
             connection.transaction_state.replace(TransactionState::None);
         }

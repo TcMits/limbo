@@ -1360,23 +1360,18 @@ impl Connection {
         self.closed.set(true);
 
         match self.transaction_state.get() {
-            TransactionState::Write { schema_did_change } => {
+            TransactionState::None => {
+                // No active transaction
+            }
+            _ => {
                 while let IOResult::IO = self.pager.borrow().end_tx(
                     true, // rollback = true for close
-                    schema_did_change,
                     self,
                     self.wal_checkpoint_disabled.get(),
                 )? {
                     self.run_once()?;
                 }
                 self.transaction_state.set(TransactionState::None);
-            }
-            TransactionState::PendingUpgrade | TransactionState::Read => {
-                self.pager.borrow().end_read_tx()?;
-                self.transaction_state.set(TransactionState::None);
-            }
-            TransactionState::None => {
-                // No active transaction
             }
         }
 
@@ -1929,7 +1924,9 @@ impl Statement {
         res
     }
 
+    #[instrument(skip_all, level = Level::DEBUG)]
     fn reprepare(&mut self) -> Result<()> {
+        tracing::trace!("repreparing statement");
         let conn = self.program.connection.clone();
         *conn.schema.borrow_mut() = conn._db.clone_schema()?;
         self.program = {
@@ -1965,10 +1962,8 @@ impl Statement {
         let res = self.pager.io.run_once();
         if res.is_err() {
             let state = self.program.connection.transaction_state.get();
-            if let TransactionState::Write { schema_did_change } = state {
-                let end_tx_res =
-                    self.pager
-                        .end_tx(true, schema_did_change, &self.program.connection, true)?;
+            if let TransactionState::Write { .. } = state {
+                let end_tx_res = self.pager.end_tx(true, &self.program.connection, true)?;
                 self.program
                     .connection
                     .transaction_state
