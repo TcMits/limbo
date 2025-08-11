@@ -29,12 +29,11 @@ use crate::{
     function::{AggFunc, FuncCtx},
     state_machine::StateTransition,
     storage::sqlite3_ondisk::SmallVec,
-    translate::collate::CollationSeq,
-    translate::plan::TableReferences,
+    translate::{collate::CollationSeq, plan::TableReferences},
     types::{IOResult, RawSlice, TextRef},
     vdbe::execute::{
-        OpIdxInsertState, OpInsertState, OpInsertSubState, OpNewRowidState, OpNoConflictState,
-        OpSeekState,
+        OpDeleteState, OpDeleteSubState, OpIdxInsertState, OpInsertState, OpInsertSubState,
+        OpNewRowidState, OpNoConflictState, OpSeekState,
     },
     RefValue,
 };
@@ -254,6 +253,7 @@ pub struct ProgramState {
     commit_state: CommitState,
     #[cfg(feature = "json")]
     json_cache: JsonCacheCell,
+    op_delete_state: OpDeleteState,
     op_idx_delete_state: Option<OpIdxDeleteState>,
     op_integrity_check_state: OpIntegrityCheckState,
     op_open_ephemeral_state: OpOpenEphemeralState,
@@ -287,6 +287,10 @@ impl ProgramState {
             commit_state: CommitState::Ready,
             #[cfg(feature = "json")]
             json_cache: JsonCacheCell::new(),
+            op_delete_state: OpDeleteState {
+                sub_state: OpDeleteSubState::MaybeCaptureRecord,
+                deleted_record: None,
+            },
             op_idx_delete_state: None,
             op_integrity_check_state: OpIntegrityCheckState::Start,
             op_open_ephemeral_state: OpOpenEphemeralState::Start,
