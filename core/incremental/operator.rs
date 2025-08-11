@@ -746,9 +746,7 @@ impl ProjectOperator {
                             if arg_list.len() == 1 {
                                 let arg_val = self.evaluate_expression(&arg_list[0], values);
                                 match arg_val {
-                                    Value::Integer(i) => {
-                                        Value::Text(Text::new(&format!("{:X}", i)))
-                                    }
+                                    Value::Integer(i) => Value::Text(Text::new(&format!("{i:X}"))),
                                     _ => Value::Null,
                                 }
                             } else {
