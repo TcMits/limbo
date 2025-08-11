@@ -5148,6 +5148,8 @@ pub fn op_insert(
                     continue;
                 }
 
+                turso_assert!(!flag.has(InsertFlags::REQUIRE_SEEK), "to capture old record accurately, we must be located at the correct position in the table");
+
                 let old_record = {
                     let mut cursor = state.get_cursor(*cursor_id);
                     let cursor = cursor.as_btree_mut();
