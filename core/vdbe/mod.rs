@@ -444,6 +444,10 @@ impl Program {
 
     #[instrument(skip_all, level = Level::DEBUG)]
     fn apply_view_deltas(&self, rollback: bool) {
+        if self.connection.view_transaction_states.borrow().is_empty() {
+            return;
+        }
+
         let tx_states = self.connection.view_transaction_states.take();
 
         if !rollback {
