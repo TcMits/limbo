@@ -160,7 +160,7 @@ impl Limbo {
             let interrupt_count: Arc<AtomicUsize> = Arc::clone(&interrupt_count);
             ctrlc::set_handler(move || {
                 // Increment the interrupt count on Ctrl-C
-                interrupt_count.fetch_add(1, Ordering::SeqCst);
+                interrupt_count.fetch_add(1, Ordering::Release);
             })
             .expect("Error setting Ctrl-C handler");
         }
@@ -546,7 +546,7 @@ impl Limbo {
     fn reset_line(&mut self, _line: &str) -> rustyline::Result<()> {
         // Entry is auto added to history
         // self.rl.add_history_entry(line.to_owned())?;
-        self.interrupt_count.store(0, Ordering::SeqCst);
+        self.interrupt_count.store(0, Ordering::Release);
         Ok(())
     }
 
@@ -741,7 +741,7 @@ impl Limbo {
                 OutputMode::List => {
                     let mut headers_printed = false;
                     loop {
-                        if self.interrupt_count.load(Ordering::SeqCst) > 0 {
+                        if self.interrupt_count.load(Ordering::Acquire) > 0 {
                             println!("Query interrupted.");
                             return Ok(());
                         }
@@ -815,7 +815,7 @@ impl Limbo {
                     }
                 }
                 OutputMode::Pretty => {
-                    if self.interrupt_count.load(Ordering::SeqCst) > 0 {
+                    if self.interrupt_count.load(Ordering::Acquire) > 0 {
                         println!("Query interrupted.");
                         return Ok(());
                     }
