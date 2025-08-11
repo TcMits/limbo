@@ -948,9 +948,10 @@ pub fn begin_write_btree_page(
 pub fn write_pages_vectored(
     pager: &Pager,
     batch: BTreeMap<usize, Arc<Buffer>>,
-) -> Result<PendingFlush> {
+    flush: &PendingFlush,
+) -> Result<()> {
     if batch.is_empty() {
-        return Ok(PendingFlush::default());
+        return Ok(());
     }
 
     // batch item array is already sorted by id, so we just need to find contiguous ranges of page_id's
@@ -974,7 +975,8 @@ pub fn write_pages_vectored(
 
     // Create the atomic counters
     let runs_left = Arc::new(AtomicUsize::new(run_count));
-    let done = Arc::new(AtomicBool::new(false));
+    let done = flush.done.clone();
+    done.store(false, Ordering::Release);
     // we know how many runs, but we don't know how many buffers per run, so we can only give an
     // estimate of the capacity
     const EST_BUFF_CAPACITY: usize = 32;
@@ -983,7 +985,6 @@ pub fn write_pages_vectored(
     // We can reuse this across runs without reallocating
     let mut run_bufs = Vec::with_capacity(EST_BUFF_CAPACITY);
     let mut run_start_id: Option<usize> = None;
-    let mut all_ids = Vec::with_capacity(batch.len());
 
     // Iterate through the batch
     let mut iter = batch.into_iter().peekable();
@@ -996,7 +997,6 @@ pub fn write_pages_vectored(
 
         // Add this page to the current run
         run_bufs.push(item);
-        all_ids.push(id);
 
         // Check if this is the end of a run
         let is_end_of_run = match iter.peek() {
@@ -1032,15 +1032,8 @@ pub fn write_pages_vectored(
         }
     }
 
-    tracing::debug!(
-        "write_pages_vectored: {} pages to write, runs: {run_count}",
-        all_ids.len()
-    );
-
-    Ok(PendingFlush {
-        pages: all_ids,
-        done,
-    })
+    tracing::debug!("write_pages_vectored: total runs={run_count}");
+    Ok(())
 }
 
 #[instrument(skip_all, level = Level::DEBUG)]

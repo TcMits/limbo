@@ -370,15 +370,13 @@ struct OngoingCheckpoint {
     scratch_page: PageRef,
     batch: Batch,
     state: CheckpointState,
-    pending_flush: Option<PendingFlush>,
+    pending_flush: PendingFlush,
     min_frame: u64,
     max_frame: u64,
     current_page: u64,
 }
 
 pub(super) struct PendingFlush {
-    // page ids to clear
-    pub(super) pages: Vec<usize>,
     // completion flag set by IO callback
     pub(super) done: Arc<AtomicBool>,
 }
@@ -392,17 +390,11 @@ impl Default for PendingFlush {
 impl PendingFlush {
     pub fn new() -> Self {
         Self {
-            pages: Vec::with_capacity(CKPT_BATCH_PAGES),
-            done: Arc::new(AtomicBool::new(false)),
+            done: Arc::new(AtomicBool::new(true)),
         }
     }
-    // clear the dirty flag of all pages in the pending flush batch
-    fn clear_dirty(&self, pager: &Pager) {
-        for id in &self.pages {
-            if let Some(p) = pager.cache_get(*id) {
-                p.clear_dirty();
-            }
-        }
+    fn clear(&mut self) {
+        self.done.store(true, Ordering::Relaxed);
     }
 }
 
@@ -1239,7 +1231,7 @@ impl WalFile {
             ongoing_checkpoint: OngoingCheckpoint {
                 scratch_page: checkpoint_page,
                 batch: Batch::new(),
-                pending_flush: None,
+                pending_flush: PendingFlush::new(),
                 state: CheckpointState::Start,
                 min_frame: 0,
                 max_frame: 0,
@@ -1303,7 +1295,7 @@ impl WalFile {
         self.ongoing_checkpoint.current_page = 0;
         self.max_frame_read_lock_index.set(NO_LOCK_HELD);
         self.ongoing_checkpoint.batch.clear();
-        let _ = self.ongoing_checkpoint.pending_flush.take();
+        self.ongoing_checkpoint.pending_flush.clear();
         self.sync_state.set(SyncState::NotSyncing);
         self.syncing.set(false);
     }
@@ -1475,30 +1467,24 @@ impl WalFile {
                 }
                 CheckpointState::FlushBatch => {
                     tracing::trace!("started checkpoint backfilling batch");
-                    self.ongoing_checkpoint.pending_flush = Some(write_pages_vectored(
+                    write_pages_vectored(
                         pager,
                         std::mem::take(&mut self.ongoing_checkpoint.batch),
-                    )?);
+                        &self.ongoing_checkpoint.pending_flush,
+                    )?;
                     // batch is queued
-                    self.ongoing_checkpoint.batch.clear();
                     self.ongoing_checkpoint.state = CheckpointState::WaitFlush;
                 }
                 CheckpointState::WaitFlush => {
-                    match self.ongoing_checkpoint.pending_flush.as_ref() {
-                        Some(pf) if pf.done.load(Ordering::Acquire) => {
-                            // flush is done, we can continue
-                            tracing::trace!("checkpoint backfilling batch done");
-                        }
-                        Some(_) => return Ok(IOResult::IO),
-                        None => panic!("we should have a pending flush here"),
-                    }
-                    tracing::debug!("finished checkpoint backfilling batch");
-                    let pf = self
+                    if !self
                         .ongoing_checkpoint
                         .pending_flush
-                        .as_ref()
-                        .expect("we should have a pending flush here");
-                    pf.clear_dirty(pager);
+                        .done
+                        .load(Ordering::Acquire)
+                    {
+                        return Ok(IOResult::IO);
+                    }
+                    tracing::debug!("finished checkpoint backfilling batch");
                     // done with batch
                     let shared = self.get_shared();
                     if (self.ongoing_checkpoint.current_page as usize)
@@ -1516,12 +1502,13 @@ impl WalFile {
                 // In Restart or Truncate mode, we need to restart the log over and possibly truncate the file
                 // Release all locks and return the current num of wal frames and the amount we backfilled
                 CheckpointState::Done => {
-                    if let Some(pf) = self.ongoing_checkpoint.pending_flush.as_ref() {
-                        turso_assert!(
-                            pf.done.load(Ordering::Relaxed),
-                            "checkpoint pending flush must have finished"
-                        );
-                    }
+                    turso_assert!(
+                        self.ongoing_checkpoint
+                            .pending_flush
+                            .done
+                            .load(Ordering::Relaxed),
+                        "checkpoint pending flush must have finished"
+                    );
                     let mut checkpoint_result = {
                         let shared = self.get_shared();
                         let current_mx = shared.max_frame.load(Ordering::Acquire);
@@ -1587,7 +1574,7 @@ impl WalFile {
                     self.ongoing_checkpoint.scratch_page.clear_dirty();
                     self.ongoing_checkpoint.scratch_page.get().id = 0;
                     self.ongoing_checkpoint.scratch_page.get().contents = None;
-                    let _ = self.ongoing_checkpoint.pending_flush.take();
+                    self.ongoing_checkpoint.pending_flush.clear();
                     self.ongoing_checkpoint.batch.clear();
                     self.ongoing_checkpoint.state = CheckpointState::Start;
                     return Ok(IOResult::Done(checkpoint_result));
