@@ -480,13 +480,13 @@ impl Program {
         program_state: &mut ProgramState,
         mv_store: Option<&Arc<MvStore>>,
         rollback: bool,
-    ) -> Result<StepResult> {
+    ) -> Result<IOResult<()>> {
         self.apply_view_deltas(rollback);
 
         if self.connection.transaction_state.get() == TransactionState::None && mv_store.is_none() {
             // No need to do any work here if not in tx. Current MVCC logic doesn't work with this assumption,
             // hence the mv_store.is_none() check.
-            return Ok(StepResult::Done);
+            return Ok(IOResult::Done(()));
         }
         if let Some(mv_store) = mv_store {
             let conn = self.connection.clone();
@@ -510,7 +510,7 @@ impl Program {
                 }
                 mv_transactions.clear();
             }
-            Ok(StepResult::Done)
+            Ok(IOResult::Done(()))
         } else {
             let connection = self.connection.clone();
             let auto_commit = connection.auto_commit.get();
@@ -542,9 +542,9 @@ impl Program {
                     TransactionState::Read => {
                         connection.transaction_state.replace(TransactionState::None);
                         pager.end_read_tx()?;
-                        Ok(StepResult::Done)
+                        Ok(IOResult::Done(()))
                     }
-                    TransactionState::None => Ok(StepResult::Done),
+                    TransactionState::None => Ok(IOResult::Done(())),
                     TransactionState::PendingUpgrade => {
                         panic!("Unexpected transaction state: {current_state:?} during auto-commit",)
                     }
@@ -553,7 +553,7 @@ impl Program {
                 if self.change_cnt_on {
                     self.connection.set_changes(self.n_change.get());
                 }
-                Ok(StepResult::Done)
+                Ok(IOResult::Done(()))
             }
         }
     }
@@ -565,7 +565,7 @@ impl Program {
         commit_state: &mut CommitState,
         connection: &Connection,
         rollback: bool,
-    ) -> Result<StepResult> {
+    ) -> Result<IOResult<()>> {
         let cacheflush_status = pager.end_tx(
             rollback,
             connection,
@@ -582,10 +582,10 @@ impl Program {
             IOResult::IO => {
                 tracing::trace!("Cacheflush IO");
                 *commit_state = CommitState::Committing;
-                return Ok(StepResult::IO);
+                return Ok(IOResult::IO);
             }
         }
-        Ok(StepResult::Done)
+        Ok(IOResult::Done(()))
     }
 
     #[rustfmt::skip]

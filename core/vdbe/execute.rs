@@ -62,7 +62,7 @@ use crate::{
     vector::{vector32, vector64, vector_distance_cos, vector_distance_l2, vector_extract},
 };
 
-use crate::{info, turso_assert, OpenFlags, RefValue, Row, StepResult, TransactionState};
+use crate::{info, turso_assert, OpenFlags, RefValue, Row, TransactionState};
 
 use super::{
     insn::{Cookie, RegisterOrLiteral},
@@ -159,14 +159,11 @@ pub enum InsnFunctionStepResult {
     Step,
 }
 
-impl From<StepResult> for InsnFunctionStepResult {
-    fn from(value: StepResult) -> Self {
+impl<T> From<IOResult<T>> for InsnFunctionStepResult {
+    fn from(value: IOResult<T>) -> Self {
         match value {
-            super::StepResult::Done => Self::Done,
-            super::StepResult::IO => Self::IO,
-            super::StepResult::Row => Self::Row,
-            super::StepResult::Interrupt => Self::Interrupt,
-            super::StepResult::Busy => Self::Busy,
+            IOResult::Done(_) => InsnFunctionStepResult::Done,
+            IOResult::IO => InsnFunctionStepResult::IO,
         }
     }
 }
@@ -1914,13 +1911,9 @@ pub fn halt(
             )));
         }
     }
-    match program.commit_txn(pager.clone(), state, mv_store, false)? {
-        StepResult::Done => Ok(InsnFunctionStepResult::Done),
-        StepResult::IO => Ok(InsnFunctionStepResult::IO),
-        StepResult::Row => Ok(InsnFunctionStepResult::Row),
-        StepResult::Interrupt => Ok(InsnFunctionStepResult::Interrupt),
-        StepResult::Busy => Ok(InsnFunctionStepResult::Busy),
-    }
+    program
+        .commit_txn(pager.clone(), state, mv_store, false)
+        .map(Into::into)
 }
 
 pub fn op_halt(
@@ -1962,13 +1955,9 @@ pub fn op_halt(
     let auto_commit = program.connection.auto_commit.get();
     tracing::trace!("op_halt(auto_commit={})", auto_commit);
     if auto_commit {
-        match program.commit_txn(pager.clone(), state, mv_store, false)? {
-            StepResult::Done => Ok(InsnFunctionStepResult::Done),
-            StepResult::IO => Ok(InsnFunctionStepResult::IO),
-            StepResult::Row => Ok(InsnFunctionStepResult::Row),
-            StepResult::Interrupt => Ok(InsnFunctionStepResult::Interrupt),
-            StepResult::Busy => Ok(InsnFunctionStepResult::Busy),
-        }
+        program
+            .commit_txn(pager.clone(), state, mv_store, false)
+            .map(Into::into)
     } else {
         Ok(InsnFunctionStepResult::Done)
     }
