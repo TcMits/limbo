@@ -4233,6 +4233,7 @@ dependencies = [
  "lru",
  "memory-stats",
  "miette",
+ "mimalloc",
  "pack1",
  "parking_lot",
  "paste",

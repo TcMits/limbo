@@ -3,6 +3,10 @@ use pprof::criterion::{Output, PProfProfiler};
 use std::{sync::Arc, time::Instant};
 use turso_core::{Database, PlatformIO};
 
+#[cfg(not(target_family = "wasm"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn rusqlite_open() -> rusqlite::Connection {
     let sqlite_conn = rusqlite::Connection::open("../testing/testing.db").unwrap();
     sqlite_conn
