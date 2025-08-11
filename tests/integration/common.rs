@@ -153,7 +153,7 @@ pub fn maybe_setup_tracing() {
     let _ = tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
-                .with_ansi(false)
+                .with_ansi(true)
                 .with_line_number(true)
                 .with_thread_ids(true),
         )

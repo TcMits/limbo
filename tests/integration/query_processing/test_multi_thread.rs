@@ -196,3 +196,41 @@ fn test_reader_writer() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn test_schema_reprepare_write() {
+    maybe_setup_tracing();
+    let tmp_db = TempDatabase::new_empty(false);
+    let conn1 = tmp_db.connect_limbo();
+    conn1.execute("CREATE TABLE t(x, y, z)").unwrap();
+    let conn2 = tmp_db.connect_limbo();
+    let mut stmt = conn2.prepare("INSERT INTO t(y, z) VALUES (1, 2)").unwrap();
+    let mut stmt2 = conn2.prepare("INSERT INTO t(y, z) VALUES (3, 4)").unwrap();
+    conn1.execute("ALTER TABLE t DROP COLUMN x").unwrap();
+
+    tracing::info!("Executing Stmt 1");
+    loop {
+        match stmt.step().unwrap() {
+            turso_core::StepResult::Done => {
+                break;
+            }
+            turso_core::StepResult::IO => {
+                stmt.run_once().unwrap();
+            }
+            step => panic!("unexpected step result {step:?}"),
+        }
+    }
+
+    tracing::info!("Executing Stmt 2");
+    loop {
+        match stmt2.step().unwrap() {
+            turso_core::StepResult::Done => {
+                break;
+            }
+            turso_core::StepResult::IO => {
+                stmt2.run_once().unwrap();
+            }
+            step => panic!("unexpected step result {step:?}"),
+        }
+    }
+}
