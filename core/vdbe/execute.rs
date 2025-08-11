@@ -7172,6 +7172,49 @@ pub fn op_add_column(
     Ok(InsnFunctionStepResult::Step)
 }
 
+pub fn op_rename_column(
+    program: &Program,
+    state: &mut ProgramState,
+    insn: &Insn,
+    pager: &Rc<Pager>,
+    mv_store: Option<&Arc<MvStore>>,
+) -> Result<InsnFunctionStepResult> {
+    load_insn!(
+        RenameColumn {
+            table,
+            column_index,
+            name
+        },
+        insn
+    );
+
+    let conn = program.connection.clone();
+
+    conn.with_schema_mut(|schema| {
+        let table = schema
+            .tables
+            .get_mut(table)
+            .expect("table being renamed should be in schema");
+
+        let table = Arc::make_mut(table);
+
+        let Table::BTree(btree) = table else {
+            panic!("only btree tables can be renamed");
+        };
+
+        let btree = Arc::make_mut(btree);
+
+        let column = btree
+            .columns
+            .get_mut(*column_index)
+            .expect("renamed column should be in schema");
+        column.name = Some(name.to_owned());
+    });
+
+    state.pc += 1;
+    Ok(InsnFunctionStepResult::Step)
+}
+
 impl Value {
     pub fn exec_lower(&self) -> Option<Self> {
         match self {

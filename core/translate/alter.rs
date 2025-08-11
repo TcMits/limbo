@@ -233,7 +233,7 @@ pub fn translate_alter_table(
             let rename_from = old.as_str();
             let rename_to = new.as_str();
 
-            if btree.get_column(rename_from).is_none() {
+            let Some((column_index, _)) = btree.get_column(rename_from) else {
                 return Err(LimboError::ParseError(format!(
                     "no such column: \"{rename_from}\""
                 )));
@@ -312,9 +312,10 @@ pub fn translate_alter_table(
                 value: schema.schema_version as i32 + 1,
                 p5: 0,
             });
-            program.emit_insn(Insn::ParseSchema {
-                db: usize::MAX, // TODO: This value is unused, change when we do something with it
-                where_clause: None,
+            program.emit_insn(Insn::RenameColumn {
+                table: table_name.to_owned(),
+                column_index,
+                name: rename_to.to_owned(),
             });
 
             program
