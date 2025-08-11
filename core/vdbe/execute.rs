@@ -5317,8 +5317,6 @@ pub fn op_insert(
     }
 
     state.op_insert_state.sub_state = OpInsertSubState::MaybeCaptureRecord;
-    let prev_changes = program.n_change.get();
-    program.n_change.set(prev_changes + 1);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
