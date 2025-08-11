@@ -67,7 +67,13 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/tursodatabase/turso/releases/latest/download/turso_cli-installer.sh | sh
 ```
 
-Then launch the shell to execute SQL statements:
+Then launch the interactive shell:
+
+```shell
+$ turso
+```
+
+This will start the Turso interactive shell where you can execute SQL statements:
 
 ```console
 Turso
