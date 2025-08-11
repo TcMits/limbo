@@ -194,7 +194,7 @@ impl IncrementalView {
     ) -> Result<Self> {
         let name = view_name.name.as_str().to_string();
 
-        let where_predicate = FilterPredicate::from_select(&select);
+        let where_predicate = FilterPredicate::from_select(&select)?;
 
         // Extract output columns using the shared function
         let view_columns = extract_view_columns(&select, schema);

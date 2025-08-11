@@ -237,97 +237,104 @@ pub enum FilterPredicate {
 impl FilterPredicate {
     /// Parse a SQL AST expression into a FilterPredicate
     /// This centralizes all SQL-to-predicate parsing logic
-    pub fn from_sql_expr(expr: &turso_sqlite3_parser::ast::Expr) -> Self {
+    pub fn from_sql_expr(expr: &turso_sqlite3_parser::ast::Expr) -> crate::Result<Self> {
         use turso_sqlite3_parser::ast::*;
 
-        if let Expr::Binary(lhs, op, rhs) = expr {
-            // Handle AND/OR logical operators
-            match op {
-                Operator::And => {
-                    let left = Self::from_sql_expr(lhs);
-                    let right = Self::from_sql_expr(rhs);
-                    return FilterPredicate::And(Box::new(left), Box::new(right));
-                }
-                Operator::Or => {
-                    let left = Self::from_sql_expr(lhs);
-                    let right = Self::from_sql_expr(rhs);
-                    return FilterPredicate::Or(Box::new(left), Box::new(right));
-                }
-                _ => {}
+        let Expr::Binary(lhs, op, rhs) = expr else {
+            return Err(crate::LimboError::ParseError(
+                "Unsupported WHERE clause for incremental views: not a binary expression"
+                    .to_string(),
+            ));
+        };
+
+        // Handle AND/OR logical operators
+        match op {
+            Operator::And => {
+                let left = Self::from_sql_expr(lhs)?;
+                let right = Self::from_sql_expr(rhs)?;
+                return Ok(FilterPredicate::And(Box::new(left), Box::new(right)));
             }
-
-            // Handle comparison operators
-            if let Expr::Id(column_name) = &**lhs {
-                let column = column_name.as_str().to_string();
-
-                // Parse the right-hand side value
-                let value = match &**rhs {
-                    Expr::Literal(Literal::String(s)) => {
-                        // Strip quotes from string literals
-                        let cleaned = s.trim_matches('\'').trim_matches('"');
-                        Value::Text(Text::new(cleaned))
-                    }
-                    Expr::Literal(Literal::Numeric(n)) => {
-                        // Try to parse as integer first, then float
-                        if let Ok(i) = n.parse::<i64>() {
-                            Value::Integer(i)
-                        } else if let Ok(f) = n.parse::<f64>() {
-                            Value::Float(f)
-                        } else {
-                            return FilterPredicate::None;
-                        }
-                    }
-                    Expr::Literal(Literal::Null) => Value::Null,
-                    Expr::Literal(Literal::Blob(_)) => {
-                        // Blob comparison not yet supported
-                        return FilterPredicate::None;
-                    }
-                    _ => {
-                        // Complex expressions not yet supported
-                        return FilterPredicate::None;
-                    }
-                };
-
-                // Create the appropriate predicate based on operator
-                match op {
-                    Operator::Equals => {
-                        return FilterPredicate::Equals { column, value };
-                    }
-                    Operator::NotEquals => {
-                        return FilterPredicate::NotEquals { column, value };
-                    }
-                    Operator::Greater => {
-                        return FilterPredicate::GreaterThan { column, value };
-                    }
-                    Operator::GreaterEquals => {
-                        return FilterPredicate::GreaterThanOrEqual { column, value };
-                    }
-                    Operator::Less => {
-                        return FilterPredicate::LessThan { column, value };
-                    }
-                    Operator::LessEquals => {
-                        return FilterPredicate::LessThanOrEqual { column, value };
-                    }
-                    _ => {}
-                }
+            Operator::Or => {
+                let left = Self::from_sql_expr(lhs)?;
+                let right = Self::from_sql_expr(rhs)?;
+                return Ok(FilterPredicate::Or(Box::new(left), Box::new(right)));
             }
+            _ => {}
         }
 
-        // Default to None for unsupported expressions
-        FilterPredicate::None
+        // Handle comparison operators
+        let Expr::Id(column_name) = &**lhs else {
+            return Err(crate::LimboError::ParseError(
+                "Unsupported WHERE clause for incremental views: left-hand-side is not a column reference".to_string(),
+            ));
+        };
+
+        let column = column_name.as_str().to_string();
+
+        // Parse the right-hand side value
+        let value = match &**rhs {
+            Expr::Literal(Literal::String(s)) => {
+                // Strip quotes from string literals
+                let cleaned = s.trim_matches('\'').trim_matches('"');
+                Value::Text(Text::new(cleaned))
+            }
+            Expr::Literal(Literal::Numeric(n)) => {
+                // Try to parse as integer first, then float
+                if let Ok(i) = n.parse::<i64>() {
+                    Value::Integer(i)
+                } else if let Ok(f) = n.parse::<f64>() {
+                    Value::Float(f)
+                } else {
+                    return Err(crate::LimboError::ParseError(
+                        "Unsupported WHERE clause for incremental views: right-hand-side is not a numeric literal".to_string(),
+                    ));
+                }
+            }
+            Expr::Literal(Literal::Null) => Value::Null,
+            Expr::Literal(Literal::Blob(_)) => {
+                // Blob comparison not yet supported
+                return Err(crate::LimboError::ParseError(
+                    "Unsupported WHERE clause for incremental views: comparison with blob literals is not supported".to_string(),
+                ));
+            }
+            other => {
+                // Complex expressions not yet supported
+                return Err(crate::LimboError::ParseError(
+                    format!("Unsupported WHERE clause for incremental views: comparison with {other:?} is not supported"),
+                ));
+            }
+        };
+
+        // Create the appropriate predicate based on operator
+        match op {
+            Operator::Equals => Ok(FilterPredicate::Equals { column, value }),
+            Operator::NotEquals => Ok(FilterPredicate::NotEquals { column, value }),
+            Operator::Greater => Ok(FilterPredicate::GreaterThan { column, value }),
+            Operator::GreaterEquals => Ok(FilterPredicate::GreaterThanOrEqual { column, value }),
+            Operator::Less => Ok(FilterPredicate::LessThan { column, value }),
+            Operator::LessEquals => Ok(FilterPredicate::LessThanOrEqual { column, value }),
+            other => Err(crate::LimboError::ParseError(
+                format!("Unsupported WHERE clause for incremental views: comparison operator {other:?} is not supported"),
+            )),
+        }
     }
 
     /// Parse a WHERE clause from a SELECT statement
-    pub fn from_select(select: &turso_sqlite3_parser::ast::Select) -> Self {
+    pub fn from_select(select: &turso_sqlite3_parser::ast::Select) -> crate::Result<Self> {
         use turso_sqlite3_parser::ast::*;
 
         if let OneSelect::Select(select_stmt) = &*select.body.select {
             if let Some(where_clause) = &select_stmt.where_clause {
-                return Self::from_sql_expr(where_clause);
+                Self::from_sql_expr(where_clause)
+            } else {
+                Ok(FilterPredicate::None)
             }
+        } else {
+            Err(crate::LimboError::ParseError(
+                "Unsupported WHERE clause for incremental views: not a single SELECT statement"
+                    .to_string(),
+            ))
         }
-
-        FilterPredicate::None
     }
 }
 
