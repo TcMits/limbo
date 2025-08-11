@@ -1804,6 +1804,8 @@ pub enum PragmaName {
     DatabaseList,
     /// Encoding - only support utf8
     Encoding,
+    /// Current free page count.
+    FreelistCount,
     /// Run integrity check on the database file
     IntegrityCheck,
     /// `journal_mode` pragma
@@ -1828,8 +1830,6 @@ pub enum PragmaName {
     UserVersion,
     /// trigger a checkpoint to run on database(s) if WAL is enabled
     WalCheckpoint,
-    /// Current free page count.
-    FreelistCount,
 }
 
 /// `CREATE TRIGGER` time
