@@ -5301,24 +5301,29 @@ pub fn op_delete(
             LimboError::InternalError("Cannot delete: no current row".to_string())
         })?;
 
-        // Get the current record before deletion and extract values
-        let record_values = if let Some(record) = return_if_io!(cursor.record()) {
-            let mut values = record
-                .get_values()
-                .into_iter()
-                .map(|v| v.to_owned())
-                .collect::<Vec<_>>();
+        let schema = program.connection.schema.borrow();
+        let dependent_views = schema.get_dependent_views(table_name);
+        let record_values = if !dependent_views.is_empty() {
+            // Get the current record before deletion and extract values
+            if let Some(record) = return_if_io!(cursor.record()) {
+                let mut values = record
+                    .get_values()
+                    .into_iter()
+                    .map(|v| v.to_owned())
+                    .collect::<Vec<_>>();
 
-            // Fix rowid alias columns: replace Null with actual rowid value
-            let schema = program.connection.schema.borrow();
-            if let Some(table) = schema.get_table(table_name) {
-                for (i, col) in table.columns().iter().enumerate() {
-                    if col.is_rowid_alias && i < values.len() {
-                        values[i] = Value::Integer(key);
+                // Fix rowid alias columns: replace Null with actual rowid value
+                if let Some(table) = schema.get_table(table_name) {
+                    for (i, col) in table.columns().iter().enumerate() {
+                        if col.is_rowid_alias && i < values.len() {
+                            values[i] = Value::Integer(key);
+                        }
                     }
                 }
+                Some(values)
+            } else {
+                None
             }
-            Some(values)
         } else {
             None
         };
