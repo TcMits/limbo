@@ -5140,7 +5140,10 @@ pub fn op_insert(
             OpInsertSubState::MaybeCaptureRecord => {
                 let schema = program.connection.schema.borrow();
                 let dependent_views = schema.get_dependent_views(table_name);
-                if dependent_views.is_empty() || !flag.has(InsertFlags::UPDATE_ROWID_CHANGE) {
+                // If there are no dependent views, we don't need to capture the old record.
+                // We also don't need to do it if the rowid of the UPDATEd row was changed, because that means
+                // we deleted it earlier and `op_delete` already captured the change.
+                if dependent_views.is_empty() || flag.has(InsertFlags::UPDATE_ROWID_CHANGE) {
                     state.op_insert_state.sub_state = OpInsertSubState::Insert;
                     continue;
                 }
