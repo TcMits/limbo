@@ -126,7 +126,7 @@ Turso aims to be fully compatible with SQLite, with opt-in features not supporte
 | PRAGMA foreign_key_check         | No         |                                              |
 | PRAGMA foreign_key_list          | No         |                                              |
 | PRAGMA foreign_keys              | No         |                                              |
-| PRAGMA freelist_count            | No         |                                              |
+| PRAGMA freelist_count            | Yes        |                                              |
 | PRAGMA full_column_names         | Not Needed | deprecated in SQLite                         |
 | PRAGMA fullsync                  | No         |                                              |
 | PRAGMA function_list             | No         |                                              |
@@ -140,7 +140,7 @@ Turso aims to be fully compatible with SQLite, with opt-in features not supporte
 | PRAGMA journal_mode              | Yes        |                                              |
 | PRAGMA journal_size_limit        | No         |                                              |
 | PRAGMA legacy_alter_table        | No         |                                              |
-| PRAGMA legacy_file_format         | Yes        |                                              |
+| PRAGMA legacy_file_format        | Yes        |                                              |
 | PRAGMA locking_mode              | No         |                                              |
 | PRAGMA max_page_count            | Yes        |                                              |
 | PRAGMA mmap_size                 | No         |                                              |
