@@ -714,12 +714,17 @@ pub(crate) fn commit_tx(
     let mut sm = mv_store
         .commit_tx(tx_id, conn.pager.borrow().clone(), conn)
         .unwrap();
-    let result = sm.step(&mv_store)?;
-    assert!(sm.is_finalized());
-    match result {
-        TransitionResult::Done(()) => Ok(()),
-        _ => unreachable!(),
+    // TODO: sync IO hack
+    loop {
+        let res = sm.step(&mv_store)?;
+        match res {
+            crate::state_machine::TransitionResult::Io => {}
+            crate::state_machine::TransitionResult::Continue => continue,
+            crate::state_machine::TransitionResult::Done(_) => break,
+        }
     }
+    assert!(sm.is_finalized());
+    Ok(())
 }
 
 pub(crate) fn commit_tx_no_conn(
@@ -727,18 +732,21 @@ pub(crate) fn commit_tx_no_conn(
     tx_id: u64,
     conn: &Arc<Connection>,
 ) -> Result<(), LimboError> {
-    let mut sm = db
-        .get_db()
-        .get_mv_store()
-        .unwrap()
+    let mv_store = db.get_mvcc_store();
+    let mut sm = mv_store
         .commit_tx(tx_id, conn.pager.borrow().clone(), conn)
         .unwrap();
-    let result = sm.step(&db.get_mvcc_store())?;
-    assert!(sm.is_finalized());
-    match result {
-        TransitionResult::Done(()) => Ok(()),
-        _ => unreachable!(),
+    // TODO: sync IO hack
+    loop {
+        let res = sm.step(&mv_store)?;
+        match res {
+            crate::state_machine::TransitionResult::Io => {}
+            crate::state_machine::TransitionResult::Continue => continue,
+            crate::state_machine::TransitionResult::Done(_) => break,
+        }
     }
+    assert!(sm.is_finalized());
+    Ok(())
 }
 
 #[test]

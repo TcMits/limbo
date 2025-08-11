@@ -5,6 +5,7 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use pprof::criterion::{Output, PProfProfiler};
 use turso_core::mvcc::clock::LocalClock;
 use turso_core::mvcc::database::{MvStore, Row, RowID};
+use turso_core::state_machine::{StateTransition, TransitionResult};
 use turso_core::types::{ImmutableRecord, Text};
 use turso_core::{Connection, Database, MemoryIO, Value};
 
@@ -30,7 +31,6 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("mvcc-ops-throughput");
     group.throughput(Throughput::Elements(1));
 
-    let db = bench_db();
     group.bench_function("begin_tx + rollback_tx", |b| {
         let db = bench_db();
         b.to_async(FuturesExecutor).iter(|| async {
@@ -45,8 +45,19 @@ fn bench(c: &mut Criterion) {
         b.to_async(FuturesExecutor).iter(|| async {
             let conn = &db.conn;
             let tx_id = db.mvcc_store.begin_tx(conn.get_pager().clone());
-            db.mvcc_store
+            let mv_store = &db.mvcc_store;
+            let mut sm = mv_store
                 .commit_tx(tx_id, conn.get_pager().clone(), conn)
+                .unwrap();
+            // TODO: sync IO hack
+            loop {
+                let res = sm.step(mv_store).unwrap();
+                match res {
+                    TransitionResult::Io => {}
+                    TransitionResult::Continue => continue,
+                    TransitionResult::Done(_) => break,
+                }
+            }
         })
     });
 
@@ -64,8 +75,19 @@ fn bench(c: &mut Criterion) {
                     },
                 )
                 .unwrap();
-            db.mvcc_store
+            let mv_store = &db.mvcc_store;
+            let mut sm = mv_store
                 .commit_tx(tx_id, conn.get_pager().clone(), conn)
+                .unwrap();
+            // TODO: sync IO hack
+            loop {
+                let res = sm.step(mv_store).unwrap();
+                match res {
+                    TransitionResult::Io => {}
+                    TransitionResult::Continue => continue,
+                    TransitionResult::Done(_) => break,
+                }
+            }
         })
     });
 
@@ -90,9 +112,19 @@ fn bench(c: &mut Criterion) {
                     conn.get_pager().clone(),
                 )
                 .unwrap();
-            db.mvcc_store
+            let mv_store = &db.mvcc_store;
+            let mut sm = mv_store
                 .commit_tx(tx_id, conn.get_pager().clone(), conn)
                 .unwrap();
+            // TODO: sync IO hack
+            loop {
+                let res = sm.step(mv_store).unwrap();
+                match res {
+                    TransitionResult::Io => {}
+                    TransitionResult::Continue => continue,
+                    TransitionResult::Done(_) => break,
+                }
+            }
         })
     });
 
