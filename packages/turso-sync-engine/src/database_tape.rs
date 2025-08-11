@@ -444,10 +444,10 @@ impl DatabaseReplaySession {
                         DatabaseTapeRowChangeType::Delete { before } => {
                             let before = parse_bin_record(before)?;
                             assert!(before.len() == 5);
-                            let Some(turso_core::Value::Text(entity_type)) = before.get(0) else {
+                            let Some(turso_core::Value::Text(entity_type)) = before.first() else {
                                 panic!(
                                     "unexpected 'type' column of sqlite_schema table: {:?}",
-                                    before.get(0)
+                                    before.first()
                                 );
                             };
                             let Some(turso_core::Value::Text(entity_name)) = before.get(1) else {
@@ -475,9 +475,9 @@ impl DatabaseReplaySession {
                         }
                         DatabaseTapeRowChangeType::Update { updates, .. } => {
                             let Some(updates) = updates else {
-                                return Err(Error::DatabaseTapeError(format!(
-                                    "'updates' column of CDC table must be populated"
-                                )));
+                                return Err(Error::DatabaseTapeError(
+                                    "'updates' column of CDC table must be populated".to_string(),
+                                ));
                             };
                             let updates = parse_bin_record(updates)?;
                             assert!(updates.len() % 2 == 0);
@@ -514,7 +514,7 @@ impl DatabaseReplaySession {
                                     if i < columns_cnt {
                                         columns.push(match value {
                                             turso_core::Value::Integer(x @ (1 | 0)) => x > 0,
-                                            _ => panic!("unexpected 'changes' binary record first-half component: {:?}", value)
+                                            _ => panic!("unexpected 'changes' binary record first-half component: {value:?}")
                                         })
                                     } else {
                                         values.push(value);
@@ -666,12 +666,12 @@ impl DatabaseReplaySession {
         &mut self,
         coro: &Coro,
         table_name: &str,
-        columns: &Vec<bool>,
+        columns: &[bool],
     ) -> Result<&mut UpdateCachedStmt> {
-        let key = (table_name.to_string(), columns.clone());
+        let key = (table_name.to_string(), columns.to_owned());
         if !self.cached_update_stmt.contains_key(&key) {
             tracing::trace!("prepare update statement for replay: table={}", table_name);
-            let stmt = self.update_query(coro, table_name, &columns).await?;
+            let stmt = self.update_query(coro, table_name, columns).await?;
             self.cached_update_stmt.insert(key.clone(), stmt);
         }
         tracing::trace!(
