@@ -1016,9 +1016,10 @@ pub fn write_pages_vectored(
             });
 
             // Submit write operation for this run, decrementing the counter if we error
-            if let Err(e) = pager
-                .db_file
-                .write_pages(start_id, page_sz, run_bufs.clone(), c)
+            if let Err(e) =
+                pager
+                    .db_file
+                    .write_pages(start_id, page_sz, std::mem::take(&mut run_bufs), c)
             {
                 if runs_left.fetch_sub(1, Ordering::AcqRel) == 1 {
                     done.store(true, Ordering::Release);
