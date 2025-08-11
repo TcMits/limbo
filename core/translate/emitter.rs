@@ -1189,9 +1189,9 @@ fn emit_update_insns(
             flag: if has_user_provided_rowid {
                 // The previous Insn::NotExists and Insn::Delete seek to the old rowid,
                 // so to insert a new user-provided rowid, we need to seek to the correct place.
-                InsertFlags::new().require_seek().update()
+                InsertFlags::new().require_seek().update_rowid_change()
             } else {
-                InsertFlags::new().update()
+                InsertFlags::new()
             },
             table_name: table_ref.identifier.clone(),
         });

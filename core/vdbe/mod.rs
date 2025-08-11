@@ -33,7 +33,8 @@ use crate::{
     translate::plan::TableReferences,
     types::{IOResult, RawSlice, TextRef},
     vdbe::execute::{
-        OpIdxInsertState, OpInsertState, OpNewRowidState, OpNoConflictState, OpSeekState,
+        OpIdxInsertState, OpInsertState, OpInsertSubState, OpNewRowidState, OpNoConflictState,
+        OpSeekState,
     },
     RefValue,
 };
@@ -291,7 +292,10 @@ impl ProgramState {
             op_open_ephemeral_state: OpOpenEphemeralState::Start,
             op_new_rowid_state: OpNewRowidState::Start,
             op_idx_insert_state: OpIdxInsertState::SeekIfUnique,
-            op_insert_state: OpInsertState::Insert,
+            op_insert_state: OpInsertState {
+                sub_state: OpInsertSubState::MaybeCaptureRecord,
+                old_record: None,
+            },
             op_no_conflict_state: OpNoConflictState::Start,
             seek_state: OpSeekState::Start,
             current_collation: None,

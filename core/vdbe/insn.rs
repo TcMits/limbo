@@ -107,7 +107,7 @@ impl IdxInsertFlags {
 pub struct InsertFlags(pub u8);
 
 impl InsertFlags {
-    pub const UPDATE: u8 = 0x01; // Flag indicating this is part of an UPDATE statement
+    pub const UPDATE_ROWID_CHANGE: u8 = 0x01; // Flag indicating this is part of an UPDATE statement where the row's rowid is changed
     pub const REQUIRE_SEEK: u8 = 0x02; // Flag indicating that a seek is required to insert the row
 
     pub fn new() -> Self {
@@ -123,8 +123,8 @@ impl InsertFlags {
         self
     }
 
-    pub fn update(mut self) -> Self {
-        self.0 |= InsertFlags::UPDATE;
+    pub fn update_rowid_change(mut self) -> Self {
+        self.0 |= InsertFlags::UPDATE_ROWID_CHANGE;
         self
     }
 }
