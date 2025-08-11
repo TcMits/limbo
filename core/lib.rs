@@ -40,7 +40,6 @@ pub mod numeric;
 #[cfg(not(feature = "fuzz"))]
 mod numeric;
 
-use crate::{incremental::view::ViewTransactionState, schema::Table};
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::pragma::TURSO_CDC_DEFAULT_TABLE_NAME;
 #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
@@ -48,6 +47,7 @@ use crate::types::WalFrameInfo;
 #[cfg(feature = "fs")]
 use crate::util::{OpenMode, OpenOptions};
 use crate::vtab::VirtualTable;
+use crate::{incremental::view::ViewTransactionState, schema::Table};
 use core::str;
 pub use error::LimboError;
 use fallible_iterator::FallibleIterator;
