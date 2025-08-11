@@ -1450,8 +1450,6 @@ impl WalFile {
                     }
                 }
                 CheckpointState::AccumulatePage => {
-                    // mark before batching
-                    self.ongoing_checkpoint.scratch_page.set_dirty();
                     // we read the frame into memory, add it to our batch
                     self.ongoing_checkpoint
                         .batch
@@ -1573,7 +1571,6 @@ impl WalFile {
                     } else {
                         let _ = self.checkpoint_guard.take();
                     }
-                    self.ongoing_checkpoint.scratch_page.clear_dirty();
                     self.ongoing_checkpoint.scratch_page.get().id = 0;
                     self.ongoing_checkpoint.scratch_page.get().contents = None;
                     self.ongoing_checkpoint.pending_flush.clear();
