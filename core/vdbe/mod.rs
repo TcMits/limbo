@@ -32,8 +32,8 @@ use crate::{
     translate::{collate::CollationSeq, plan::TableReferences},
     types::{IOResult, RawSlice, TextRef},
     vdbe::execute::{
-        OpDeleteState, OpDeleteSubState, OpIdxInsertState, OpInsertState, OpInsertSubState,
-        OpNewRowidState, OpNoConflictState, OpSeekState,
+        OpColumnState, OpDeleteState, OpDeleteSubState, OpIdxInsertState, OpInsertState,
+        OpInsertSubState, OpNewRowidState, OpNoConflictState, OpSeekState,
     },
     RefValue,
 };
@@ -264,6 +264,7 @@ pub struct ProgramState {
     seek_state: OpSeekState,
     /// Current collation sequence set by OP_CollSeq instruction
     current_collation: Option<CollationSeq>,
+    op_column_state: OpColumnState,
 }
 
 impl ProgramState {
@@ -303,6 +304,7 @@ impl ProgramState {
             op_no_conflict_state: OpNoConflictState::Start,
             seek_state: OpSeekState::Start,
             current_collation: None,
+            op_column_state: OpColumnState::Start,
         }
     }
 
