@@ -11,13 +11,21 @@ git clone git@github.com:penberg/Mobibench.git
 2. Build Mobibench:
 
 ```console
-cd shell
-LIBS="../turso/target/release/libturso_sqlite3.a -m" make
+cd Mobibench/shell
+LIBS="../../target/release/libturso_sqlite3.a -lm" make
+mv mobibench mobibench-turso
 ```
 
 3. Run Mobibench:
 
+(easiest way is to `cd` into `target/release`)
+
 ```console
+# with strace, from target/release
+
+strace -f -c ../../Mobibench/shell/mobibench-turso -f 1024 -r 4 -a 0 -y 0 -t 1 -d 0 -n 10000 -j 3 -s 2 -T 3 -D 1
+
+
 ./mobibench -p <benchmark-directory> -n 1000 -d 0 -j 4
 ```
 
