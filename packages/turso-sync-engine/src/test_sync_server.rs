@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use tokio::sync::Mutex;
 
@@ -33,6 +37,7 @@ struct TestSyncServerState {
 
 #[derive(Clone)]
 pub struct TestSyncServer {
+    path: PathBuf,
     ctx: Arc<TestContext>,
     db: turso::Database,
     state: Arc<Mutex<TestSyncServerState>>,
@@ -49,6 +54,7 @@ impl TestSyncServer {
             },
         );
         Ok(Self {
+            path: path.to_path_buf(),
             ctx,
             db: turso::Builder::new_local(path.to_str().unwrap())
                 .build()
@@ -262,6 +268,25 @@ impl TestSyncServer {
 
     pub fn db(&self) -> turso::Database {
         self.db.clone()
+    }
+    pub async fn checkpoint(&self) -> Result<()> {
+        let conn = self.db.connect()?;
+        let _ = conn.query("PRAGMA wal_checkpoint(TRUNCATE)", ()).await?;
+        let mut state = self.state.lock().await;
+        let generation = state.generation + 1;
+        state.generation = generation;
+        state.generations.insert(
+            generation,
+            Generation {
+                snapshot: std::fs::read(&self.path).map_err(|e| {
+                    Error::DatabaseSyncEngineError(format!(
+                        "failed to create generation snapshot: {e}"
+                    ))
+                })?,
+                frames: Vec::new(),
+            },
+        );
+        Ok(())
     }
     pub async fn execute(&self, sql: &str, params: impl turso::IntoParams) -> Result<()> {
         let conn = self.db.connect()?;
