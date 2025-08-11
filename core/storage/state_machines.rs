@@ -42,3 +42,11 @@ pub enum SeekEndState {
     Start,
     ProcessPage,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum InsertState {
+    Start,
+    Seek,
+    Advance,
+    InsertIntoPage,
+}

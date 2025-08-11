@@ -10,8 +10,8 @@ use crate::{
             LEAF_PAGE_HEADER_SIZE_BYTES, LEFT_CHILD_PTR_SIZE_BYTES,
         },
         state_machines::{
-            AdvanceState, CountState, EmptyTableState, MoveToRightState, RewindState, SeekEndState,
-            SeekToLastState,
+            AdvanceState, CountState, EmptyTableState, InsertState, MoveToRightState, RewindState,
+            SeekEndState, SeekToLastState,
         },
     },
     translate::plan::IterationDirection,
@@ -558,6 +558,8 @@ pub struct BTreeCursor {
     count_state: CountState,
     /// State machine for [BTreeCursor::seek_end]
     seek_end_state: SeekEndState,
+    /// State machine for [BTreeCursor::insert]
+    insert_state: InsertState,
 }
 
 /// We store the cell index and cell count for each page in the stack.
@@ -624,6 +626,7 @@ impl BTreeCursor {
             advance_state: AdvanceState::Start,
             count_state: CountState::Start,
             seek_end_state: SeekEndState::Start,
+            insert_state: InsertState::Start,
         }
     }
 
@@ -4444,61 +4447,89 @@ impl BTreeCursor {
                 None => todo!("Support mvcc inserts with index btrees"),
             },
             None => {
-                match (&self.valid_state, self.is_write_in_progress()) {
-                    (CursorValidState::Valid, _) => {
-                        // consider the current position valid unless the caller explicitly asks us to seek.
-                    }
-                    (CursorValidState::RequireSeek, false) => {
-                        // we must seek.
-                        moved_before = false;
-                    }
-                    (CursorValidState::RequireSeek, true) => {
-                        // illegal to seek during a write no matter what CursorValidState or caller says -- we might e.g. move to the wrong page during balancing
-                        moved_before = true;
-                    }
-                    (CursorValidState::RequireAdvance(direction), _) => {
-                        // FIXME: this is a hack to support the case where we need to advance the cursor after a seek.
-                        // We should have a proper state machine for this.
-                        return_if_io!(match direction {
-                            IterationDirection::Forwards => self.next(),
-                            IterationDirection::Backwards => self.prev(),
-                        });
-                        self.valid_state = CursorValidState::Valid;
-                        self.seek_state = CursorSeekState::Start;
-                        moved_before = true;
-                    }
-                };
-                if !moved_before {
-                    let seek_result = match key {
-                        BTreeKey::IndexKey(_) => {
-                            return_if_io!(self.seek(
-                                SeekKey::IndexKey(key.get_record().unwrap()),
-                                SeekOp::GE { eq_only: true }
-                            ))
+                loop {
+                    let state = self.insert_state;
+                    match state {
+                        InsertState::Start => {
+                            match (&self.valid_state, self.is_write_in_progress()) {
+                                (CursorValidState::Valid, _) => {
+                                    // consider the current position valid unless the caller explicitly asks us to seek.
+                                }
+                                (CursorValidState::RequireSeek, false) => {
+                                    // we must seek.
+                                    moved_before = false;
+                                }
+                                (CursorValidState::RequireSeek, true) => {
+                                    // illegal to seek during a write no matter what CursorValidState or caller says -- we might e.g. move to the wrong page during balancing
+                                    moved_before = true;
+                                }
+                                (CursorValidState::RequireAdvance(direction), _) => {
+                                    // FIXME: this is a hack to support the case where we need to advance the cursor after a seek.
+                                    // We should have a proper state machine for this.
+                                    return_if_io!(match direction {
+                                        IterationDirection::Forwards => self.next(),
+                                        IterationDirection::Backwards => self.prev(),
+                                    });
+                                    self.valid_state = CursorValidState::Valid;
+                                    self.seek_state = CursorSeekState::Start;
+                                    moved_before = true;
+                                }
+                            };
+                            if !moved_before {
+                                self.insert_state = InsertState::Seek;
+                            } else {
+                                self.insert_state = InsertState::InsertIntoPage;
+                            }
                         }
-                        BTreeKey::TableRowId(_) => {
-                            return_if_io!(self.seek(
-                                SeekKey::TableRowId(key.to_rowid()),
-                                SeekOp::GE { eq_only: true }
-                            ))
+                        InsertState::Seek => {
+                            let seek_result = match key {
+                                BTreeKey::IndexKey(_) => {
+                                    return_if_io!(self.seek(
+                                        SeekKey::IndexKey(key.get_record().unwrap()),
+                                        SeekOp::GE { eq_only: true }
+                                    ))
+                                }
+                                BTreeKey::TableRowId(_) => {
+                                    return_if_io!(self.seek(
+                                        SeekKey::TableRowId(key.to_rowid()),
+                                        SeekOp::GE { eq_only: true }
+                                    ))
+                                }
+                            };
+                            if SeekResult::TryAdvance == seek_result {
+                                self.valid_state =
+                                    CursorValidState::RequireAdvance(IterationDirection::Forwards);
+                                self.insert_state = InsertState::Advance;
+                            }
+                            self.context.take(); // we know where we wanted to move so if there was any saved context, discard it.
+                            self.valid_state = CursorValidState::Valid;
+                            self.seek_state = CursorSeekState::Start;
+                            tracing::debug!(
+                                "seeked to the right place, page is now {:?}",
+                                self.stack.top().get().get().id
+                            );
+                            self.insert_state = InsertState::InsertIntoPage;
                         }
-                    };
-                    if SeekResult::TryAdvance == seek_result {
-                        self.valid_state =
-                            CursorValidState::RequireAdvance(IterationDirection::Forwards);
-                        return_if_io!(self.next());
+                        InsertState::Advance => {
+                            return_if_io!(self.next());
+                            self.context.take(); // we know where we wanted to move so if there was any saved context, discard it.
+                            self.valid_state = CursorValidState::Valid;
+                            self.seek_state = CursorSeekState::Start;
+                            tracing::debug!(
+                                "seeked to the right place, page is now {:?}",
+                                self.stack.top().get().get().id
+                            );
+                            self.insert_state = InsertState::InsertIntoPage;
+                        }
+                        InsertState::InsertIntoPage => {
+                            return_if_io!(self.insert_into_page(key));
+                            if key.maybe_rowid().is_some() {
+                                self.has_record.replace(true);
+                            }
+                            self.insert_state = InsertState::Start;
+                            break;
+                        }
                     }
-                    self.context.take(); // we know where we wanted to move so if there was any saved context, discard it.
-                    self.valid_state = CursorValidState::Valid;
-                    self.seek_state = CursorSeekState::Start;
-                    tracing::debug!(
-                        "seeked to the right place, page is now {:?}",
-                        self.stack.top().get().get().id
-                    );
-                }
-                return_if_io!(self.insert_into_page(key));
-                if key.maybe_rowid().is_some() {
-                    self.has_record.replace(true);
                 }
             }
         };
