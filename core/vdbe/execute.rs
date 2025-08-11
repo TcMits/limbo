@@ -5291,19 +5291,18 @@ pub fn op_delete(
     );
 
     // Capture row data before deletion for view updates
-    let (key, record_values) = {
+    let record_key_and_values = {
         let mut cursor = state.get_cursor(*cursor_id);
         let cursor = cursor.as_btree_mut();
 
-        // Get the current key
-        let maybe_key = return_if_io!(cursor.rowid());
-        let key = maybe_key.ok_or_else(|| {
-            LimboError::InternalError("Cannot delete: no current row".to_string())
-        })?;
-
         let schema = program.connection.schema.borrow();
         let dependent_views = schema.get_dependent_views(table_name);
-        let record_values = if !dependent_views.is_empty() {
+        let result = if !dependent_views.is_empty() {
+            // Get the current key
+            let maybe_key = return_if_io!(cursor.rowid());
+            let key = maybe_key.ok_or_else(|| {
+                LimboError::InternalError("Cannot delete: no current row".to_string())
+            })?;
             // Get the current record before deletion and extract values
             if let Some(record) = return_if_io!(cursor.record()) {
                 let mut values = record
@@ -5320,7 +5319,7 @@ pub fn op_delete(
                         }
                     }
                 }
-                Some(values)
+                Some((key, values))
             } else {
                 None
             }
@@ -5331,11 +5330,11 @@ pub fn op_delete(
         // Now perform the deletion
         return_if_io!(cursor.delete());
 
-        (key, record_values)
+        result
     };
 
     // Update dependent views for incremental computation
-    if let Some(values) = record_values {
+    if let Some((key, values)) = record_key_and_values {
         let schema = program.connection.schema.borrow();
         let dependent_views = schema.get_dependent_views(table_name);
         let mut tx_states = program.connection.view_transaction_states.borrow_mut();
