@@ -497,9 +497,15 @@ impl Program {
                 for tx_id in mv_transactions.iter() {
                     let mut state_machine =
                         mv_store.commit_tx(*tx_id, pager.clone(), &conn).unwrap();
-                    state_machine
-                        .step(mv_store)
-                        .map_err(|e| LimboError::InternalError(e.to_string()))?;
+                    // TODO: sync IO hack
+                    loop {
+                        let res = state_machine.step(mv_store)?;
+                        match res {
+                            crate::state_machine::TransitionResult::Io => {}
+                            crate::state_machine::TransitionResult::Continue => continue,
+                            crate::state_machine::TransitionResult::Done(_) => break,
+                        }
+                    }
                     assert!(state_machine.is_finalized());
                 }
                 mv_transactions.clear();

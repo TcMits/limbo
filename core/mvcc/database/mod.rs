@@ -1192,42 +1192,46 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                 IOResult::Done(Some(row_id)) => row_id,
                 IOResult::Done(None) => break,
                 IOResult::IO => {
-                    pager.io.run_once().unwrap();
+                    pager.io.run_once()?;
                     continue;
                 }
             };
-            match cursor
-                .record()
-                .map_err(|e| LimboError::InternalError(e.to_string()))?
-            {
-                IOResult::Done(Some(record)) => {
-                    let id = RowID { table_id, row_id };
-                    let column_count = record.column_count();
-                    // We insert row with 0 timestamp, because it's the only version we have on initialization.
-                    self.insert_version(
-                        id,
-                        RowVersion {
-                            begin: TxTimestampOrID::Timestamp(0),
-                            end: None,
-                            row: Row::new(id, record.get_payload().to_vec(), column_count),
-                        },
-                    );
+            'record: loop {
+                match cursor.record()? {
+                    IOResult::Done(Some(record)) => {
+                        let id = RowID { table_id, row_id };
+                        let column_count = record.column_count();
+                        // We insert row with 0 timestamp, because it's the only version we have on initialization.
+                        self.insert_version(
+                            id,
+                            RowVersion {
+                                begin: TxTimestampOrID::Timestamp(0),
+                                end: None,
+                                row: Row::new(id, record.get_payload().to_vec(), column_count),
+                            },
+                        );
+                        break 'record;
+                    }
+                    IOResult::Done(None) => break,
+                    IOResult::IO => {
+                        pager.io.run_once()?;
+                    } // FIXME: lazy me not wanting to do state machine right now
                 }
-                IOResult::Done(None) => break,
-                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
             }
 
             // Move to next record
-            match cursor
-                .next()
-                .map_err(|e| LimboError::InternalError(e.to_string()))?
-            {
-                IOResult::Done(has_next) => {
-                    if !has_next {
-                        break;
+            'next: loop {
+                match cursor.next()? {
+                    IOResult::Done(has_next) => {
+                        if !has_next {
+                            break;
+                        }
+                        break 'next;
                     }
+                    IOResult::IO => {
+                        pager.io.run_once()?;
+                    } // FIXME: lazy me not wanting to do state machine right now
                 }
-                IOResult::IO => unreachable!(), // FIXME: lazy me not wanting to do state machine right now
             }
         }
         Ok(())
