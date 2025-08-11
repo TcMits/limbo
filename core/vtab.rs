@@ -105,6 +105,7 @@ impl VirtualTable {
         let vtab = VirtualTable {
             name: view_name.to_owned(),
             columns,
+            module_name: Some(view_name.to_string()),
             kind: VTabKind::VirtualTable,
             vtab_type: VirtualTableType::View(crate::vtab_view::ViewVirtualTable { view }),
         };
