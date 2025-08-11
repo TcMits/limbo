@@ -335,9 +335,9 @@ impl FilterPredicate {
 pub enum ProjectColumn {
     /// Direct column reference
     Column(String),
-    /// Computed expression (simplified for now)
+    /// Computed expression
     Expression {
-        expr: String, // For now, just store as string
+        expr: turso_sqlite3_parser::ast::Expr,
         alias: Option<String>,
     },
 }
@@ -625,15 +625,155 @@ impl ProjectOperator {
                         output.push(Value::Null);
                     }
                 }
-                ProjectColumn::Expression { .. } => {
-                    // For now, just pass through a null
-                    // In a real implementation, we'd evaluate the expression
-                    output.push(Value::Null);
+                ProjectColumn::Expression { expr, .. } => {
+                    // Evaluate the expression
+                    let result = self.evaluate_expression(expr, values);
+                    output.push(result);
                 }
             }
         }
 
         output
+    }
+
+    fn evaluate_expression(
+        &self,
+        expr: &turso_sqlite3_parser::ast::Expr,
+        values: &[Value],
+    ) -> Value {
+        use turso_sqlite3_parser::ast::*;
+
+        match expr {
+            Expr::Id(name) => {
+                if let Some(idx) = self
+                    .input_column_names
+                    .iter()
+                    .position(|c| c == name.as_str())
+                {
+                    if let Some(v) = values.get(idx) {
+                        return v.clone();
+                    }
+                }
+                Value::Null
+            }
+            Expr::Literal(lit) => {
+                match lit {
+                    Literal::Numeric(n) => {
+                        if let Ok(i) = n.parse::<i64>() {
+                            Value::Integer(i)
+                        } else if let Ok(f) = n.parse::<f64>() {
+                            Value::Float(f)
+                        } else {
+                            Value::Null
+                        }
+                    }
+                    Literal::String(s) => {
+                        let cleaned = s.trim_matches('\'').trim_matches('"');
+                        Value::Text(Text::new(cleaned))
+                    }
+                    Literal::Null => Value::Null,
+                    Literal::Blob(_)
+                    | Literal::Keyword(_)
+                    | Literal::CurrentDate
+                    | Literal::CurrentTime
+                    | Literal::CurrentTimestamp => Value::Null, // Not supported yet
+                }
+            }
+            Expr::Binary(left, op, right) => {
+                let left_val = self.evaluate_expression(left, values);
+                let right_val = self.evaluate_expression(right, values);
+
+                match op {
+                    Operator::Add => match (&left_val, &right_val) {
+                        (Value::Integer(a), Value::Integer(b)) => Value::Integer(a + b),
+                        (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
+                        (Value::Integer(a), Value::Float(b)) => Value::Float(*a as f64 + b),
+                        (Value::Float(a), Value::Integer(b)) => Value::Float(a + *b as f64),
+                        _ => Value::Null,
+                    },
+                    Operator::Subtract => match (&left_val, &right_val) {
+                        (Value::Integer(a), Value::Integer(b)) => Value::Integer(a - b),
+                        (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
+                        (Value::Integer(a), Value::Float(b)) => Value::Float(*a as f64 - b),
+                        (Value::Float(a), Value::Integer(b)) => Value::Float(a - *b as f64),
+                        _ => Value::Null,
+                    },
+                    Operator::Multiply => match (&left_val, &right_val) {
+                        (Value::Integer(a), Value::Integer(b)) => Value::Integer(a * b),
+                        (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
+                        (Value::Integer(a), Value::Float(b)) => Value::Float(*a as f64 * b),
+                        (Value::Float(a), Value::Integer(b)) => Value::Float(a * *b as f64),
+                        _ => Value::Null,
+                    },
+                    Operator::Divide => match (&left_val, &right_val) {
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            if *b != 0 {
+                                Value::Integer(a / b)
+                            } else {
+                                Value::Null
+                            }
+                        }
+                        (Value::Float(a), Value::Float(b)) => {
+                            if *b != 0.0 {
+                                Value::Float(a / b)
+                            } else {
+                                Value::Null
+                            }
+                        }
+                        (Value::Integer(a), Value::Float(b)) => {
+                            if *b != 0.0 {
+                                Value::Float(*a as f64 / b)
+                            } else {
+                                Value::Null
+                            }
+                        }
+                        (Value::Float(a), Value::Integer(b)) => {
+                            if *b != 0 {
+                                Value::Float(a / *b as f64)
+                            } else {
+                                Value::Null
+                            }
+                        }
+                        _ => Value::Null,
+                    },
+                    _ => Value::Null, // Other operators not supported yet
+                }
+            }
+            Expr::FunctionCall { name, args, .. } => {
+                match name.as_str().to_lowercase().as_str() {
+                    "hex" => {
+                        if let Some(arg_list) = args {
+                            if arg_list.len() == 1 {
+                                let arg_val = self.evaluate_expression(&arg_list[0], values);
+                                match arg_val {
+                                    Value::Integer(i) => {
+                                        Value::Text(Text::new(&format!("{:X}", i)))
+                                    }
+                                    _ => Value::Null,
+                                }
+                            } else {
+                                Value::Null
+                            }
+                        } else {
+                            Value::Null
+                        }
+                    }
+                    _ => Value::Null, // Other functions not supported yet
+                }
+            }
+            Expr::Parenthesized(inner) => {
+                assert!(
+                    inner.len() <= 1,
+                    "Parenthesized expressions with multiple elements are not supported"
+                );
+                if !inner.is_empty() {
+                    self.evaluate_expression(&inner[0], values)
+                } else {
+                    Value::Null
+                }
+            }
+            _ => Value::Null, // Other expression types not supported yet
+        }
     }
 }
 

@@ -828,8 +828,25 @@ impl IncrementalView {
 
             for result_col in &select_stmt.columns {
                 match result_col {
-                    ResultColumn::Expr(Expr::Id(name), _) => {
-                        columns.push(ProjectColumn::Column(name.as_str().to_string()));
+                    ResultColumn::Expr(expr, alias) => {
+                        match expr {
+                            Expr::Id(name) => {
+                                // Simple column reference
+                                columns.push(ProjectColumn::Column(name.as_str().to_string()));
+                            }
+                            _ => {
+                                // Expression - store it for evaluation
+                                let alias_str = if let Some(As::As(alias_name)) = alias {
+                                    Some(alias_name.as_str().to_string())
+                                } else {
+                                    None
+                                };
+                                columns.push(ProjectColumn::Expression {
+                                    expr: expr.clone(),
+                                    alias: alias_str,
+                                });
+                            }
+                        }
                     }
                     ResultColumn::Star => {
                         // Select all columns
@@ -838,8 +855,7 @@ impl IncrementalView {
                         }
                     }
                     _ => {
-                        // For now, skip complex expressions
-                        // Could be extended to handle more cases
+                        // For now, skip TableStar and other cases
                     }
                 }
             }
