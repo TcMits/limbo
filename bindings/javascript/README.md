@@ -1,16 +1,29 @@
-# @tursodatabase/database
+<p align="center">
+  <h1 align="center">Turso Database for JavaScript</h1>
+</p>
 
-The next evolution of SQLite: A high-performance, SQLite-compatible database library for Node.js
+<p align="center">
+  <a title="JavaScript" target="_blank" href="https://www.npmjs.com/package/@tursodatabase/database"><img alt="npm" src="https://img.shields.io/npm/v/@tursodatabase/database"></a>
+  <a title="MIT" target="_blank" href="https://github.com/tursodatabase/turso/blob/main/LICENSE.md"><img src="http://img.shields.io/badge/license-MIT-orange.svg?style=flat-square"></a>
+</p>
+<p align="center">
+  <a title="Users Discord" target="_blank" href="https://tur.so/discord"><img alt="Chat with other users of Turso on Discord" src="https://img.shields.io/discord/933071162680958986?label=Discord&logo=Discord&style=social"></a>
+</p>
+
+---
+
+## About
+
+This package is the Turso in-memory database library for JavaScript.
+
+> **⚠️ Warning:** This software is ALPHA, only use for development, testing, and experimentation. We are working to make it production ready, but do not use it for critical data right now.
 
 ## Features
 
-- **SQLite Compatible**: Drop-in replacement for better-sqlite3 with familiar API
-- **High Performance**: Built with Rust for maximum speed and efficiency
-- **In-Process**: No network overhead, runs directly in your Node.js process
-- **TypeScript Support**: Full TypeScript definitions included
-- **Cross-Platform**: Supports Linux, macOS, Windows and browsers (through WebAssembly)
-- **Transaction Support**: Full ACID transactions with rollback support
-- **Prepared Statements**: Optimized query execution with parameter binding
+- **SQLite compatible:** SQLite query language and file format support ([status](https://github.com/tursodatabase/turso/blob/main/COMPAT.md)).
+- **In-process**: No network overhead, runs directly in your Node.js process
+- **TypeScript support**: Full TypeScript definitions included
+- **Cross-platform**: Supports Linux, macOS, Windows and browsers (through WebAssembly)
 
 ## Installation
 
@@ -18,15 +31,15 @@ The next evolution of SQLite: A high-performance, SQLite-compatible database lib
 npm install @tursodatabase/database
 ```
 
-## Quick Start
+## Getting Started
 
 ### In-Memory Database
 
 ```javascript
-import Database from '@tursodatabase/database';
+import { connect } from '@tursodatabase/database';
 
 // Create an in-memory database
-const db = new Database(':memory:');
+const db = await connect(':memory:');
 
 // Create a table
 db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)');
@@ -48,10 +61,10 @@ console.log(users);
 ### File-Based Database
 
 ```javascript
-import Database from '@tursodatabase/database';
+import { connect } from '@tursodatabase/database';
 
 // Create or open a database file
-const db = new Database('my-database.db');
+const db = await connect('my-database.db');
 
 // Create a table
 db.exec(`
@@ -70,13 +83,47 @@ const result = insertPost.run('Hello World', 'This is my first blog post!');
 console.log(`Inserted post with ID: ${result.lastInsertRowid}`);
 ```
 
+### Transactions
+
+```javascript
+import { connect } from '@tursodatabase/database';
+
+const db = await connect('transactions.db');
+
+// Using transactions for atomic operations
+const transaction = db.transaction((users) => {
+  const insert = db.prepare('INSERT INTO users (name, email) VALUES (?, ?)');
+  for (const user of users) {
+    insert.run(user.name, user.email);
+  }
+});
+
+// Execute transaction
+transaction([
+  { name: 'Alice', email: 'alice@example.com' },
+  { name: 'Bob', email: 'bob@example.com' }
+]);
+```
+
+### WebAssembly Support
+
+Turso Database can run in browsers using WebAssembly. Check the `browser.js` and WASM artifacts for browser usage.
+
 ## API Reference
+
+For complete API documentation, see [JavaScript API Reference](../../docs/javascript-api-reference.md).
+
+## Related Packages
+
+* The [@tursodatabase/serverless](https://www.npmjs.com/package/@tursodatabase/serverless) package provides a serverless driver with the same API.
+* The [@tursodatabase/sync](https://www.npmjs.com/package/@tursodatabase/sync) package provides bidirectional sync between a local Turso database and Turso Cloud. 
+
 ## License
 
-MIT
+This project is licensed under the [MIT license](../../LICENSE.md).
 
 ## Support
 
 - [GitHub Issues](https://github.com/tursodatabase/turso/issues)
 - [Documentation](https://docs.turso.tech)
-- [Discord Community](https://discord.gg/turso)
+- [Discord Community](https://tur.so/discord)
