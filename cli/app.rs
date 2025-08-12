@@ -1126,15 +1126,6 @@ impl Limbo {
     }
 
     fn display_schema(&mut self, table: Option<&str>) -> anyhow::Result<()> {
-        if !self.conn.is_db_initialized() {
-            if let Some(table_name) = table {
-                self.write_fmt(format_args!("-- Error: Table '{table_name}' not found."))?;
-            } else {
-                self.writeln("-- No tables or indexes found in the database.")?;
-            }
-            return Ok(());
-        }
-
         match table {
             Some(table_spec) => {
                 // Parse table name to handle database prefixes (e.g., "db.table")
@@ -1188,15 +1179,6 @@ impl Limbo {
     }
 
     fn display_indexes(&mut self, maybe_table: Option<String>) -> anyhow::Result<()> {
-        if !self.conn.is_db_initialized() {
-            if let Some(tbl_name) = &maybe_table {
-                self.write_fmt(format_args!("-- Error: Table '{tbl_name}' not found."))?;
-            } else {
-                self.writeln("-- No indexes found in the database.")?;
-            }
-            return Ok(());
-        }
-
         let sql = match maybe_table {
             Some(ref tbl_name) => format!(
                 "SELECT name FROM sqlite_schema WHERE type='index' AND tbl_name = '{tbl_name}' ORDER BY 1"
@@ -1245,17 +1227,6 @@ impl Limbo {
     }
 
     fn display_tables(&mut self, pattern: Option<&str>) -> anyhow::Result<()> {
-        if !self.conn.is_db_initialized() {
-            if let Some(pattern) = pattern {
-                self.write_fmt(format_args!(
-                    "-- Error: Tables with pattern '{pattern}' not found."
-                ))?;
-            } else {
-                self.writeln("-- No tables found in the database.")?;
-            }
-            return Ok(());
-        }
-
         let sql = match pattern {
             Some(pattern) => format!(
                 "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name LIKE '{pattern}' ORDER BY 1"

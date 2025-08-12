@@ -413,6 +413,8 @@ pub enum CursorContext {
 /// In the future, we may expand these general validity states
 #[derive(Debug, PartialEq, Eq)]
 pub enum CursorValidState {
+    /// Cursor does not point to a valid entry, and Btree will never yield a record.
+    Invalid,
     /// Cursor is pointing a to an existing location/cell in the Btree
     Valid,
     /// Cursor may be pointing to a non-existent location/cell. This can happen after balancing operations
@@ -571,6 +573,11 @@ impl BTreeCursor {
         root_page: usize,
         num_columns: usize,
     ) -> Self {
+        let valid_state = if root_page == 1 && !pager.db_state.is_initialized() {
+            CursorValidState::Invalid
+        } else {
+            CursorValidState::Valid
+        };
         let usable_space = pager.usable_space();
         Self {
             mv_cursor,
@@ -595,7 +602,7 @@ impl BTreeCursor {
             index_info: None,
             count: 0,
             context: None,
-            valid_state: CursorValidState::Valid,
+            valid_state,
             seek_state: CursorSeekState::Start,
             read_overflow_state: RefCell::new(None),
             record_cursor: RefCell::new(RecordCursor::with_capacity(num_columns)),
@@ -4154,6 +4161,9 @@ impl BTreeCursor {
 
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn rewind(&mut self) -> Result<IOResult<()>> {
+        if self.valid_state == CursorValidState::Invalid {
+            return Ok(IOResult::Done(()));
+        }
         loop {
             match self.rewind_state {
                 RewindState::Start => {
@@ -4188,6 +4198,10 @@ impl BTreeCursor {
 
     #[instrument(skip_all, level = Level::DEBUG)]
     pub fn next(&mut self) -> Result<IOResult<bool>> {
+        if self.valid_state == CursorValidState::Invalid {
+            return Ok(IOResult::Done(false));
+        }
+
         loop {
             match self.advance_state {
                 AdvanceState::Start => {
@@ -4396,6 +4410,9 @@ impl BTreeCursor {
                     match state {
                         InsertState::Start => {
                             match (&self.valid_state, self.is_write_in_progress()) {
+                                (CursorValidState::Invalid, _) => {
+                                    panic!("trying to insert with invalid BTreeCursor");
+                                }
                                 (CursorValidState::Valid, _) => {
                                     // consider the current position valid unless the caller explicitly asks us to seek.
                                 }
@@ -7521,6 +7538,24 @@ mod tests {
         });
         btree_init_page(&page2, PageType::TableLeaf, 0, 4096);
         (pager, page2.get().get().id, db, conn)
+    }
+
+    #[test]
+    fn btree_with_virtual_page_1() -> Result<()> {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let io: Arc<dyn IO> = Arc::new(MemoryIO::new());
+        let db = Database::open_file(io.clone(), ":memory:", false, false).unwrap();
+        let conn = db.connect().unwrap();
+        let pager = conn.pager.borrow().clone();
+
+        let mut cursor = BTreeCursor::new(None, pager, 1, 5);
+        let result = cursor.rewind()?;
+        assert!(matches!(result, IOResult::Done(_)));
+        let result = cursor.next()?;
+        assert!(matches!(result, IOResult::Done(has_next_record) if !has_next_record));
+        let result = cursor.record()?;
+        assert!(matches!(result, IOResult::Done(record) if record.is_none()));
+        Ok(())
     }
 
     #[test]
