@@ -130,6 +130,17 @@ pub enum Stmt {
         /// query
         select: Box<Select>,
     },
+    /// `CREATE MATERIALIZED VIEW`
+    CreateMaterializedView {
+        /// `IF NOT EXISTS`
+        if_not_exists: bool,
+        /// view name
+        view_name: QualifiedName,
+        /// columns
+        columns: Option<Vec<IndexedColumn>>,
+        /// query
+        select: Box<Select>,
+    },
     /// `CREATE VIRTUAL TABLE`
     CreateVirtualTable(Box<CreateVirtualTable>),
     /// `DELETE`

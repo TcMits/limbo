@@ -478,6 +478,11 @@ cmd ::= createkw temp(T) VIEW ifnotexists(E) fullname(Y) eidlist_opt(C)
   self.ctx.stmt = Some(Stmt::CreateView{ temporary: T, if_not_exists: E, view_name: Y, columns: C,
                                          select: Box::new(S) });
 }
+cmd ::= createkw MATERIALIZED VIEW ifnotexists(E) fullname(Y) eidlist_opt(C)
+          AS select(S). {
+  self.ctx.stmt = Some(Stmt::CreateMaterializedView{ if_not_exists: E, view_name: Y, columns: C,
+                                         select: Box::new(S) });
+}
 cmd ::= DROP VIEW ifexists(E) fullname(X). {
   self.ctx.stmt = Some(Stmt::DropView{ if_exists: E, view_name: X });
 }

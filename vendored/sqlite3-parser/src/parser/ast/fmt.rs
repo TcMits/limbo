@@ -391,6 +391,29 @@ impl ToTokens for Stmt {
                 s.append(TK_AS, None)?;
                 select.to_tokens_with_context(s, context)
             }
+            Self::CreateMaterializedView {
+                if_not_exists,
+                view_name,
+                columns,
+                select,
+            } => {
+                s.append(TK_CREATE, None)?;
+                s.append(TK_MATERIALIZED, None)?;
+                s.append(TK_VIEW, None)?;
+                if *if_not_exists {
+                    s.append(TK_IF, None)?;
+                    s.append(TK_NOT, None)?;
+                    s.append(TK_EXISTS, None)?;
+                }
+                view_name.to_tokens_with_context(s, context)?;
+                if let Some(columns) = columns {
+                    s.append(TK_LP, None)?;
+                    comma(columns, s, context)?;
+                    s.append(TK_RP, None)?;
+                }
+                s.append(TK_AS, None)?;
+                select.to_tokens_with_context(s, context)
+            }
             Self::CreateVirtualTable(create_virtual_table) => {
                 let CreateVirtualTable {
                     if_not_exists,

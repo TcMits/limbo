@@ -8,7 +8,7 @@ use crate::{Connection, Result, SymbolTable};
 use std::sync::Arc;
 use turso_sqlite3_parser::ast::{self, fmt::ToTokens};
 
-pub fn translate_create_view(
+pub fn translate_create_materialized_view(
     schema: &Schema,
     view_name: &str,
     select_stmt: &ast::Select,
@@ -19,7 +19,7 @@ pub fn translate_create_view(
     // Check if experimental views are enabled
     if !connection.experimental_views_enabled() {
         return Err(crate::LimboError::ParseError(
-            "CREATE VIEW is an experimental feature. Enable with --experimental-views flag"
+            "CREATE MATERIALIZED VIEW is an experimental feature. Enable with --experimental-views flag"
                 .to_string(),
         ));
     }
@@ -40,7 +40,7 @@ pub fn translate_create_view(
     IncrementalView::can_create_view(select_stmt, schema)?;
 
     // Reconstruct the SQL string
-    let sql = create_view_to_str(view_name, select_stmt);
+    let sql = create_materialized_view_to_str(view_name, select_stmt);
 
     // Open cursor to sqlite_schema table
     let table = schema.get_btree_table(SQLITE_TABLEID).unwrap();
@@ -78,9 +78,9 @@ pub fn translate_create_view(
     Ok(program)
 }
 
-fn create_view_to_str(view_name: &str, select_stmt: &ast::Select) -> String {
+fn create_materialized_view_to_str(view_name: &str, select_stmt: &ast::Select) -> String {
     format!(
-        "CREATE VIEW {} AS {}",
+        "CREATE MATERIALIZED VIEW {} AS {}",
         view_name,
         select_stmt.format().unwrap()
     )

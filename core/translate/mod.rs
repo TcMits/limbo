@@ -125,6 +125,7 @@ pub fn translate_inner(
             | ast::Stmt::CreateTable { .. }
             | ast::Stmt::CreateTrigger { .. }
             | ast::Stmt::CreateView { .. }
+            | ast::Stmt::CreateMaterializedView { .. }
             | ast::Stmt::CreateVirtualTable(..)
             | ast::Stmt::Delete(..)
             | ast::Stmt::DropIndex { .. }
@@ -189,9 +190,12 @@ pub fn translate_inner(
             program,
         )?,
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
-        ast::Stmt::CreateView {
+        ast::Stmt::CreateView { .. } => {
+            bail_parse_error!("CREATE VIEW not supported yet.")
+        }
+        ast::Stmt::CreateMaterializedView {
             view_name, select, ..
-        } => view::translate_create_view(
+        } => view::translate_create_materialized_view(
             schema,
             view_name.name.as_str(),
             &select,

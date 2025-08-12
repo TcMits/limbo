@@ -94,7 +94,7 @@ pub struct IncrementalView {
 }
 
 impl IncrementalView {
-    /// Validate that a CREATE VIEW statement can be handled by IncrementalView
+    /// Validate that a CREATE MATERIALIZED VIEW statement can be handled by IncrementalView
     /// This should be called early, before updating sqlite_master
     pub fn can_create_view(
         select: &turso_sqlite3_parser::ast::Select,
@@ -149,7 +149,7 @@ impl IncrementalView {
     /// Check if this view has the same SQL definition as the provided SQL string
     pub fn has_same_sql(&self, sql: &str) -> bool {
         // Parse the SQL to extract just the SELECT statement
-        if let Ok(Some(Cmd::Stmt(Stmt::CreateView { select, .. }))) =
+        if let Ok(Some(Cmd::Stmt(Stmt::CreateMaterializedView { select, .. }))) =
             Parser::new(sql.as_bytes()).next()
         {
             // Compare the SELECT statements as SQL strings
@@ -178,15 +178,14 @@ impl IncrementalView {
         let cmd = parser.next()?;
         let cmd = cmd.expect("View is an empty statement");
         match cmd {
-            Cmd::Stmt(Stmt::CreateView {
-                temporary: _,
+            Cmd::Stmt(Stmt::CreateMaterializedView {
                 if_not_exists: _,
                 view_name,
                 columns: _,
                 select,
             }) => IncrementalView::from_stmt(view_name, select, schema),
             _ => Err(LimboError::ParseError(format!(
-                "View is not a CREATE VIEW statement: {sql}"
+                "View is not a CREATE MATERIALIZED VIEW statement: {sql}"
             ))),
         }
     }
@@ -1018,7 +1017,7 @@ mod tests {
     #[test]
     fn test_projection_simple_columns() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a, b FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a, b FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1042,7 +1041,7 @@ mod tests {
     #[test]
     fn test_projection_arithmetic_expression() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a * 2 as doubled FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a * 2 as doubled FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1066,7 +1065,7 @@ mod tests {
     #[test]
     fn test_projection_multiple_expressions() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a + b as sum, a - b as diff, c FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a + b as sum, a - b as diff, c FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1093,7 +1092,7 @@ mod tests {
     #[test]
     fn test_projection_function_call() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT hex(a) as hex_a, b FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT hex(a) as hex_a, b FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1120,7 +1119,7 @@ mod tests {
     #[test]
     fn test_projection_mixed_columns_and_expressions() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a, b * 2 as doubled, c, a + b + c as total FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a, b * 2 as doubled, c, a + b + c as total FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1152,7 +1151,7 @@ mod tests {
     #[test]
     fn test_projection_complex_expression() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT (a * 2) + (b * 3) as weighted, c / 2 as half FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT (a * 2) + (b * 3) as weighted, c / 2 as half FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1176,7 +1175,7 @@ mod tests {
     #[test]
     fn test_projection_with_where_clause() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a, a * 2 as doubled FROM t WHERE b > 2";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a, a * 2 as doubled FROM t WHERE b > 2";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1202,7 +1201,7 @@ mod tests {
     #[test]
     fn test_projection_more_output_columns_than_input() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a, b, a * 2 as doubled_a, b * 3 as tripled_b, a + b as sum, hex(c) as hex_c FROM t";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a, b, a * 2 as doubled_a, b * 3 as tripled_b, a + b as sum, hex(c) as hex_c FROM t";
 
         let view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1237,7 +1236,7 @@ mod tests {
     #[test]
     fn test_aggregation_count_with_group_by() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a, COUNT(*) FROM t GROUP BY a";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a, COUNT(*) FROM t GROUP BY a";
 
         let mut view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1291,7 +1290,7 @@ mod tests {
     #[test]
     fn test_aggregation_sum_with_filter() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT SUM(b) FROM t WHERE a > 1";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT SUM(b) FROM t WHERE a > 1";
 
         let mut view = IncrementalView::from_sql(sql, &schema).unwrap();
 
@@ -1329,7 +1328,7 @@ mod tests {
     #[test]
     fn test_aggregation_incremental_updates() {
         let schema = create_test_schema();
-        let sql = "CREATE VIEW v AS SELECT a, COUNT(*), SUM(b) FROM t GROUP BY a";
+        let sql = "CREATE MATERIALIZED VIEW v AS SELECT a, COUNT(*), SUM(b) FROM t GROUP BY a";
 
         let mut view = IncrementalView::from_sql(sql, &schema).unwrap();
 
