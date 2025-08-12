@@ -489,9 +489,9 @@ const connect = async (path, options = {}) => {
     return [db, path, SqliteError];
   }
   if (provider === "libsql") {
-    const x = await import("libsql/promise");
-    const db = new x.default(path, options);
-    return [db, path, x.SqliteError, path];
+    const libsql = await import("libsql/promise");
+    const db = await libsql.connect(path, options);
+    return [db, path, libsql.SqliteError, path];
   }
   if (provider === "serverless") {
     const x = await import("@tursodatabase/serverless");
