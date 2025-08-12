@@ -10,7 +10,8 @@ use crate::storage::pager::{AtomicDbState, CreateBTreeFlags, DbState};
 use crate::storage::sqlite3_ondisk::read_varint;
 use crate::translate::collate::CollationSeq;
 use crate::types::{
-    compare_immutable, compare_records_generic, Extendable, ImmutableRecord, SeekResult, Text,
+    compare_immutable, compare_records_generic, Extendable, IOCompletions, ImmutableRecord,
+    SeekResult, Text,
 };
 use crate::util::{normalize_ident, IOExt as _};
 use crate::vdbe::insn::InsertFlags;
@@ -119,7 +120,7 @@ macro_rules! return_if_io {
     ($expr:expr) => {
         match $expr? {
             IOResult::Done(v) => v,
-            IOResult::IO => return Ok(InsnFunctionStepResult::IO),
+            IOResult::IO(io) => return Ok(InsnFunctionStepResult::IO(io)),
         }
     };
 }
@@ -152,7 +153,7 @@ fn compare_with_collation(
 
 pub enum InsnFunctionStepResult {
     Done,
-    IO,
+    IO(IOCompletions),
     Row,
     Interrupt,
     Busy,
@@ -163,7 +164,7 @@ impl<T> From<IOResult<T>> for InsnFunctionStepResult {
     fn from(value: IOResult<T>) -> Self {
         match value {
             IOResult::Done(_) => InsnFunctionStepResult::Done,
-            IOResult::IO => InsnFunctionStepResult::IO,
+            IOResult::IO(io) => InsnFunctionStepResult::IO(io),
         }
     }
 }
@@ -2078,14 +2079,14 @@ pub fn op_transaction(
                         return Ok(InsnFunctionStepResult::Busy);
                     }
                 }
-                IOResult::IO => {
+                IOResult::IO(io) => {
                     // set the transaction state to pending so we don't have to
                     // end the read transaction.
                     program
                         .connection
                         .transaction_state
                         .replace(TransactionState::PendingUpgrade);
-                    return Ok(InsnFunctionStepResult::IO);
+                    return Ok(InsnFunctionStepResult::IO(io));
                 }
             }
         }
@@ -2634,16 +2635,16 @@ pub fn op_seek(
             state.pc = target_pc.as_offset_int();
             Ok(InsnFunctionStepResult::Step)
         }
-        Ok(SeekInternalResult::IO) => Ok(InsnFunctionStepResult::IO),
+        Ok(SeekInternalResult::IO(io)) => Ok(InsnFunctionStepResult::IO(io)),
         Err(e) => Err(e),
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum SeekInternalResult {
     Found,
     NotFound,
-    IO,
+    IO(IOCompletions),
 }
 #[derive(Clone)]
 pub enum RecordSource {
@@ -2807,7 +2808,7 @@ pub fn seek_internal(
                     };
                         match cursor.seek(seek_key, *op)? {
                             IOResult::Done(seek_result) => seek_result,
-                            IOResult::IO => return Ok(SeekInternalResult::IO),
+                            IOResult::IO(io) => return Ok(SeekInternalResult::IO(io)),
                         }
                     };
                     let found = match seek_result {
@@ -2853,7 +2854,7 @@ pub fn seek_internal(
                         };
                         match result {
                             IOResult::Done(found) => found,
-                            IOResult::IO => return Ok(SeekInternalResult::IO),
+                            IOResult::IO(io) => return Ok(SeekInternalResult::IO(io)),
                         }
                     };
                     return Ok(if found {
@@ -2867,7 +2868,7 @@ pub fn seek_internal(
                     let cursor = cursor.as_btree_mut();
                     match cursor.last()? {
                         IOResult::Done(()) => {}
-                        IOResult::IO => return Ok(SeekInternalResult::IO),
+                        IOResult::IO(io) => return Ok(SeekInternalResult::IO(io)),
                     }
                     // the MoveLast variant is only used for SeekOp::LT and SeekOp::LE when the seek condition is always true,
                     // so we have always found what we were looking for.
@@ -2887,7 +2888,7 @@ pub fn seek_internal(
         is_index,
         op,
     );
-    if !matches!(result, Ok(SeekInternalResult::IO)) {
+    if !matches!(result, Ok(SeekInternalResult::IO(..))) {
         state.seek_state = OpSeekState::Start;
     }
     result
@@ -5544,7 +5545,7 @@ pub fn op_idx_delete(
                 ) {
                     Ok(SeekInternalResult::Found) => true,
                     Ok(SeekInternalResult::NotFound) => false,
-                    Ok(SeekInternalResult::IO) => return Ok(InsnFunctionStepResult::IO),
+                    Ok(SeekInternalResult::IO(io)) => return Ok(InsnFunctionStepResult::IO(io)),
                     Err(e) => return Err(e),
                 };
 
@@ -5665,7 +5666,7 @@ pub fn op_idx_insert(
                     state.op_idx_insert_state = OpIdxInsertState::Insert { moved_before: true };
                     Ok(InsnFunctionStepResult::Step)
                 }
-                SeekInternalResult::IO => Ok(InsnFunctionStepResult::IO),
+                SeekInternalResult::IO(io) => Ok(InsnFunctionStepResult::IO(io)),
             }
         }
         OpIdxInsertState::UniqueConstraintCheck => {
@@ -6033,7 +6034,7 @@ pub fn op_no_conflict(
                         state.op_no_conflict_state = OpNoConflictState::Start;
                         Ok(InsnFunctionStepResult::Step)
                     }
-                    SeekInternalResult::IO => Ok(InsnFunctionStepResult::IO),
+                    SeekInternalResult::IO(io) => Ok(InsnFunctionStepResult::IO(io)),
                 };
             }
         }
@@ -6388,7 +6389,7 @@ pub fn op_page_count(
     let count = match pager.with_header(|header| header.database_size.get()) {
         Err(_) => 0.into(),
         Ok(IOResult::Done(v)) => v.into(),
-        Ok(IOResult::IO) => return Ok(InsnFunctionStepResult::IO),
+        Ok(IOResult::IO(io)) => return Ok(InsnFunctionStepResult::IO(io)),
     };
     state.registers[*dest] = Register::Value(Value::Integer(count));
     state.pc += 1;
@@ -6487,7 +6488,7 @@ pub fn op_read_cookie(
     }) {
         Err(_) => 0.into(),
         Ok(IOResult::Done(v)) => v,
-        Ok(IOResult::IO) => return Ok(InsnFunctionStepResult::IO),
+        Ok(IOResult::IO(io)) => return Ok(InsnFunctionStepResult::IO(io)),
     };
 
     state.registers[*dest] = Register::Value(Value::Integer(cookie_value));
@@ -6973,7 +6974,7 @@ pub fn op_found(
     ) {
         Ok(SeekInternalResult::Found) => SeekResult::Found,
         Ok(SeekInternalResult::NotFound) => SeekResult::NotFound,
-        Ok(SeekInternalResult::IO) => return Ok(InsnFunctionStepResult::IO),
+        Ok(SeekInternalResult::IO(io)) => return Ok(InsnFunctionStepResult::IO(io)),
         Err(e) => return Err(e),
     };
 
