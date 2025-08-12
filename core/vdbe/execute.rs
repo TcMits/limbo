@@ -2062,6 +2062,11 @@ pub fn op_transaction(
             match res {
                 Ok(header_schema_cookie) => {
                     if header_schema_cookie != *schema_cookie {
+                        tracing::info!(
+                            "schema changed, force reprepare: {} != {}",
+                            header_schema_cookie,
+                            *schema_cookie
+                        );
                         return Err(LimboError::SchemaUpdated);
                     }
                 }

@@ -849,6 +849,7 @@ impl Wal for WalFile {
         }
 
         // Snapshot is stale, give up and let caller retry from scratch
+        tracing::debug!("unable to upgrade transaction from read to write: snapshot is stale, give up and let caller retry from scratch");
         shared.write_lock.unlock();
         Ok(LimboResult::Busy)
     }
