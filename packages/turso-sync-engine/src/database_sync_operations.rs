@@ -4,8 +4,8 @@ use turso_core::{types::Text, Buffer, Completion, LimboError, Value};
 
 use crate::{
     database_tape::{
-        exec_stmt, run_stmt, DatabaseChangesIteratorMode, DatabaseChangesIteratorOpts,
-        DatabaseReplaySessionOpts, DatabaseTape, DatabaseWalSession,
+        exec_stmt, run_stmt_expect_one_row, DatabaseChangesIteratorMode,
+        DatabaseChangesIteratorOpts, DatabaseReplaySessionOpts, DatabaseTape, DatabaseWalSession,
     },
     errors::Error,
     protocol_io::{DataCompletion, DataPollResult, ProtocolIO},
@@ -263,8 +263,8 @@ pub async fn transfer_logical_changes(
         select_last_change_id_stmt
             .bind_at(1.try_into().unwrap(), Value::Text(Text::new(client_id)));
 
-        match run_stmt(coro, &mut select_last_change_id_stmt).await? {
-            Some(row) => row.get_value(0).as_int().ok_or_else(|| {
+        match run_stmt_expect_one_row(coro, &mut select_last_change_id_stmt).await? {
+            Some(row) => row[0].as_int().ok_or_else(|| {
                 Error::DatabaseSyncEngineError("unexpected source pull_gen type".to_string())
             })?,
             None => {
@@ -284,12 +284,14 @@ pub async fn transfer_logical_changes(
     let mut select_last_change_id_stmt = target_conn.prepare(TURSO_SYNC_SELECT_LAST_CHANGE_ID)?;
     select_last_change_id_stmt.bind_at(1.try_into().unwrap(), Value::Text(Text::new(client_id)));
 
-    let mut last_change_id = match run_stmt(coro, &mut select_last_change_id_stmt).await? {
+    let mut last_change_id = match run_stmt_expect_one_row(coro, &mut select_last_change_id_stmt)
+        .await?
+    {
         Some(row) => {
-            let target_pull_gen = row.get_value(0).as_int().ok_or_else(|| {
+            let target_pull_gen = row[0].as_int().ok_or_else(|| {
                 Error::DatabaseSyncEngineError("unexpected target pull_gen type".to_string())
             })?;
-            let target_change_id = row.get_value(1).as_int().ok_or_else(|| {
+            let target_change_id = row[1].as_int().ok_or_else(|| {
                 Error::DatabaseSyncEngineError("unexpected target change_id type".to_string())
             })?;
             tracing::debug!(
@@ -321,6 +323,9 @@ pub async fn transfer_logical_changes(
     let replay_opts = DatabaseReplaySessionOpts {
         use_implicit_rowid: false,
     };
+
+    let source_schema_cookie = source.connect_untracked()?.read_schema_version()?;
+
     let mut session = target.start_replay_session(coro, replay_opts).await?;
 
     let iterate_opts = DatabaseChangesIteratorOpts {
@@ -369,6 +374,13 @@ pub async fn transfer_logical_changes(
                 set_last_change_id_stmt
                     .bind_at(3.try_into().unwrap(), Value::Text(Text::new(client_id)));
                 exec_stmt(coro, &mut set_last_change_id_stmt).await?;
+
+                let session_schema_cookie = session.conn().read_schema_version()?;
+                if session_schema_cookie <= source_schema_cookie {
+                    session
+                        .conn()
+                        .write_schema_version(source_schema_cookie + 1)?;
+                }
             }
             _ => {}
         }
@@ -575,7 +587,7 @@ pub mod tests {
 
     use crate::{
         database_sync_operations::{transfer_logical_changes, transfer_physical_changes},
-        database_tape::{run_stmt, DatabaseTape, DatabaseTapeOpts},
+        database_tape::{run_stmt_once, DatabaseTape, DatabaseTapeOpts},
         wal_session::WalSession,
         Result,
     };
@@ -605,7 +617,7 @@ pub mod tests {
 
             let mut rows = Vec::new();
             let mut stmt = conn2.prepare("SELECT x, y FROM t").unwrap();
-            while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+            while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                 rows.push(row.get_values().cloned().collect::<Vec<_>>());
             }
             assert_eq!(
@@ -622,7 +634,7 @@ pub mod tests {
 
             let mut rows = Vec::new();
             let mut stmt = conn2.prepare("SELECT x, y FROM t").unwrap();
-            while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+            while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                 rows.push(row.get_values().cloned().collect::<Vec<_>>());
             }
             assert_eq!(
@@ -701,7 +713,7 @@ pub mod tests {
             let conn2 = db2.connect(&coro).await.unwrap();
             let mut rows = Vec::new();
             let mut stmt = conn2.prepare("SELECT x, y FROM t").unwrap();
-            while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+            while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                 rows.push(row.get_values().cloned().collect::<Vec<_>>());
             }
             assert_eq!(
@@ -716,7 +728,7 @@ pub mod tests {
             conn2.execute("INSERT INTO t VALUES (7, 8)")?;
             let mut rows = Vec::new();
             let mut stmt = conn2.prepare("SELECT x, y FROM t").unwrap();
-            while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+            while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                 rows.push(row.get_values().cloned().collect::<Vec<_>>());
             }
             assert_eq!(

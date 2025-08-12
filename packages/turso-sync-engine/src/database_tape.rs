@@ -35,7 +35,7 @@ pub struct DatabaseTapeOpts {
     pub cdc_mode: Option<String>,
 }
 
-pub(crate) async fn run_stmt<'a>(
+pub(crate) async fn run_stmt_once<'a>(
     coro: &'_ Coro,
     stmt: &'a mut turso_core::Statement,
 ) -> Result<Option<&'a turso_core::Row>> {
@@ -58,6 +58,28 @@ pub(crate) async fn run_stmt<'a>(
             StepResult::Row => return Ok(Some(stmt.row().unwrap())),
         }
     }
+}
+
+pub(crate) async fn run_stmt_expect_one_row<'a>(
+    coro: &'_ Coro,
+    stmt: &'a mut turso_core::Statement,
+) -> Result<Option<Vec<turso_core::Value>>> {
+    let Some(row) = run_stmt_once(coro, stmt).await? else {
+        return Ok(None);
+    };
+    let values = row.get_values().cloned().collect();
+    let None = run_stmt_once(coro, stmt).await? else {
+        return Err(Error::DatabaseTapeError("single row expected".to_string()));
+    };
+    return Ok(Some(values));
+}
+
+pub(crate) async fn run_stmt_ignore_rows(
+    coro: &Coro,
+    stmt: &mut turso_core::Statement,
+) -> Result<()> {
+    while let Some(_) = run_stmt_once(coro, stmt).await? {}
+    Ok(())
 }
 
 pub(crate) async fn exec_stmt(coro: &Coro, stmt: &mut turso_core::Statement) -> Result<()> {
@@ -109,7 +131,7 @@ impl DatabaseTape {
         let connection = self.inner.connect()?;
         tracing::debug!("set '{CDC_PRAGMA_NAME}' for new connection");
         let mut stmt = connection.prepare(&self.pragma_query)?;
-        run_stmt(coro, &mut stmt).await?;
+        run_stmt_ignore_rows(coro, &mut stmt).await?;
         Ok(connection)
     }
     /// Builds an iterator which emits [DatabaseTapeOperation] by extracting data from CDC table
@@ -168,7 +190,7 @@ impl DatabaseWalSession {
         let conn = wal_session.conn();
         let frames_count = conn.wal_frame_count()?;
         let mut page_size_stmt = conn.prepare("PRAGMA page_size")?;
-        let Some(row) = run_stmt(coro, &mut page_size_stmt).await? else {
+        let Some(row) = run_stmt_expect_one_row(coro, &mut page_size_stmt).await? else {
             return Err(Error::DatabaseTapeError(
                 "unable to get database page size".to_string(),
             ));
@@ -178,18 +200,11 @@ impl DatabaseWalSession {
                 "unexpected columns count for PRAGMA page_size query".to_string(),
             ));
         }
-        let turso_core::Value::Integer(page_size) = row.get_value(0) else {
+        let turso_core::Value::Integer(page_size) = row[0] else {
             return Err(Error::DatabaseTapeError(
                 "unexpected column type for PRAGMA page_size query".to_string(),
             ));
         };
-        let page_size = *page_size;
-        let None = run_stmt(coro, &mut page_size_stmt).await? else {
-            return Err(Error::DatabaseTapeError(
-                "page size pragma returned multiple rows".to_string(),
-            ));
-        };
-
         Ok(Self {
             page_size: page_size as usize,
             next_wal_frame_no: frames_count + 1,
@@ -376,7 +391,7 @@ impl DatabaseChangesIterator {
             turso_core::Value::Integer(change_id_filter),
         );
 
-        while let Some(row) = run_stmt(coro, &mut self.query_stmt).await? {
+        while let Some(row) = run_stmt_once(coro, &mut self.query_stmt).await? {
             let database_change: DatabaseChange = row.try_into()?;
             let tape_change = match self.mode {
                 DatabaseChangesIteratorMode::Apply => database_change.into_apply()?,
@@ -432,7 +447,7 @@ impl DatabaseReplaySession {
             DatabaseTapeOperation::RowChange(change) => {
                 if !self.in_txn {
                     tracing::trace!("replay: start txn for replaying changes");
-                    self.conn.execute("BEGIN")?;
+                    self.conn.execute("BEGIN IMMEDIATE")?;
                     self.in_txn = true;
                 }
                 tracing::trace!("replay: change={:?}", change);
@@ -696,7 +711,7 @@ impl DatabaseReplaySession {
                 "SELECT name FROM pragma_table_info('{table_name}')"
             ))?;
             let mut column_names = Vec::with_capacity(columns + 1);
-            while let Some(column) = run_stmt(coro, &mut table_info_stmt).await? {
+            while let Some(column) = run_stmt_once(coro, &mut table_info_stmt).await? {
                 let turso_core::Value::Text(text) = column.get_value(0) else {
                     return Err(Error::DatabaseTapeError(
                         "unexpected column type for pragma_table_info query".to_string(),
@@ -721,7 +736,7 @@ impl DatabaseReplaySession {
             ))?;
             let mut pk_predicates = Vec::with_capacity(1);
             let mut pk_column_indices = Vec::with_capacity(1);
-            while let Some(column) = run_stmt(coro, &mut pk_info_stmt).await? {
+            while let Some(column) = run_stmt_once(coro, &mut pk_info_stmt).await? {
                 let turso_core::Value::Integer(column_id) = column.get_value(0) else {
                     return Err(Error::DatabaseTapeError(
                         "unexpected column type for pragma_table_info query".to_string(),
@@ -764,7 +779,7 @@ impl DatabaseReplaySession {
         let mut pk_predicates = Vec::with_capacity(1);
         let mut pk_column_indices = Vec::with_capacity(1);
         let mut column_updates = Vec::with_capacity(1);
-        while let Some(column) = run_stmt(coro, &mut table_info_stmt).await? {
+        while let Some(column) = run_stmt_once(coro, &mut table_info_stmt).await? {
             let turso_core::Value::Integer(column_id) = column.get_value(0) else {
                 return Err(Error::DatabaseTapeError(
                     "unexpected column type for pragma_table_info query".to_string(),
@@ -836,7 +851,7 @@ mod tests {
 
     use crate::{
         database_tape::{
-            run_stmt, DatabaseChangesIteratorOpts, DatabaseReplaySessionOpts, DatabaseTape,
+            run_stmt_once, DatabaseChangesIteratorOpts, DatabaseReplaySessionOpts, DatabaseTape,
         },
         types::{DatabaseTapeOperation, DatabaseTapeRowChange, DatabaseTapeRowChangeType},
     };
@@ -855,7 +870,7 @@ mod tests {
                 let conn = db1.connect(&coro).await.unwrap();
                 let mut stmt = conn.prepare("SELECT * FROM turso_cdc").unwrap();
                 let mut rows = Vec::new();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 rows
@@ -977,7 +992,7 @@ mod tests {
                 }
                 let mut stmt = conn2.prepare("SELECT rowid, x FROM t").unwrap();
                 let mut rows = Vec::new();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 rows
@@ -1055,7 +1070,7 @@ mod tests {
                 }
                 let mut stmt = conn2.prepare("SELECT rowid, x FROM t").unwrap();
                 let mut rows = Vec::new();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 rows
@@ -1124,7 +1139,7 @@ mod tests {
                 }
                 let mut stmt = conn2.prepare("SELECT rowid, x FROM t").unwrap();
                 let mut rows = Vec::new();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 rows
@@ -1205,7 +1220,7 @@ mod tests {
                 }
                 let mut rows = Vec::new();
                 let mut stmt = conn3.prepare("SELECT rowid, x, y FROM t").unwrap();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 assert_eq!(
@@ -1219,7 +1234,7 @@ mod tests {
 
                 let mut rows = Vec::new();
                 let mut stmt = conn3.prepare("SELECT rowid, x, y FROM q").unwrap();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 assert_eq!(
@@ -1236,7 +1251,7 @@ mod tests {
                         "SELECT * FROM sqlite_schema WHERE name != 'turso_cdc' AND type = 'table'",
                     )
                     .unwrap();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 assert_eq!(
@@ -1319,7 +1334,7 @@ mod tests {
                 let mut stmt = conn2
                     .prepare("SELECT * FROM sqlite_schema WHERE name IN ('t', 't_idx')")
                     .unwrap();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 assert_eq!(
@@ -1403,7 +1418,7 @@ mod tests {
                 let mut stmt = conn2
                     .prepare("SELECT * FROM sqlite_schema WHERE name IN ('t')")
                     .unwrap();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 assert_eq!(
@@ -1501,7 +1516,7 @@ mod tests {
                 }
                 let mut rows = Vec::new();
                 let mut stmt = conn3.prepare("SELECT * FROM t").unwrap();
-                while let Some(row) = run_stmt(&coro, &mut stmt).await.unwrap() {
+                while let Some(row) = run_stmt_once(&coro, &mut stmt).await.unwrap() {
                     rows.push(row.get_values().cloned().collect::<Vec<_>>());
                 }
                 assert_eq!(

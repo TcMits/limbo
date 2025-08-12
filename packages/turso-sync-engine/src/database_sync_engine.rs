@@ -422,7 +422,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
 
 #[cfg(test)]
 pub mod tests {
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use rand::RngCore;
 
@@ -560,6 +560,65 @@ pub mod tests {
                     vec![turso::Value::Integer(4)],
                 ]
             );
+        });
+    }
+
+    #[test]
+    pub fn test_sync_single_db_many_pulls_big_payloads() {
+        deterministic_runtime(async || {
+            let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
+            let dir = tempfile::TempDir::new().unwrap();
+            let server_path = dir.path().join("server.db");
+            let ctx = Arc::new(TestContext::new(seed_u64()));
+            let protocol = TestProtocolIo::new(ctx.clone(), &server_path)
+                .await
+                .unwrap();
+            let mut runner = TestRunner::new(ctx.clone(), io, protocol.clone());
+            let local_path = dir.path().join("local.db");
+            let opts = DatabaseSyncEngineOpts {
+                client_name: "id-1".to_string(),
+                wal_pull_batch_size: 1,
+            };
+            runner.init(local_path, opts).await.unwrap();
+
+            protocol
+                .server
+                .execute("CREATE TABLE t(x INTEGER PRIMARY KEY, y)", ())
+                .await
+                .unwrap();
+
+            runner.pull().await.unwrap();
+
+            // create connection in outer scope in order to prevent Database from being dropped in between of pull operations
+            let conn = runner.connect().await.unwrap();
+
+            let mut expected = BTreeMap::new();
+            for attempt in 0..10 {
+                for _ in 0..5 {
+                    let key = ctx.rng().await.next_u32();
+                    let length = ctx.rng().await.next_u32() % (10 * 4096);
+                    protocol
+                        .server
+                        .execute("INSERT INTO t VALUES (?, randomblob(?))", (key, length))
+                        .await
+                        .unwrap();
+                    expected.insert(key as i64, length as i64);
+                }
+
+                tracing::info!("pull attempt={}", attempt);
+                runner.pull().await.unwrap();
+
+                let expected = expected
+                    .iter()
+                    .map(|(x, y)| vec![turso::Value::Integer(*x), turso::Value::Integer(*y)])
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    query_rows(&conn, "SELECT x, length(y) FROM t")
+                        .await
+                        .unwrap(),
+                    expected
+                );
+            }
         });
     }
 
