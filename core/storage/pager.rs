@@ -305,8 +305,6 @@ pub enum BtreePageAllocMode {
 /// This will keep track of the state of current cache commit in order to not repeat work
 struct CommitInfo {
     state: CommitState,
-    /// Dirty pages to be flushed.
-    dirty_pages: Vec<usize>,
 }
 
 /// Track the state of the auto-vacuum mode.
@@ -421,7 +419,6 @@ pub struct Pager {
 
     commit_info: RefCell<CommitInfo>,
     checkpoint_state: RefCell<CheckpointState>,
-    checkpoint_inflight: Rc<RefCell<usize>>,
     syncing: Rc<RefCell<bool>>,
     auto_vacuum_mode: RefCell<AutoVacuumMode>,
     /// 0 -> Database is empty,
@@ -479,6 +476,7 @@ enum AllocatePageState {
     /// If a freelist leaf is found, reuse it for the page allocation and remove it from the trunk page.
     ReuseFreelistLeaf {
         trunk_page: PageRef,
+        leaf_page: PageRef,
         number_of_freelist_leaves: u32,
     },
     /// If a suitable freelist leaf is not found, allocate an entirely new page.
@@ -490,10 +488,7 @@ enum AllocatePageState {
 #[derive(Clone)]
 enum AllocatePage1State {
     Start,
-    Writing {
-        write_counter: Rc<RefCell<usize>>,
-        page: BTreePage,
-    },
+    Writing { page: BTreePage },
     Done,
 }
 
@@ -534,11 +529,9 @@ impl Pager {
             ))),
             commit_info: RefCell::new(CommitInfo {
                 state: CommitState::Start,
-                dirty_pages: Vec::new(),
             }),
             syncing: Rc::new(RefCell::new(false)),
             checkpoint_state: RefCell::new(CheckpointState::Checkpoint),
-            checkpoint_inflight: Rc::new(RefCell::new(0)),
             buffer_pool,
             auto_vacuum_mode: RefCell::new(AutoVacuumMode::None),
             db_state,
@@ -1612,26 +1605,16 @@ impl Pager {
                     DatabaseHeader::SIZE,
                     (default_header.page_size.get() - default_header.reserved_space as u32) as u16,
                 );
-                let write_counter = Rc::new(RefCell::new(0));
-                let c = begin_write_btree_page(self, &page1.get(), write_counter.clone())?;
+                let c = begin_write_btree_page(self, &page1.get())?;
 
                 self.allocate_page1_state
-                    .replace(AllocatePage1State::Writing {
-                        write_counter,
-                        page: page1,
-                    });
+                    .replace(AllocatePage1State::Writing { page: page1 });
                 Ok(IOResult::IO(IOCompletions::Single(c)))
             }
-            AllocatePage1State::Writing {
-                write_counter,
-                page,
-            } => {
-                tracing::trace!("allocate_page1(Writing)");
-                if *write_counter.borrow() > 0 {
-                    return Ok(IOResult::IO);
-                }
-                tracing::trace!("allocate_page1(Writing done)");
+            AllocatePage1State::Writing { page } => {
                 let page1_ref = page.get();
+                turso_assert!(page1_ref.is_loaded(), "page should be loaded");
+                tracing::trace!("allocate_page1(Writing done)");
                 let page_key = PageCacheKey::new(page1_ref.get().id);
                 let mut cache = self.page_cache.write();
                 cache.insert(page_key, page1_ref.clone()).map_err(|e| {
@@ -1727,9 +1710,6 @@ impl Pager {
                     trunk_page,
                     current_db_size,
                 } => {
-                    if trunk_page.is_locked() {
-                        return Ok(IOResult::IO);
-                    }
                     turso_assert!(
                         trunk_page.is_loaded(),
                         "Freelist trunk page {} is not loaded",
@@ -1744,11 +1724,23 @@ impl Pager {
                     // There are leaf pointers on this trunk page, so we can reuse one of the pages
                     // for the allocation.
                     if number_of_freelist_leaves != 0 {
+                        let page_contents = trunk_page.get().contents.as_ref().unwrap();
+                        let next_leaf_page_id =
+                            page_contents.read_u32_no_offset(FREELIST_TRUNK_OFFSET_FIRST_LEAF);
+                        let (leaf_page, c) = self.read_page(next_leaf_page_id as usize)?;
+
+                        turso_assert!(
+                            number_of_freelist_leaves > 0,
+                            "Freelist trunk page {} has no leaves",
+                            trunk_page.get().id
+                        );
+
                         *state = AllocatePageState::ReuseFreelistLeaf {
                             trunk_page: trunk_page.clone(),
+                            leaf_page,
                             number_of_freelist_leaves,
                         };
-                        continue;
+                        return Ok(IOResult::IO(IOCompletions::Single(c)));
                     }
 
                     // No freelist leaves on this trunk page.
@@ -1787,25 +1779,15 @@ impl Pager {
                 }
                 AllocatePageState::ReuseFreelistLeaf {
                     trunk_page,
+                    leaf_page,
                     number_of_freelist_leaves,
                 } => {
                     turso_assert!(
-                        trunk_page.is_loaded(),
-                        "Freelist trunk page {} is not loaded",
-                        trunk_page.get().id
-                    );
-                    turso_assert!(
-                        *number_of_freelist_leaves > 0,
-                        "Freelist trunk page {} has no leaves",
-                        trunk_page.get().id
+                        leaf_page.is_loaded(),
+                        "Leaf page {} is not loaded",
+                        leaf_page.get().id
                     );
                     let page_contents = trunk_page.get().contents.as_ref().unwrap();
-                    let next_leaf_page_id =
-                        page_contents.read_u32_no_offset(FREELIST_TRUNK_OFFSET_FIRST_LEAF);
-                    let (leaf_page, _c) = self.read_page(next_leaf_page_id as usize)?;
-                    if leaf_page.is_locked() {
-                        return Ok(IOResult::IO);
-                    }
                     self.add_dirty(&leaf_page);
                     // zero out the page
                     turso_assert!(
@@ -1847,6 +1829,7 @@ impl Pager {
                     self.add_dirty(trunk_page);
 
                     header.freelist_pages = (header.freelist_pages.get() - 1).into();
+                    let leaf_page = leaf_page.clone();
                     *state = AllocatePageState::Start;
                     return Ok(IOResult::Done(leaf_page));
                 }
@@ -1947,11 +1930,9 @@ impl Pager {
 
     fn reset_internal_states(&self) {
         self.checkpoint_state.replace(CheckpointState::Checkpoint);
-        self.checkpoint_inflight.replace(0);
         self.syncing.replace(false);
         self.commit_info.replace(CommitInfo {
             state: CommitState::Start,
-            dirty_pages: Vec::new(),
         });
         self.allocate_page_state.replace(AllocatePageState::Start);
     }
