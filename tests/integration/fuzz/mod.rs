@@ -1832,7 +1832,6 @@ mod tests {
 
                         // Successfully added column, update our tracking
                         let table_name = table_to_alter.clone();
-                        let col_name = new_col_name.clone();
                         if let Some(columns) = current_tables.get_mut(&table_name) {
                             columns.push(new_col_name);
                         }

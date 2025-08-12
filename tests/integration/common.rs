@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use turso_core::{types::IOResult, Connection, Database, IO};
+use turso_core::IOExt;
+use turso_core::{Connection, Database, IO};
 
 #[allow(dead_code)]
 pub struct TempDatabase {
@@ -115,17 +116,10 @@ impl TempDatabase {
 }
 
 pub(crate) fn do_flush(conn: &Arc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
-    loop {
-        match conn.cacheflush()? {
-            IOResult::Done(_) => {
-                break;
-            }
-            IOResult::IO => {
-                tmp_db.io.run_once()?;
-            }
-        }
-    }
-    Ok(())
+    tmp_db
+        .io
+        .block(|| conn.cacheflush())
+        .map_err(anyhow::Error::from)
 }
 
 pub(crate) fn compare_string(a: impl AsRef<str>, b: impl AsRef<str>) {

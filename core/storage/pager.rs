@@ -590,10 +590,8 @@ impl Pager {
     /// Returns the new maximum page count (may be clamped to current database size)
     pub fn set_max_page_count(&self, new_max: u32) -> crate::Result<IOResult<u32>> {
         // Get current database size
-        let current_page_count = match self.with_header(|header| header.database_size.get())? {
-            IOResult::Done(size) => size,
-            IOResult::IO => return Ok(IOResult::IO),
-        };
+        let current_page_count =
+            return_if_io!(self.with_header(|header| header.database_size.get()));
 
         // Clamp new_max to be at least the current database size
         let clamped_max = std::cmp::max(new_max, current_page_count);
@@ -868,17 +866,14 @@ impl Pager {
                             }
                             BtreeCreateVacuumFullState::PtrMapPut { allocated_page_id } => {
                                 //  For now map allocated_page_id since we are not swapping it with root_page_num
-                                let res = match self.ptrmap_put(
+                                return_if_io!(self.ptrmap_put(
                                     allocated_page_id,
                                     PtrmapType::RootPage,
                                     0,
-                                )? {
-                                    IOResult::Done(_) => Ok(IOResult::Done(allocated_page_id)),
-                                    IOResult::IO => return Ok(IOResult::IO),
-                                };
+                                ));
                                 self.btree_create_vacuum_full_state
                                     .set(BtreeCreateVacuumFullState::Start);
-                                return res;
+                                return Ok(IOResult::Done(allocated_page_id));
                             }
                         }
                     }
@@ -995,10 +990,7 @@ impl Pager {
     pub fn begin_write_tx(&self) -> Result<IOResult<LimboResult>> {
         // TODO(Diego): The only possibly allocate page1 here is because OpenEphemeral needs a write transaction
         // we should have a unique API to begin transactions, something like sqlite3BtreeBeginTrans
-        match self.maybe_allocate_page1()? {
-            IOResult::Done(_) => {}
-            IOResult::IO => return Ok(IOResult::IO),
-        }
+        return_if_io!(self.maybe_allocate_page1());
         let Some(wal) = self.wal.as_ref() else {
             return Ok(IOResult::Done(LimboResult::Ok));
         };
@@ -1029,20 +1021,15 @@ impl Pager {
             self.rollback(schema_did_change, connection, is_write)?;
             return Ok(IOResult::Done(PagerCommitResult::Rollback));
         }
-        let commit_status = self.commit_dirty_pages(wal_checkpoint_disabled)?;
-        match commit_status {
-            IOResult::IO => Ok(IOResult::IO),
-            IOResult::Done(_) => {
-                wal.borrow().end_write_tx();
-                wal.borrow().end_read_tx();
+        let commit_status = return_if_io!(self.commit_dirty_pages(wal_checkpoint_disabled));
+        wal.borrow().end_write_tx();
+        wal.borrow().end_read_tx();
 
-                if schema_did_change {
-                    let schema = connection.schema.borrow().clone();
-                    connection._db.update_schema_if_newer(schema)?;
-                }
-                Ok(commit_status)
-            }
+        if schema_did_change {
+            let schema = connection.schema.borrow().clone();
+            connection._db.update_schema_if_newer(schema)?;
         }
+        Ok(IOResult::Done(commit_status))
     }
 
     #[instrument(skip_all, level = Level::DEBUG)]
@@ -1097,7 +1084,9 @@ impl Pager {
         if let Some(page) = page_cache.get(&page_key) {
             tracing::trace!("read_page(page_idx = {}) = cached", page_idx);
             // Dummy completion being passed, as we do not need to read from database or wal
-            return Ok((page.clone(), Completion::new_write(|_| {})));
+            let c = Completion::new_write(|_| {});
+            c.complete(0);
+            return Ok((page.clone(), c));
         }
         let (page, c) = self.read_page_no_cache(page_idx, None, false)?;
         self.cache_insert(page_idx, page.clone(), &mut page_cache)?;
@@ -1492,16 +1481,13 @@ impl Pager {
             match state {
                 CheckpointState::Checkpoint => {
                     let in_flight = self.checkpoint_inflight.clone();
-                    match wal
-                        .borrow_mut()
-                        .checkpoint(self, in_flight, CheckpointMode::Passive)?
-                    {
-                        IOResult::IO => return Ok(IOResult::IO),
-                        IOResult::Done(res) => {
-                            checkpoint_result = res;
-                            self.checkpoint_state.replace(CheckpointState::SyncDbFile);
-                        }
-                    };
+                    let res = return_if_io!(wal.borrow_mut().checkpoint(
+                        self,
+                        in_flight,
+                        CheckpointMode::Passive
+                    ));
+                    checkpoint_result = res;
+                    self.checkpoint_state.replace(CheckpointState::SyncDbFile);
                 }
                 CheckpointState::SyncDbFile => {
                     let _c =

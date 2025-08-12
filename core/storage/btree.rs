@@ -4070,18 +4070,10 @@ impl BTreeCursor {
         let root_contents = root.get_contents();
         // FIXME: handle page cache is full
         // FIXME: remove sync IO hack
-        let child_btree = loop {
-            match self.pager.do_allocate_page(
-                root_contents.page_type(),
-                0,
-                BtreePageAllocMode::Any,
-            )? {
-                IOResult::IO => {
-                    self.pager.io.run_once()?;
-                }
-                IOResult::Done(page) => break page,
-            }
-        };
+        let child_btree = self.pager.io.block(|| {
+            self.pager
+                .do_allocate_page(root_contents.page_type(), 0, BtreePageAllocMode::Any)
+        })?;
 
         tracing::debug!(
             "balance_root(root={}, rightmost={}, page_type={:?})",
@@ -5160,29 +5152,29 @@ impl BTreeCursor {
                     }
                 }
                 DestroyState::ClearOverflowPages { cell } => {
-                    match self.clear_overflow_pages(&cell)? {
-                        IOResult::Done(_) => match cell {
-                            //  For an index interior cell, clear the left child page now that overflow pages have been cleared
-                            BTreeCell::IndexInteriorCell(index_int_cell) => {
-                                let (child_page, _c) =
-                                    self.read_page(index_int_cell.left_child_page as usize)?;
-                                self.stack.push(child_page);
-                                let destroy_info = self.state.mut_destroy_info().expect(
-                                    "unable to get a mut reference to destroy state in cursor",
-                                );
-                                destroy_info.state = DestroyState::LoadPage;
-                                return Ok(IOResult::IO);
-                            }
-                            //  For any leaf cell, advance the index now that overflow pages have been cleared
-                            BTreeCell::TableLeafCell(_) | BTreeCell::IndexLeafCell(_) => {
-                                let destroy_info = self.state.mut_destroy_info().expect(
-                                    "unable to get a mut reference to destroy state in cursor",
-                                );
-                                destroy_info.state = DestroyState::LoadPage;
-                            }
-                            _ => panic!("unexpected cell type"),
-                        },
-                        IOResult::IO => return Ok(IOResult::IO),
+                    return_if_io!(self.clear_overflow_pages(&cell));
+                    match cell {
+                        //  For an index interior cell, clear the left child page now that overflow pages have been cleared
+                        BTreeCell::IndexInteriorCell(index_int_cell) => {
+                            let (child_page, _c) =
+                                self.read_page(index_int_cell.left_child_page as usize)?;
+                            self.stack.push(child_page);
+                            let destroy_info = self
+                                .state
+                                .mut_destroy_info()
+                                .expect("unable to get a mut reference to destroy state in cursor");
+                            destroy_info.state = DestroyState::LoadPage;
+                            return Ok(IOResult::IO);
+                        }
+                        //  For any leaf cell, advance the index now that overflow pages have been cleared
+                        BTreeCell::TableLeafCell(_) | BTreeCell::IndexLeafCell(_) => {
+                            let destroy_info = self
+                                .state
+                                .mut_destroy_info()
+                                .expect("unable to get a mut reference to destroy state in cursor");
+                            destroy_info.state = DestroyState::LoadPage;
+                        }
+                        _ => panic!("unexpected cell type"),
                     }
                 }
                 DestroyState::FreePage => {
@@ -7867,14 +7859,10 @@ mod tests {
                     pager.deref(),
                 )
                 .unwrap();
-                loop {
-                    match pager.end_tx(false, &conn, false).unwrap() {
-                        IOResult::Done(_) => break,
-                        IOResult::IO => {
-                            pager.io.run_once().unwrap();
-                        }
-                    }
-                }
+                pager
+                    .io
+                    .block(|| pager.end_tx(false, &conn, false))
+                    .unwrap();
                 pager.begin_read_tx().unwrap();
                 // FIXME: add sorted vector instead, should be okay for small amounts of keys for now :P, too lazy to fix right now
                 let _c = cursor.move_to_root().unwrap();
@@ -7944,14 +7932,10 @@ mod tests {
         tracing::info!("super seed: {}", seed);
         for _ in 0..attempts {
             let (pager, _, _db, conn) = empty_btree();
-            let index_root_page_result =
-                pager.btree_create(&CreateBTreeFlags::new_index()).unwrap();
-            let index_root_page = match index_root_page_result {
-                crate::types::IOResult::Done(id) => id as usize,
-                crate::types::IOResult::IO => {
-                    panic!("btree_create returned IO in test, unexpected")
-                }
-            };
+            let index_root_page = pager
+                .io
+                .block(|| pager.btree_create(&CreateBTreeFlags::new_index()))
+                .unwrap() as usize;
             let index_def = Index {
                 name: "testindex".to_string(),
                 columns: (0..10)
@@ -7981,7 +7965,7 @@ mod tests {
             tracing::info!("seed: {seed}");
             for i in 0..inserts {
                 pager.begin_read_tx().unwrap();
-                let _res = pager.begin_write_tx().unwrap();
+                pager.io.block(|| pager.begin_write_tx()).unwrap();
                 let key = {
                     let result;
                     loop {
@@ -8024,15 +8008,12 @@ mod tests {
                     pager.deref(),
                 )
                 .unwrap();
-                let _c = cursor.move_to_root().unwrap();
-                loop {
-                    match pager.end_tx(false, &conn, false).unwrap() {
-                        IOResult::Done(_) => break,
-                        IOResult::IO => {
-                            pager.io.run_once().unwrap();
-                        }
-                    }
-                }
+                let c = cursor.move_to_root().unwrap();
+                pager.io.wait_for_completion(c).unwrap();
+                pager
+                    .io
+                    .block(|| pager.end_tx(false, &conn, false))
+                    .unwrap();
             }
 
             // Check that all keys can be found by seeking
@@ -8118,14 +8099,10 @@ mod tests {
 
         for _ in 0..attempts {
             let (pager, _, _db, conn) = empty_btree();
-            let index_root_page_result =
-                pager.btree_create(&CreateBTreeFlags::new_index()).unwrap();
-            let index_root_page = match index_root_page_result {
-                crate::types::IOResult::Done(id) => id as usize,
-                crate::types::IOResult::IO => {
-                    panic!("btree_create returned IO in test, unexpected")
-                }
-            };
+            let index_root_page = pager
+                .io
+                .block(|| pager.btree_create(&CreateBTreeFlags::new_index()))
+                .unwrap() as usize;
             let index_def = Index {
                 name: "testindex".to_string(),
                 columns: vec![IndexColumn {
@@ -8151,7 +8128,8 @@ mod tests {
             for i in 0..operations {
                 let print_progress = i % 100 == 0;
                 pager.begin_read_tx().unwrap();
-                let _res = pager.begin_write_tx().unwrap();
+
+                pager.io.block(|| pager.begin_write_tx()).unwrap();
 
                 // Decide whether to insert or delete (80% chance of insert)
                 let is_insert = rng.next_u64() % 100 < (insert_chance * 100.0) as u64;
@@ -8242,15 +8220,12 @@ mod tests {
                     }
                 }
 
-                let _c = cursor.move_to_root().unwrap();
-                loop {
-                    match pager.end_tx(false, &conn, false).unwrap() {
-                        IOResult::Done(_) => break,
-                        IOResult::IO => {
-                            pager.io.run_once().unwrap();
-                        }
-                    }
-                }
+                let c = cursor.move_to_root().unwrap();
+                pager.io.wait_for_completion(c).unwrap();
+                pager
+                    .io
+                    .block(|| pager.end_tx(false, &conn, false))
+                    .unwrap();
             }
 
             // Final validation
@@ -8610,50 +8585,43 @@ mod tests {
             .block(|| pager.with_header(|header| header.freelist_pages))?
             .get();
         // Clear overflow pages
-        let clear_result = cursor.clear_overflow_pages(&leaf_cell)?;
-        match clear_result {
-            IOResult::Done(_) => {
-                let (freelist_pages, freelist_trunk_page) = pager
-                    .io
-                    .block(|| {
-                        pager.with_header(|header| {
-                            (
-                                header.freelist_pages.get(),
-                                header.freelist_trunk_page.get(),
-                            )
-                        })
-                    })
-                    .unwrap();
+        pager.io.block(|| cursor.clear_overflow_pages(&leaf_cell))?;
+        let (freelist_pages, freelist_trunk_page) = pager
+            .io
+            .block(|| {
+                pager.with_header(|header| {
+                    (
+                        header.freelist_pages.get(),
+                        header.freelist_trunk_page.get(),
+                    )
+                })
+            })
+            .unwrap();
 
-                // Verify proper number of pages were added to freelist
-                assert_eq!(
-                    freelist_pages,
-                    initial_freelist_pages + 3,
-                    "Expected 3 pages to be added to freelist"
-                );
+        // Verify proper number of pages were added to freelist
+        assert_eq!(
+            freelist_pages,
+            initial_freelist_pages + 3,
+            "Expected 3 pages to be added to freelist"
+        );
 
-                // If this is first trunk page
-                let trunk_page_id = freelist_trunk_page;
-                if trunk_page_id > 0 {
-                    // Verify trunk page structure
-                    let (trunk_page, _c) = cursor.read_page(trunk_page_id as usize)?;
-                    if let Some(contents) = trunk_page.get().get().contents.as_ref() {
-                        // Read number of leaf pages in trunk
-                        let n_leaf = contents.read_u32_no_offset(4);
-                        assert!(n_leaf > 0, "Trunk page should have leaf entries");
+        // If this is first trunk page
+        let trunk_page_id = freelist_trunk_page;
+        if trunk_page_id > 0 {
+            // Verify trunk page structure
+            let (trunk_page, _c) = cursor.read_page(trunk_page_id as usize)?;
+            if let Some(contents) = trunk_page.get().get().contents.as_ref() {
+                // Read number of leaf pages in trunk
+                let n_leaf = contents.read_u32_no_offset(4);
+                assert!(n_leaf > 0, "Trunk page should have leaf entries");
 
-                        for i in 0..n_leaf {
-                            let leaf_page_id = contents.read_u32_no_offset(8 + (i as usize * 4));
-                            assert!(
-                                (2..=4).contains(&leaf_page_id),
-                                "Leaf page ID {leaf_page_id} should be in range 2-4"
-                            );
-                        }
-                    }
+                for i in 0..n_leaf {
+                    let leaf_page_id = contents.read_u32_no_offset(8 + (i as usize * 4));
+                    assert!(
+                        (2..=4).contains(&leaf_page_id),
+                        "Leaf page ID {leaf_page_id} should be in range 2-4"
+                    );
                 }
-            }
-            IOResult::IO => {
-                cursor.pager.io.run_once()?;
             }
         }
 
@@ -8683,34 +8651,27 @@ mod tests {
             .get() as usize;
 
         // Try to clear non-existent overflow pages
-        let clear_result = cursor.clear_overflow_pages(&leaf_cell)?;
-        match clear_result {
-            IOResult::Done(_) => {
-                let (freelist_pages, freelist_trunk_page) = pager.io.block(|| {
-                    pager.with_header(|header| {
-                        (
-                            header.freelist_pages.get(),
-                            header.freelist_trunk_page.get(),
-                        )
-                    })
-                })?;
+        pager.io.block(|| cursor.clear_overflow_pages(&leaf_cell))?;
+        let (freelist_pages, freelist_trunk_page) = pager.io.block(|| {
+            pager.with_header(|header| {
+                (
+                    header.freelist_pages.get(),
+                    header.freelist_trunk_page.get(),
+                )
+            })
+        })?;
 
-                // Verify freelist was not modified
-                assert_eq!(
-                    freelist_pages as usize, initial_freelist_pages,
-                    "Freelist should not change when no overflow pages exist"
-                );
+        // Verify freelist was not modified
+        assert_eq!(
+            freelist_pages as usize, initial_freelist_pages,
+            "Freelist should not change when no overflow pages exist"
+        );
 
-                // Verify trunk page wasn't created
-                assert_eq!(
-                    freelist_trunk_page, 0,
-                    "No trunk page should be created when no overflow pages exist"
-                );
-            }
-            IOResult::IO => {
-                cursor.pager.io.run_once()?;
-            }
-        }
+        // Verify trunk page wasn't created
+        assert_eq!(
+            freelist_trunk_page, 0,
+            "No trunk page should be created when no overflow pages exist"
+        );
 
         Ok(())
     }

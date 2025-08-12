@@ -91,7 +91,8 @@ use turso_sqlite3_parser::{ast, ast::Cmd, lexer::sql::Parser};
 use types::IOResult;
 pub use types::RefValue;
 pub use types::Value;
-use util::{parse_schema_rows, IOExt as _};
+use util::parse_schema_rows;
+pub use util::IOExt;
 use vdbe::builder::QueryMode;
 use vdbe::builder::TableRefIdCounter;
 
@@ -1231,16 +1232,11 @@ impl Connection {
     /// Read schema version at current transaction
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn read_schema_version(&self) -> Result<u32> {
-        loop {
-            let pager = self.pager.borrow();
-            match pager.with_header(|header| header.schema_cookie)? {
-                IOResult::Done(cookie) => return Ok(cookie.get()),
-                IOResult::IO => {
-                    self.run_once()?;
-                    continue;
-                }
-            };
-        }
+        let pager = self.pager.borrow();
+        pager
+            .io
+            .block(|| pager.with_header(|header| header.schema_cookie))
+            .map(|version| version.get())
     }
 
     /// Update schema version to the new value within opened write transaction
@@ -1254,9 +1250,9 @@ impl Connection {
                 "write_schema_version must be called from within Write transaction".to_string(),
             ));
         };
-        loop {
-            let pager = self.pager.borrow();
-            match pager.with_header_mut(|header| {
+        let pager = self.pager.borrow();
+        pager.io.block(|| {
+            pager.with_header_mut(|header| {
                 turso_assert!(
                     header.schema_cookie.get() < version,
                     "cookie can't go back in time"
@@ -1266,14 +1262,8 @@ impl Connection {
                 });
                 self.with_schema_mut(|schema| schema.schema_version = version);
                 header.schema_cookie = version.into();
-            })? {
-                IOResult::Done(()) => break,
-                IOResult::IO => {
-                    self.run_once()?;
-                    continue;
-                }
-            };
-        }
+            })
+        })?;
         Ok(())
     }
 
@@ -1423,13 +1413,14 @@ impl Connection {
                 // No active transaction
             }
             _ => {
-                while let IOResult::IO = self.pager.borrow().end_tx(
-                    true, // rollback = true for close
-                    self,
-                    self.wal_checkpoint_disabled.get(),
-                )? {
-                    self.run_once()?;
-                }
+                let pager = self.pager.borrow();
+                pager.io.block(|| {
+                    pager.end_tx(
+                        true, // rollback = true for close
+                        self,
+                        self.wal_checkpoint_disabled.get(),
+                    )
+                })?;
                 self.transaction_state.set(TransactionState::None);
             }
         }

@@ -8,8 +8,8 @@ use crate::storage::btree::BTreeCursor;
 use crate::translate::collate::CollationSeq;
 use crate::translate::plan::SelectPlan;
 use crate::util::{module_args_from_sql, module_name_from_sql, IOExt, UnparsedFromSqlIndex};
+use crate::{return_if_io, LimboError, MvCursor, Pager, RefValue, SymbolTable, VirtualTable};
 use crate::{util::normalize_ident, Result};
-use crate::{LimboError, MvCursor, Pager, RefValue, SymbolTable, VirtualTable};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use std::cell::RefCell;
@@ -128,16 +128,7 @@ impl Schema {
             let mut view = view
                 .lock()
                 .map_err(|_| LimboError::InternalError("Failed to lock view".to_string()))?;
-            match view.populate_from_table(conn)? {
-                IOResult::Done(()) => {
-                    // This view is done, continue to next
-                    continue;
-                }
-                IOResult::IO => {
-                    // This view needs more IO, return early
-                    return Ok(IOResult::IO);
-                }
-            }
+            return_if_io!(view.populate_from_table(conn));
         }
         Ok(IOResult::Done(()))
     }

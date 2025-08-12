@@ -178,10 +178,7 @@ impl Sorter {
             self.records.pop()
         } else {
             // Serve from sorted chunk files.
-            match self.next_from_chunk_heap()? {
-                IOResult::IO => return Ok(IOResult::IO),
-                IOResult::Done(record) => record,
-            }
+            return_if_io!(self.next_from_chunk_heap())
         };
         match record {
             Some(record) => {

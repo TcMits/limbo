@@ -1906,6 +1906,7 @@ pub mod test {
             wal::READMARK_NOT_USED,
         },
         types::IOResult,
+        util::IOExt,
         CheckpointMode, CheckpointResult, Completion, Connection, Database, LimboError, PlatformIO,
         StepResult, Wal, WalFile, WalFileShared, IO,
     };
@@ -2030,14 +2031,10 @@ pub mod test {
         mode: CheckpointMode,
     ) -> CheckpointResult {
         let wc = Rc::new(RefCell::new(0usize));
-        loop {
-            match wal.checkpoint(pager, wc.clone(), mode).unwrap() {
-                IOResult::Done(r) => return r,
-                IOResult::IO => {
-                    pager.io.run_once().unwrap();
-                }
-            }
-        }
+        pager
+            .io
+            .block(|| wal.checkpoint(pager, wc.clone(), mode))
+            .unwrap()
     }
 
     fn wal_header_snapshot(shared: &Arc<UnsafeCell<WalFileShared>>) -> (u32, u32, u32, u32) {
@@ -2062,9 +2059,9 @@ pub mod test {
         conn.execute("create table test(id integer primary key, value text)")
             .unwrap();
         bulk_inserts(&conn, 20, 3);
-        while let IOResult::IO = conn.pager.borrow_mut().cacheflush().unwrap() {
-            conn.run_once().unwrap();
-        }
+        db.io
+            .block(|| conn.pager.borrow_mut().cacheflush())
+            .unwrap();
 
         // Snapshot header & counters before the RESTART checkpoint.
         let wal_shared = db.maybe_shared_wal.read().as_ref().unwrap().clone();
@@ -2156,9 +2153,9 @@ pub mod test {
             .execute("create table test(id integer primary key, value text)")
             .unwrap();
         bulk_inserts(&conn1.clone(), 15, 2);
-        while let IOResult::IO = conn1.pager.borrow_mut().cacheflush().unwrap() {
-            conn1.run_once().unwrap();
-        }
+        db.io
+            .block(|| conn1.pager.borrow_mut().cacheflush())
+            .unwrap();
 
         // Force a read transaction that will freeze a lower read mark
         let readmark = {
@@ -2170,9 +2167,9 @@ pub mod test {
 
         // generate more frames that the reader will not see.
         bulk_inserts(&conn1.clone(), 15, 2);
-        while let IOResult::IO = conn1.pager.borrow_mut().cacheflush().unwrap() {
-            conn1.run_once().unwrap();
-        }
+        db.io
+            .block(|| conn1.pager.borrow_mut().cacheflush())
+            .unwrap();
 
         // Run passive checkpoint, expect partial
         let (res1, max_before) = {
@@ -2831,9 +2828,9 @@ pub mod test {
         bulk_inserts(&conn, 8, 4);
 
         // Ensure frames are flushed to the WAL
-        while let IOResult::IO = conn.pager.borrow_mut().cacheflush().unwrap() {
-            conn.run_once().unwrap();
-        }
+        db.io
+            .block(|| conn.pager.borrow_mut().cacheflush())
+            .unwrap();
 
         // Snapshot the current mxFrame before running FULL
         let wal_shared = db.maybe_shared_wal.read().as_ref().unwrap().clone();
@@ -2863,9 +2860,9 @@ pub mod test {
 
         // First commit some data and flush (reader will snapshot here)
         bulk_inserts(&writer, 2, 3);
-        while let IOResult::IO = writer.pager.borrow_mut().cacheflush().unwrap() {
-            writer.run_once().unwrap();
-        }
+        db.io
+            .block(|| writer.pager.borrow_mut().cacheflush())
+            .unwrap();
 
         // Start a read transaction pinned at the current snapshot
         {
@@ -2882,9 +2879,9 @@ pub mod test {
 
         // Advance WAL beyond the reader's snapshot
         bulk_inserts(&writer, 3, 4);
-        while let IOResult::IO = writer.pager.borrow_mut().cacheflush().unwrap() {
-            writer.run_once().unwrap();
-        }
+        db.io
+            .block(|| writer.pager.borrow_mut().cacheflush())
+            .unwrap();
         let mx_now = unsafe {
             (&*db.maybe_shared_wal.read().as_ref().unwrap().get())
                 .max_frame
