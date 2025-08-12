@@ -64,12 +64,12 @@ jobs:
       - name: Clickbench
         run: make clickbench
 
-      - name: Analyze LIMBO result with Nyrkiö
+      - name: Analyze TURSO result with Nyrkiö
         uses: nyrkio/change-detection@HEAD
         with:
-          name: clickbench/limbo
+          name: clickbench/turso
           tool: time
-          output-file-path: clickbench-limbo.txt
+          output-file-path: clickbench-tursodb.txt
           # What to do if a change is immediately detected by Nyrkiö.
           # Note that smaller changes are only detected with delay, usually after a change
           # persisted over 2-7 commits. Go to nyrkiö.com to view those or configure alerts.
