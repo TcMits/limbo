@@ -10150,4 +10150,27 @@ mod tests {
             assert!(!bitfield.get(i));
         }
     }
+
+    #[test]
+    fn test_unlikely() {
+        let input = Value::build_text("turso");
+        let expected = Value::build_text("turso");
+        assert_eq!(input.exec_unlikely(), expected);
+    
+        let input = Value::Integer(42);
+        let expected = Value::Integer(42);
+        assert_eq!(input.exec_unlikely(), expected);
+    
+        let input = Value::Float(99.99);
+        let expected = Value::Float(99.99);
+        assert_eq!(input.exec_unlikely(), expected);
+    
+        let input = Value::Null;
+        let expected = Value::Null;
+        assert_eq!(input.exec_unlikely(), expected);
+    
+        let input = Value::Blob(vec![10, 20, 30, 40]);
+        let expected = Value::Blob(vec![10, 20, 30, 40]);
+        assert_eq!(input.exec_unlikely(), expected);
+    }    
 }
