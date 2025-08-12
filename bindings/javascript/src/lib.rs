@@ -66,7 +66,7 @@ impl Database {
 
         let db_file = Arc::new(DatabaseFile::new(file));
         let db =
-            turso_core::Database::open(io.clone(), &path, db_file, false, false).map_err(|e| {
+            turso_core::Database::open(io.clone(), &path, db_file, false, true).map_err(|e| {
                 Error::new(
                     Status::GenericFailure,
                     format!("Failed to open database: {e}"),
