@@ -323,7 +323,13 @@ pub fn translate_alter_table(
         ast::AlterTableBody::RenameTo(new_name) => {
             let new_name = new_name.as_str();
 
-            if schema.get_table(new_name).is_some() {
+            if schema.get_table(new_name).is_some()
+                || schema
+                    .indexes
+                    .values()
+                    .flatten()
+                    .any(|index| index.name == normalize_ident(new_name))
+            {
                 return Err(LimboError::ParseError(format!(
                     "there is already another table or index with this name: {new_name}"
                 )));

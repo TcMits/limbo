@@ -126,3 +126,15 @@ do_execsql_test_in_memory_any_error fail-alter-table-drop-primary-key-column-con
     CREATE TABLE t (a, b, PRIMARY KEY (a));
     ALTER TABLE t DROP a;
 }
+
+do_execsql_test_in_memory_any_error fail-alter-table-rename-to-existing-index {
+    CREATE TABLE x (a);
+    CREATE INDEX y ON x (a);
+    ALTER TABLE x RENAME TO y;
+}
+
+do_execsql_test_in_memory_any_error fail-alter-table-rename-to-existing-table {
+    CREATE TABLE x (a);
+    CREATE TABLE y (a);
+    ALTER TABLE x RENAME TO y;
+}
