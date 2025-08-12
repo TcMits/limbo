@@ -1178,8 +1178,8 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                 .map_err(|e| LimboError::InternalError(e.to_string()))?
             {
                 IOResult::Done(()) => break,
-                IOResult::IO => {
-                    pager.io.run_once().unwrap();
+                IOResult::IO(io) => {
+                    io.wait(pager.io.as_ref())?;
                     continue;
                 }
             }
@@ -1191,8 +1191,8 @@ impl<Clock: LogicalClock> MvStore<Clock> {
             let row_id = match rowid_result {
                 IOResult::Done(Some(row_id)) => row_id,
                 IOResult::Done(None) => break,
-                IOResult::IO => {
-                    pager.io.run_once()?;
+                IOResult::IO(io) => {
+                    io.wait(pager.io.as_ref())?;
                     continue;
                 }
             };
@@ -1213,8 +1213,8 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                         break 'record;
                     }
                     IOResult::Done(None) => break,
-                    IOResult::IO => {
-                        pager.io.run_once()?;
+                    IOResult::IO(io) => {
+                        io.wait(pager.io.as_ref())?;
                     } // FIXME: lazy me not wanting to do state machine right now
                 }
             }
@@ -1228,8 +1228,8 @@ impl<Clock: LogicalClock> MvStore<Clock> {
                         }
                         break 'next;
                     }
-                    IOResult::IO => {
-                        pager.io.run_once()?;
+                    IOResult::IO(io) => {
+                        io.wait(pager.io.as_ref())?;
                     } // FIXME: lazy me not wanting to do state machine right now
                 }
             }
