@@ -2837,18 +2837,17 @@ pub mod test {
         {
             let pager = writer.pager.borrow();
             let mut wal = pager.wal.as_ref().unwrap().borrow_mut();
-            match wal.checkpoint(&pager, CheckpointMode::Full) {
-                Ok(IOResult::IO(io)) => {
-                    // Drive any pending IO (should quickly become Busy or Done)
-                    io.wait(db.io.as_ref()).unwrap();
-                    // Call again to see final state
-                    match wal.checkpoint(&pager, CheckpointMode::Full) {
-                        Err(LimboError::Busy) => {}
-                        other => panic!("expected Busy from FULL with old reader, got {other:?}"),
+            loop {
+                match wal.checkpoint(&pager, CheckpointMode::Full) {
+                    Ok(IOResult::IO(io)) => {
+                        // Drive any pending IO (should quickly become Busy or Done)
+                        io.wait(db.io.as_ref()).unwrap();
                     }
+                    Err(LimboError::Busy) => {
+                        break;
+                    }
+                    other => panic!("expected Busy from FULL with old reader, got {other:?}"),
                 }
-                Err(LimboError::Busy) => {}
-                other => panic!("expected Busy from FULL with old reader, got {other:?}"),
             }
         }
 
