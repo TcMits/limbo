@@ -399,4 +399,15 @@ class Statement {
   }
 }
 
-export { Database, SqliteError }
+/**
+ * Creates a new database connection asynchronously.
+ * 
+ * @param {string} path - Path to the database file.
+ * @param {Object} opts - Options for database behavior.
+ * @returns {Promise<Database>} - A promise that resolves to a Database instance.
+ */
+async function connect(path: string, opts: any = {}): Promise<Database> {
+  return new Database(path, opts);
+}
+
+export { Database, SqliteError, connect }

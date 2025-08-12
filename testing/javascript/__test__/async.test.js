@@ -484,9 +484,9 @@ const connect = async (path, options = {}) => {
   }
   const provider = process.env.PROVIDER;
   if (provider === "turso") {
-    const { Database, SqliteError } = await import("@tursodatabase/database");
-    const db = new Database(path, options);
-    return [db, path, SqliteError];
+    const turso = await import("@tursodatabase/database");
+    const db = await turso.connect(path, options);
+    return [db, path, turso.SqliteError];
   }
   if (provider === "libsql") {
     const libsql = await import("libsql/promise");
@@ -494,17 +494,17 @@ const connect = async (path, options = {}) => {
     return [db, path, libsql.SqliteError, path];
   }
   if (provider === "serverless") {
-    const x = await import("@tursodatabase/serverless");
+    const turso = await import("@tursodatabase/serverless");
     const url = process.env.TURSO_DATABASE_URL;
     if (!url) {
       throw new Error("TURSO_DATABASE_URL is not set");
     }
     const authToken = process.env.TURSO_AUTH_TOKEN;
-    const db = new x.connect({
+    const db = new turso.connect({
       url,
       authToken,
     });
-    return [db, null, x.SqliteError];
+    return [db, null, turso.SqliteError];
   }
 };
 
