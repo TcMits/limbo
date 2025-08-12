@@ -160,4 +160,5 @@ export interface SyncEngineOpts {
   path: string
   clientName?: string
   walPullBatchSize?: number
+  enableTracing?: boolean
 }

@@ -3,10 +3,11 @@
 pub mod generator;
 pub mod js_protocol_io;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use napi::bindgen_prelude::AsyncTask;
 use napi_derive::napi;
+use tracing_subscriber::{filter::LevelFilter, fmt::format::FmtSpan};
 use turso_node::IoLoopTask;
 use turso_sync_engine::{
     database_sync_engine::{DatabaseSyncEngine, DatabaseSyncEngineOpts},
@@ -39,12 +40,32 @@ pub struct SyncEngineOpts {
     pub path: String,
     pub client_name: Option<String>,
     pub wal_pull_batch_size: Option<u32>,
+    pub enable_tracing: Option<String>,
+}
+
+static TRACING_INIT: OnceLock<()> = OnceLock::new();
+fn init_tracing(level_filter: LevelFilter) {
+    TRACING_INIT.get_or_init(|| {
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_thread_ids(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            .with_max_level(level_filter)
+            .init();
+    });
 }
 
 #[napi]
 impl SyncEngine {
     #[napi(constructor)]
     pub fn new(opts: SyncEngineOpts) -> napi::Result<Self> {
+        // helpful for local debugging
+        match opts.enable_tracing.as_deref() {
+            Some("info") => init_tracing(LevelFilter::INFO),
+            Some("debug") => init_tracing(LevelFilter::DEBUG),
+            Some("trace") => init_tracing(LevelFilter::TRACE),
+            _ => {}
+        }
         let is_memory = opts.path == ":memory:";
         let io: Arc<dyn turso_core::IO> = if is_memory {
             Arc::new(turso_core::MemoryIO::new())
