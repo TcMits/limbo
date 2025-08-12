@@ -60,9 +60,9 @@ pub(crate) async fn run_stmt_once<'a>(
     }
 }
 
-pub(crate) async fn run_stmt_expect_one_row<'a>(
-    coro: &'_ Coro,
-    stmt: &'a mut turso_core::Statement,
+pub(crate) async fn run_stmt_expect_one_row(
+    coro: &Coro,
+    stmt: &mut turso_core::Statement,
 ) -> Result<Option<Vec<turso_core::Value>>> {
     let Some(row) = run_stmt_once(coro, stmt).await? else {
         return Ok(None);
@@ -71,14 +71,14 @@ pub(crate) async fn run_stmt_expect_one_row<'a>(
     let None = run_stmt_once(coro, stmt).await? else {
         return Err(Error::DatabaseTapeError("single row expected".to_string()));
     };
-    return Ok(Some(values));
+    Ok(Some(values))
 }
 
 pub(crate) async fn run_stmt_ignore_rows(
     coro: &Coro,
     stmt: &mut turso_core::Statement,
 ) -> Result<()> {
-    while let Some(_) = run_stmt_once(coro, stmt).await? {}
+    while run_stmt_once(coro, stmt).await?.is_some() {}
     Ok(())
 }
 
