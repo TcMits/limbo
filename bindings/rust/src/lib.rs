@@ -333,7 +333,11 @@ impl Connection {
             .inner
             .lock()
             .map_err(|e| Error::MutexError(e.to_string()))?;
-        let _res = conn.cacheflush()?;
+        let completions = conn.cacheflush()?;
+        let pager = conn.get_pager();
+        for c in completions {
+            pager.io.wait_for_completion(c)?;
+        }
         Ok(())
     }
 
