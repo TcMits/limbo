@@ -255,8 +255,8 @@ impl Database {
         enable_indexes: bool,
         enable_views: bool,
     ) -> Result<Arc<Database>> {
-        if path == ":memory:" {
-            return Self::do_open_with_flags(
+        if path.starts_with(":memory:") {
+            return Self::open_with_flags_bypass_registry(
                 io,
                 path,
                 db_file,
@@ -277,7 +277,7 @@ impl Database {
         if let Some(db) = registry.get(&canonical_path).and_then(Weak::upgrade) {
             return Ok(db);
         }
-        let db = Self::do_open_with_flags(
+        let db = Self::open_with_flags_bypass_registry(
             io,
             path,
             db_file,
@@ -291,7 +291,7 @@ impl Database {
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
-    fn do_open_with_flags(
+    fn open_with_flags_bypass_registry(
         io: Arc<dyn IO>,
         path: &str,
         db_file: Arc<dyn DatabaseStorage>,
