@@ -949,9 +949,9 @@ pub fn write_pages_vectored(
     pager: &Pager,
     batch: BTreeMap<usize, Arc<Buffer>>,
     flush: &PendingFlush,
-) -> Result<()> {
+) -> Result<Vec<Completion>> {
     if batch.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     // batch item array is already sorted by id, so we just need to find contiguous ranges of page_id's
@@ -989,6 +989,7 @@ pub fn write_pages_vectored(
     // Iterate through the batch
     let mut iter = batch.into_iter().peekable();
 
+    let mut completions = Vec::new();
     while let Some((id, item)) = iter.next() {
         // Track the start of the run
         if run_start_id.is_none() {
@@ -1016,23 +1017,28 @@ pub fn write_pages_vectored(
             });
 
             // Submit write operation for this run, decrementing the counter if we error
-            if let Err(e) = pager.db_file.write_pages(
+            match pager.db_file.write_pages(
                 start_id,
                 page_sz,
                 std::mem::replace(&mut run_bufs, Vec::with_capacity(EST_BUFF_CAPACITY)),
                 c,
             ) {
-                if runs_left.fetch_sub(1, Ordering::AcqRel) == 1 {
-                    done.store(true, Ordering::Release);
+                Ok(c) => {
+                    completions.push(c);
                 }
-                return Err(e);
+                Err(e) => {
+                    if runs_left.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        done.store(true, Ordering::Release);
+                    }
+                    return Err(e);
+                }
             }
             run_start_id = None;
         }
     }
 
     tracing::debug!("write_pages_vectored: total runs={run_count}");
-    Ok(())
+    Ok(completions)
 }
 
 #[instrument(skip_all, level = Level::DEBUG)]

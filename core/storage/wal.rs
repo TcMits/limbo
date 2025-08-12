@@ -18,7 +18,7 @@ use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_read_wal_frame_raw, finish_read_page, prepare_wal_frame,
     write_pages_vectored, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
-use crate::types::IOResult;
+use crate::types::{IOCompletions, IOResult};
 use crate::{turso_assert, Buffer, LimboError, Result};
 use crate::{Completion, Page};
 
@@ -286,10 +286,9 @@ pub trait Wal {
 pub enum CheckpointState {
     Start,
     ReadFrame,
-    WaitReadFrame,
     AccumulatePage,
     FlushBatch,
-    WaitFlush,
+    AfterFlush,
     Done,
 }
 
@@ -1392,23 +1391,16 @@ impl WalFile {
                                 *frame
                             );
                             self.ongoing_checkpoint.scratch_page.get().id = page as usize;
-                            let _ = self.read_frame(
+                            let c = self.read_frame(
                                 *frame,
                                 self.ongoing_checkpoint.scratch_page.clone(),
                                 self.buffer_pool.clone(),
                             )?;
-                            self.ongoing_checkpoint.state = CheckpointState::WaitReadFrame;
-                            continue 'checkpoint_loop;
+                            self.ongoing_checkpoint.state = CheckpointState::AccumulatePage;
+                            return Ok(IOResult::IO(IOCompletions::Single(c)));
                         }
                     }
                     self.ongoing_checkpoint.current_page += 1;
-                }
-                CheckpointState::WaitReadFrame => {
-                    if self.ongoing_checkpoint.scratch_page.is_locked() {
-                        return Ok(IOResult::IO);
-                    } else {
-                        self.ongoing_checkpoint.state = CheckpointState::AccumulatePage;
-                    }
                 }
                 CheckpointState::AccumulatePage => {
                     // we read the frame into memory, add it to our batch
@@ -1436,18 +1428,20 @@ impl WalFile {
                 }
                 CheckpointState::FlushBatch => {
                     tracing::trace!("started checkpoint backfilling batch");
-                    write_pages_vectored(
+                    let completions = write_pages_vectored(
                         pager,
                         std::mem::take(&mut self.ongoing_checkpoint.batch),
                         &self.ongoing_checkpoint.pending_flush,
                     )?;
                     // batch is queued
-                    self.ongoing_checkpoint.state = CheckpointState::WaitFlush;
+                    self.ongoing_checkpoint.state = CheckpointState::AfterFlush;
+                    return Ok(IOResult::IO(IOCompletions::Many(completions)));
                 }
-                CheckpointState::WaitFlush => {
-                    if !self.ongoing_checkpoint.pending_flush.is_done() {
-                        return Ok(IOResult::IO);
-                    }
+                CheckpointState::AfterFlush => {
+                    turso_assert!(
+                        self.ongoing_checkpoint.pending_flush.is_done(),
+                        "flush should be done"
+                    );
                     tracing::debug!("finished checkpoint backfilling batch");
                     // done with batch
                     let shared = self.get_shared();
