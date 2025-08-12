@@ -7,6 +7,7 @@ use crate::storage::btree::BTreeCursor;
 use crate::storage::btree::BTreeKey;
 use crate::types::IOResult;
 use crate::types::ImmutableRecord;
+use crate::IOExt;
 use crate::LimboError;
 use crate::Result;
 use crate::{Connection, Pager};
@@ -419,25 +420,11 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
                 // 2. Choose a txn to write depending on some heuristics like amount of frames will be written.
                 // 3. ..
                 //
-                loop {
-                    match self.pager.begin_write_tx() {
-                        Ok(crate::types::IOResult::Done(result)) => {
-                            if let crate::result::LimboResult::Busy = result {
-                                return Err(LimboError::InternalError(
-                                    "Pager write transaction busy".to_string(),
-                                ));
-                            }
-                            break;
-                        }
-                        Ok(crate::types::IOResult::IO) => {
-                            // FIXME: this is a hack to make the pager run the IO loop
-                            self.pager.io.run_once().unwrap();
-                            continue;
-                        }
-                        Err(e) => {
-                            return Err(LimboError::InternalError(e.to_string()));
-                        }
-                    }
+                let result = self.pager.io.block(|| self.pager.begin_write_tx())?;
+                if let crate::result::LimboResult::Busy = result {
+                    return Err(LimboError::InternalError(
+                        "Pager write transaction busy".to_string(),
+                    ));
                 }
                 self.state = CommitState::WriteRow {
                     end_ts,
@@ -492,7 +479,7 @@ impl<Clock: LogicalClock> StateTransition for CommitStateMachine<Clock> {
             } => {
                 let write_row_state_machine = self.write_row_state_machine.as_mut().unwrap();
                 match write_row_state_machine.step(&())? {
-                    TransitionResult::Io => return Ok(TransitionResult::Io),
+                    TransitionResult::Io(io) => return Ok(TransitionResult::Io(io)),
                     TransitionResult::Continue => {
                         return Ok(TransitionResult::Continue);
                     }
@@ -633,8 +620,8 @@ impl StateTransition for WriteRowStateMachine {
                         self.state = WriteRowState::Insert;
                         Ok(TransitionResult::Continue)
                     }
-                    IOResult::IO => {
-                        return Ok(TransitionResult::Io);
+                    IOResult::IO(io) => {
+                        return Ok(TransitionResult::Io(io));
                     }
                 }
             }
@@ -656,8 +643,8 @@ impl StateTransition for WriteRowStateMachine {
                         self.finalize(&())?;
                         Ok(TransitionResult::Done(()))
                     }
-                    IOResult::IO => {
-                        return Ok(TransitionResult::Io);
+                    IOResult::IO(io) => {
+                        return Ok(TransitionResult::Io(io));
                     }
                 }
             }

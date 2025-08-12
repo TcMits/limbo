@@ -124,7 +124,7 @@ pub struct Database {
     schema: Mutex<Arc<Schema>>,
     db_file: Arc<dyn DatabaseStorage>,
     path: String,
-    io: Arc<dyn IO>,
+    pub io: Arc<dyn IO>,
     // Shared structures of a Database are the parts that are common to multiple threads that might
     // create DB connections.
     _shared_page_cache: Arc<RwLock<DumbLruPageCache>>,

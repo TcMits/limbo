@@ -511,7 +511,9 @@ impl Program {
                     loop {
                         let res = state_machine.step(mv_store)?;
                         match res {
-                            crate::state_machine::TransitionResult::Io => {}
+                            crate::state_machine::TransitionResult::Io(io) => {
+                                io.wait(conn._db.io.as_ref())?;
+                            }
                             crate::state_machine::TransitionResult::Continue => continue,
                             crate::state_machine::TransitionResult::Done(_) => break,
                         }
