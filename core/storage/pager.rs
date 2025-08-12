@@ -248,16 +248,6 @@ impl Page {
         self.get().pin_count.load(Ordering::SeqCst) > 0
     }
 }
-#[derive(Clone, Copy, Debug)]
-/// The state of the current pager cache flush.
-enum CacheFlushState {
-    /// Idle.
-    Start,
-    /// Append a single frame to the WAL.
-    AppendFrame { current_page_to_append_idx: usize },
-    /// Wait for append frame to complete.
-    WaitAppendFrame { current_page_to_append_idx: usize },
-}
 
 #[derive(Clone, Copy, Debug)]
 /// The state of the current pager cache commit.
@@ -1053,9 +1043,7 @@ impl Pager {
         if let Some(page) = page_cache.get(&page_key) {
             tracing::trace!("read_page(page_idx = {}) = cached", page_idx);
             // Dummy completion being passed, as we do not need to read from database or wal
-            let c = Completion::new_write(|_| {});
-            c.complete(0);
-            return Ok((page.clone(), c));
+            return Ok((page.clone(), Completion::new_dummy()));
         }
         let (page, c) = self.read_page_no_cache(page_idx, None, false)?;
         self.cache_insert(page_idx, page.clone(), &mut page_cache)?;
@@ -1254,10 +1242,7 @@ impl Pager {
                     return Ok(IOResult::IO(IOCompletions::Single(c)));
                 }
                 CommitState::AfterSyncDbFile => {
-                    turso_assert!(
-                        self.syncing.borrow().clone(),
-                        "should have finished syncing"
-                    );
+                    turso_assert!(!*self.syncing.borrow(), "should have finished syncing");
                     self.commit_info.borrow_mut().state = CommitState::Start;
                     break PagerCommitResult::Checkpointed(checkpoint_result);
                 }
@@ -1349,7 +1334,7 @@ impl Pager {
                     return Ok(IOResult::IO(IOCompletions::Single(c)));
                 }
                 CheckpointState::CheckpointDone { res } => {
-                    turso_assert!(self.syncing.borrow().clone(), "syncing should be done");
+                    turso_assert!(!*self.syncing.borrow(), "syncing should be done");
                     self.checkpoint_state.replace(CheckpointState::Checkpoint);
                     return Ok(IOResult::Done(res));
                 }
@@ -1784,7 +1769,7 @@ impl Pager {
                         leaf_page.get().id
                     );
                     let page_contents = trunk_page.get().contents.as_ref().unwrap();
-                    self.add_dirty(&leaf_page);
+                    self.add_dirty(leaf_page);
                     // zero out the page
                     turso_assert!(
                         leaf_page.get_contents().overflow_cells.is_empty(),

@@ -1137,17 +1137,6 @@ impl Connection {
         Ok(())
     }
 
-    fn run_once(&self) -> Result<()> {
-        if self.closed.get() {
-            return Err(LimboError::InternalError("Connection closed".to_string()));
-        }
-        let res = self._db.io.run_once();
-        if let Err(ref e) = res {
-            vdbe::handle_program_error(&self.pager.borrow(), self, e)?;
-        }
-        res
-    }
-
     #[cfg(feature = "fs")]
     pub fn from_uri(
         uri: &str,
