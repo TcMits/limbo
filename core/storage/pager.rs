@@ -610,23 +610,18 @@ impl Pager {
                     ptrmap_pg_no
                 );
 
-                let (ptrmap_page, _c) = self.read_page(ptrmap_pg_no as usize)?;
+                let (ptrmap_page, c) = self.read_page(ptrmap_pg_no as usize)?;
                 self.ptrmap_get_state.replace(PtrMapGetState::Deserialize {
                     ptrmap_page,
                     offset_in_ptrmap_page,
                 });
-                Ok(IOResult::IO)
+                Ok(IOResult::IO(IOCompletions::Single(c)))
             }
             PtrMapGetState::Deserialize {
                 ptrmap_page,
                 offset_in_ptrmap_page,
             } => {
-                if ptrmap_page.is_locked() {
-                    return Ok(IOResult::IO);
-                }
-                if !ptrmap_page.is_loaded() {
-                    return Ok(IOResult::IO);
-                }
+                turso_assert!(ptrmap_page.is_loaded(), "ptrmap_page should be loaded");
                 let ptrmap_page_inner = ptrmap_page.get();
                 let ptrmap_pg_no = ptrmap_page_inner.id;
 
@@ -714,17 +709,18 @@ impl Pager {
                         offset_in_ptrmap_page
                     );
 
-                let (ptrmap_page, _c) = self.read_page(ptrmap_pg_no as usize)?;
+                let (ptrmap_page, c) = self.read_page(ptrmap_pg_no as usize)?;
                 self.ptrmap_put_state.replace(PtrMapPutState::Deserialize {
                     ptrmap_page,
                     offset_in_ptrmap_page,
                 });
-                Ok(IOResult::IO)
+                Ok(IOResult::IO(IOCompletions::Single(c)))
             }
             PtrMapPutState::Deserialize {
                 ptrmap_page,
                 offset_in_ptrmap_page,
             } => {
+                turso_assert!(ptrmap_page.is_loaded(), "page should be loaded");
                 let ptrmap_page_inner = ptrmap_page.get();
                 let ptrmap_pg_no = ptrmap_page_inner.id;
 
@@ -2218,7 +2214,7 @@ mod ptrmap_tests {
                 IOResult::Done(res) => {
                     return Ok(res);
                 }
-                IOResult::IO => pager.io.run_once().unwrap(),
+                IOResult::IO(io) => io.wait(pager.io.as_ref())?,
             }
         }
     }
