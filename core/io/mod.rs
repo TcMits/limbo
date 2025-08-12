@@ -95,20 +95,32 @@ pub trait IO: Clock + Send + Sync {
     }
 }
 
-pub type Complete = dyn Fn(Arc<Buffer>, i32);
+pub type ReadComplete = dyn Fn(Arc<Buffer>, i32);
 pub type WriteComplete = dyn Fn(i32);
 pub type SyncComplete = dyn Fn(i32);
 pub type TruncateComplete = dyn Fn(i32);
 
 #[must_use]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Completion {
     inner: Arc<CompletionInner>,
 }
 
+#[derive(Debug)]
 struct CompletionInner {
     pub completion_type: CompletionType,
     is_completed: Cell<bool>,
+}
+
+impl Debug for CompletionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read(..) => f.debug_tuple("Read").finish(),
+            Self::Write(..) => f.debug_tuple("Write").finish(),
+            Self::Sync(..) => f.debug_tuple("Sync").finish(),
+            Self::Truncate(..) => f.debug_tuple("Truncate").finish(),
+        }
+    }
 }
 
 pub enum CompletionType {
@@ -120,7 +132,7 @@ pub enum CompletionType {
 
 pub struct ReadCompletion {
     pub buf: Arc<Buffer>,
-    pub complete: Box<Complete>,
+    pub complete: Box<ReadComplete>,
 }
 
 impl Completion {
@@ -168,6 +180,14 @@ impl Completion {
             complete,
         ))))
     }
+
+    /// Create a dummy completed completion
+    pub fn new_dummy() -> Self {
+        let c = Self::new_write(|_| {});
+        c.complete(0);
+        c
+    }
+
     pub fn is_completed(&self) -> bool {
         self.inner.is_completed.get()
     }
@@ -212,7 +232,7 @@ pub struct SyncCompletion {
 }
 
 impl ReadCompletion {
-    pub fn new(buf: Arc<Buffer>, complete: Box<Complete>) -> Self {
+    pub fn new(buf: Arc<Buffer>, complete: Box<ReadComplete>) -> Self {
         Self { buf, complete }
     }
 

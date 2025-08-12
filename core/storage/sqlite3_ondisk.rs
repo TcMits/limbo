@@ -51,7 +51,7 @@ use super::pager::PageRef;
 use super::wal::TursoRwLock;
 use crate::error::LimboError;
 use crate::fast_lock::SpinLock;
-use crate::io::{Buffer, Complete, Completion};
+use crate::io::{Buffer, Completion, ReadComplete};
 use crate::storage::btree::offset::{
     BTREE_CELL_CONTENT_AREA, BTREE_CELL_COUNT, BTREE_FIRST_FREEBLOCK, BTREE_FRAGMENTED_BYTES_COUNT,
     BTREE_PAGE_TYPE, BTREE_RIGHTMOST_PTR,
@@ -1572,7 +1572,7 @@ pub fn read_entire_wal_dumb(file: &Arc<dyn File>) -> Result<Arc<UnsafeCell<WalFi
     }));
     let wal_file_shared_for_completion = wal_file_shared_ret.clone();
 
-    let complete: Box<Complete> = Box::new(move |buf: Arc<Buffer>, bytes_read: i32| {
+    let complete: Box<ReadComplete> = Box::new(move |buf: Arc<Buffer>, bytes_read: i32| {
         let buf_slice = buf.as_slice();
         turso_assert!(
             bytes_read == buf_slice.len() as i32,
@@ -1755,7 +1755,7 @@ pub fn begin_read_wal_frame_raw(
     buffer_pool: &Arc<BufferPool>,
     io: &Arc<dyn File>,
     offset: usize,
-    complete: Box<Complete>,
+    complete: Box<ReadComplete>,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_wal_frame_raw(offset={})", offset);
     let buf = Arc::new(buffer_pool.get_wal_frame());
@@ -1769,7 +1769,7 @@ pub fn begin_read_wal_frame(
     io: &Arc<dyn File>,
     offset: usize,
     buffer_pool: Arc<BufferPool>,
-    complete: Box<Complete>,
+    complete: Box<ReadComplete>,
 ) -> Result<Completion> {
     tracing::trace!("begin_read_wal_frame(offset={})", offset);
     let buf = buffer_pool.get_page();
