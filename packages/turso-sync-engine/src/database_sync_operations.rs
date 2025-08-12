@@ -30,6 +30,11 @@ pub enum WalPullResult {
     NeedCheckpoint,
 }
 
+pub enum WalPushResult {
+    Ok { baton: Option<String> },
+    NeedCheckpoint,
+}
+
 /// Bootstrap multiple DB files from latest generation from remote
 pub async fn db_bootstrap<C: ProtocolIO>(
     coro: &Coro,
@@ -186,12 +191,12 @@ pub async fn wal_push<C: ProtocolIO>(
     generation: u64,
     start_frame: u64,
     end_frame: u64,
-) -> Result<Option<String>> {
+) -> Result<WalPushResult> {
     assert!(wal_session.in_txn());
     tracing::debug!("wal_push: baton={baton:?}, generation={generation}, start_frame={start_frame}, end_frame={end_frame}");
 
     if start_frame == end_frame {
-        return Ok(None);
+        return Ok(WalPushResult::Ok { baton: None });
     }
 
     let mut frames_data = Vec::with_capacity((end_frame - start_frame) as usize * WAL_FRAME_SIZE);
@@ -216,17 +221,21 @@ pub async fn wal_push<C: ProtocolIO>(
         frames_data,
     )
     .await?;
-    if status.status == "conflict" {
-        return Err(Error::DatabaseSyncEngineConflict(format!(
+    if status.status == "ok" {
+        Ok(WalPushResult::Ok {
+            baton: status.baton,
+        })
+    } else if status.status == "checkpoint_needed" {
+        Ok(WalPushResult::NeedCheckpoint)
+    } else if status.status == "conflict" {
+        Err(Error::DatabaseSyncEngineConflict(format!(
             "wal_push conflict: {status:?}"
-        )));
-    }
-    if status.status != "ok" {
-        return Err(Error::DatabaseSyncEngineError(format!(
+        )))
+    } else {
+        Err(Error::DatabaseSyncEngineError(format!(
             "wal_push unexpected status: {status:?}"
-        )));
+        )))
     }
-    Ok(status.baton)
 }
 
 const TURSO_SYNC_META_TABLE: &str =
@@ -334,11 +343,13 @@ pub async fn transfer_logical_changes(
         ignore_schema_changes: false,
         ..Default::default()
     };
+    let mut rows_changed = 0;
     let mut changes = source.iterate_changes(iterate_opts)?;
     let mut updated = false;
     while let Some(operation) = changes.next(coro).await? {
         match &operation {
             DatabaseTapeOperation::RowChange(change) => {
+                rows_changed += 1;
                 assert!(
                     last_change_id.is_none() || last_change_id.unwrap() < change.change_id,
                     "change id must be strictly increasing: last_change_id={:?}, change.change_id={}",
@@ -387,6 +398,7 @@ pub async fn transfer_logical_changes(
         session.replay(coro, operation).await?;
     }
 
+    tracing::debug!("transfer_logical_changes: rows_changed={:?}", rows_changed);
     Ok(())
 }
 
@@ -448,6 +460,23 @@ pub async fn transfer_physical_changes(
         target_sync_watermark
     };
     Ok(target_sync_watermark)
+}
+
+pub async fn checkpoint_wal_file(coro: &Coro, conn: &Arc<turso_core::Connection>) -> Result<()> {
+    let mut checkpoint_stmt = conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)")?;
+    loop {
+        match checkpoint_stmt.step()? {
+            turso_core::StepResult::IO => coro.yield_(ProtocolCommand::IO).await?,
+            turso_core::StepResult::Done => break,
+            turso_core::StepResult::Row => continue,
+            r => {
+                return Err(Error::DatabaseSyncEngineError(format!(
+                    "unexepcted checkpoint result: {r:?}"
+                )))
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn reset_wal_file(

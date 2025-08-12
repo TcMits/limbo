@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     database_sync_operations::{
-        db_bootstrap, reset_wal_file, transfer_logical_changes, transfer_physical_changes,
-        wait_full_body, wal_pull, wal_push, WalPullResult,
+        checkpoint_wal_file, db_bootstrap, reset_wal_file, transfer_logical_changes,
+        transfer_physical_changes, wait_full_body, wal_pull, wal_push, WalPullResult,
     },
     errors::Error,
     io_operations::IoOperations,
@@ -107,57 +107,86 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
         // reset Synced DB if it wasn't properly cleaned-up on previous "sync-method" attempt
         self.reset_synced_if_dirty(coro).await?;
 
-        // update Synced DB with fresh changes from remote
-        self.pull_synced_from_remote(coro).await?;
+        loop {
+            // update Synced DB with fresh changes from remote
+            let pull_result = self.pull_synced_from_remote(coro).await?;
 
-        // we will "replay" Synced WAL to the Draft WAL later without pushing it to the remote
-        // so, we pass 'capture: true' as we need to preserve all changes for future push of WAL
-        let draft = self.io.open_tape(&self.draft_path, true)?;
-        let synced = self.io.open_tape(&self.synced_path, true)?;
+            {
+                // we will "replay" Synced WAL to the Draft WAL later without pushing it to the remote
+                // so, we pass 'capture: true' as we need to preserve all changes for future push of WAL
+                let draft = self.io.open_tape(&self.draft_path, true)?;
+                tracing::info!("opened draft");
+                let synced = self.io.open_tape(&self.synced_path, true)?;
+                tracing::info!("opened synced");
 
-        {
-            // we will start wal write session for Draft DB in order to hold write lock during transfer of changes
-            let mut draft_session = WalSession::new(draft.connect(coro).await?);
-            draft_session.begin()?;
+                // we will start wal write session for Draft DB in order to hold write lock during transfer of changes
+                let mut draft_session = WalSession::new(draft.connect(coro).await?);
+                draft_session.begin()?;
 
-            // mark Synced as dirty as we will start transfer of logical changes there and if we will fail in the middle - we will need to cleanup Synced db
-            self.synced_is_dirty = true;
+                // mark Synced as dirty as we will start transfer of logical changes there and if we will fail in the middle - we will need to cleanup Synced db
+                self.synced_is_dirty = true;
 
-            // transfer logical changes to the Synced DB in order to later execute physical "rebase" operation
-            let client_id = &self.meta().client_unique_id;
-            transfer_logical_changes(coro, &draft, &synced, client_id, true).await?;
+                // transfer logical changes to the Synced DB in order to later execute physical "rebase" operation
+                let client_id = &self.meta().client_unique_id;
+                transfer_logical_changes(coro, &draft, &synced, client_id, true).await?;
 
-            // now we are ready to do the rebase: let's transfer physical changes from Synced to Draft
-            let synced_wal_watermark = self.meta().synced_wal_match_watermark;
-            let synced_sync_watermark = self.meta().synced_frame_no.expect(
-                "synced_frame_no must be set as we call pull_synced_from_remote before that",
+                // now we are ready to do the rebase: let's transfer physical changes from Synced to Draft
+                let synced_wal_watermark = self.meta().synced_wal_match_watermark;
+                let synced_sync_watermark = self.meta().synced_frame_no.expect(
+                    "synced_frame_no must be set as we call pull_synced_from_remote before that",
+                );
+                let draft_wal_watermark = self.meta().draft_wal_match_watermark;
+                let draft_sync_watermark = transfer_physical_changes(
+                    coro,
+                    &synced,
+                    draft_session,
+                    synced_wal_watermark,
+                    synced_sync_watermark,
+                    draft_wal_watermark,
+                )
+                .await?;
+                update_meta(
+                    coro,
+                    self.protocol.as_ref(),
+                    &self.meta_path,
+                    &mut self.meta,
+                    |m| {
+                        m.draft_wal_match_watermark = draft_sync_watermark;
+                        m.synced_wal_match_watermark = synced_sync_watermark;
+                    },
+                )
+                .await?;
+            }
+
+            // Synced DB is 100% dirty now - let's reset it
+            assert!(self.synced_is_dirty);
+            self.reset_synced_if_dirty(coro).await?;
+
+            let WalPullResult::NeedCheckpoint = pull_result else {
+                break;
+            };
+            tracing::debug!(
+                "ready to checkpoint synced db file at {:?}, generation={}",
+                self.synced_path,
+                self.meta().synced_generation
             );
-            let draft_wal_watermark = self.meta().draft_wal_match_watermark;
-            let draft_sync_watermark = transfer_physical_changes(
-                coro,
-                &synced,
-                draft_session,
-                synced_wal_watermark,
-                synced_sync_watermark,
-                draft_wal_watermark,
-            )
-            .await?;
-            update_meta(
-                coro,
-                self.protocol.as_ref(),
-                &self.meta_path,
-                &mut self.meta,
-                |m| {
-                    m.draft_wal_match_watermark = draft_sync_watermark;
-                    m.synced_wal_match_watermark = synced_sync_watermark;
-                },
-            )
-            .await?;
+            {
+                let synced = self.io.open_tape(&self.synced_path, false)?;
+                checkpoint_wal_file(coro, &synced.connect_untracked()?).await?;
+                update_meta(
+                    coro,
+                    self.protocol.as_ref(),
+                    &self.meta_path,
+                    &mut self.meta,
+                    |m| {
+                        m.synced_generation = m.synced_generation + 1;
+                        m.synced_frame_no = Some(0);
+                        m.synced_wal_match_watermark = 0;
+                    },
+                )
+                .await?;
+            }
         }
-
-        // Synced DB is 100% dirty now - let's reset it
-        assert!(self.synced_is_dirty);
-        self.reset_synced_if_dirty(coro).await?;
 
         Ok(())
     }
@@ -251,7 +280,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
         Ok(())
     }
 
-    async fn pull_synced_from_remote(&mut self, coro: &Coro) -> Result<()> {
+    async fn pull_synced_from_remote(&mut self, coro: &Coro) -> Result<WalPullResult> {
         tracing::debug!(
             "pull_synced_from_remote: draft={:?}, synced={:?}",
             self.draft_path,
@@ -286,15 +315,11 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             )
             .await?
             {
-                WalPullResult::Done => return Ok(()),
+                WalPullResult::Done => return Ok(WalPullResult::Done),
+                WalPullResult::NeedCheckpoint => return Ok(WalPullResult::NeedCheckpoint),
                 WalPullResult::PullMore => {
                     start_frame = end_frame;
                     continue;
-                }
-                WalPullResult::NeedCheckpoint => {
-                    return Err(Error::DatabaseSyncEngineError(
-                        "checkpoint is temporary not supported".to_string(),
-                    ));
                 }
             }
         }
@@ -565,7 +590,7 @@ pub mod tests {
 
     #[test]
     pub fn test_sync_single_db_many_pulls_big_payloads() {
-                deterministic_runtime(async || {
+        deterministic_runtime(async || {
             let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new().unwrap());
             let dir = tempfile::TempDir::new().unwrap();
             let server_path = dir.path().join("server.db");
@@ -622,7 +647,7 @@ pub mod tests {
             }
         });
     }
-    
+
     #[test]
     pub fn test_sync_single_db_checkpoint() {
         deterministic_runtime(async || {
@@ -643,18 +668,29 @@ pub mod tests {
 
             protocol
                 .server
-                .execute("CREATE TABLE t(x INTEGER PRIMARY KEY)", ())
+                .execute("CREATE TABLE t(x INTEGER PRIMARY KEY, y)", ())
                 .await
                 .unwrap();
             protocol
                 .server
-                .execute("INSERT INTO t VALUES (1)", ())
+                .execute("INSERT INTO t VALUES (1, randomblob(4 * 4096))", ())
                 .await
                 .unwrap();
             protocol.server.checkpoint().await.unwrap();
             protocol
                 .server
-                .execute("INSERT INTO t VALUES (2)", ())
+                .execute("INSERT INTO t VALUES (2, randomblob(5 * 4096))", ())
+                .await
+                .unwrap();
+            protocol.server.checkpoint().await.unwrap();
+            protocol
+                .server
+                .execute("INSERT INTO t VALUES (3, randomblob(6 * 4096))", ())
+                .await
+                .unwrap();
+            protocol
+                .server
+                .execute("INSERT INTO t VALUES (4, randomblob(7 * 4096))", ())
                 .await
                 .unwrap();
 
@@ -663,10 +699,14 @@ pub mod tests {
             runner.pull().await.unwrap();
 
             assert_eq!(
-                query_rows(&conn, "SELECT * FROM t").await.unwrap(),
+                query_rows(&conn, "SELECT x, length(y) FROM t")
+                    .await
+                    .unwrap(),
                 vec![
-                    vec![turso::Value::Integer(1)],
-                    vec![turso::Value::Integer(2)]
+                    vec![turso::Value::Integer(1), turso::Value::Integer(4 * 4096)],
+                    vec![turso::Value::Integer(2), turso::Value::Integer(5 * 4096)],
+                    vec![turso::Value::Integer(3), turso::Value::Integer(6 * 4096)],
+                    vec![turso::Value::Integer(4), turso::Value::Integer(7 * 4096)],
                 ]
             );
         });

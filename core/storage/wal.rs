@@ -918,7 +918,11 @@ impl Wal for WalFile {
         page: PageRef,
         buffer_pool: Arc<BufferPool>,
     ) -> Result<Completion> {
-        tracing::debug!("read_frame({})", frame_id);
+        tracing::debug!(
+            "read_frame(page_idx = {}, frame_id = {})",
+            page.get().id,
+            frame_id
+        );
         let offset = self.frame_offset(frame_id);
         page.set_locked();
         let frame = page.clone();
@@ -969,6 +973,9 @@ impl Wal for WalFile {
         db_size: u64,
         page: &[u8],
     ) -> Result<()> {
+        if self.get_max_frame_in_wal() == 0 {
+            self.ensure_header_if_needed()?;
+        }
         tracing::debug!("write_raw_frame({})", frame_id);
         if page.len() != self.page_size() as usize {
             return Err(LimboError::InvalidArgument(format!(
