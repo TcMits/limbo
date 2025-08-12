@@ -357,18 +357,17 @@ pub fn op_checkpoint(
     let result = program.connection.checkpoint(*checkpoint_mode);
     match result {
         Ok(CheckpointResult {
-            num_wal_frames: num_wal_pages,
-            num_checkpointed_frames: num_checkpointed_pages,
+            num_attempted,
+            num_backfilled,
             ..
         }) => {
             // https://sqlite.org/pragma.html#pragma_wal_checkpoint
             // 1st col: 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
             state.registers[*dest] = Register::Value(Value::Integer(0));
             // 2nd col: # modified pages written to wal file
-            state.registers[*dest + 1] = Register::Value(Value::Integer(num_wal_pages as i64));
+            state.registers[*dest + 1] = Register::Value(Value::Integer(num_attempted as i64));
             // 3rd col: # pages moved to db after checkpoint
-            state.registers[*dest + 2] =
-                Register::Value(Value::Integer(num_checkpointed_pages as i64));
+            state.registers[*dest + 2] = Register::Value(Value::Integer(num_backfilled as i64));
         }
         Err(_err) => state.registers[*dest] = Register::Value(Value::Integer(1)),
     }

@@ -1589,9 +1589,7 @@ impl Pager {
                 .checkpoint(self, write_counter.clone(), mode)
         })?;
 
-        if checkpoint_result.everything_backfilled()
-            && checkpoint_result.num_checkpointed_frames != 0
-        {
+        if checkpoint_result.everything_backfilled() && checkpoint_result.num_backfilled != 0 {
             let db_size = self
                 .io
                 .block(|| self.with_header(|header| header.database_size))?
