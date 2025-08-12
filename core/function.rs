@@ -751,6 +751,7 @@ impl Func {
             "replace" => Ok(Self::Scalar(ScalarFunc::Replace)),
             "likely" => Ok(Self::Scalar(ScalarFunc::Likely)),
             "likelihood" => Ok(Self::Scalar(ScalarFunc::Likelihood)),
+            "unlikely" => Ok(Self::Scalar(ScalarFunc::Unlikely)),
             #[cfg(feature = "json")]
             "json" => Ok(Self::Json(JsonFunc::Json)),
             #[cfg(feature = "json")]
