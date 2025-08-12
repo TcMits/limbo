@@ -8,6 +8,8 @@
 
 ## Usage
 
+[![npm version](https://img.shields.io/npm/v/@tursodatabase/sync)](https://www.npmjs.com/package/@tursodatabase/sync)
+
 ```
 npm i @tursodatabase/sync
 ```
