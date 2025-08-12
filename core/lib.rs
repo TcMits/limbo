@@ -1218,6 +1218,7 @@ impl Connection {
         Ok(())
     }
 
+    /// Read schema version at current transaction
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn read_schema_version(&self) -> Result<u32> {
         loop {
@@ -1232,6 +1233,10 @@ impl Connection {
         }
     }
 
+    /// Update schema version to the new value within opened write transaction
+    ///
+    /// New version of the schema must be strictly greater than previous one - otherwise method will panic
+    /// Write transaction must be opened in advance - otherwise method will panic
     #[cfg(all(feature = "fs", feature = "conn_raw_api"))]
     pub fn write_schema_version(self: &Arc<Connection>, version: u32) -> Result<()> {
         let TransactionState::Write { .. } = self.transaction_state.get() else {
