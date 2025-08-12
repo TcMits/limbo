@@ -449,7 +449,7 @@ fn query_pragma(
             if let Some(name) = name {
                 if let Some(table) = schema.get_table(&name) {
                     emit_columns_for_table_info(&mut program, table.columns(), base_reg);
-                } else if let Some(view_mutex) = schema.get_view(&name) {
+                } else if let Some(view_mutex) = schema.get_materialized_view(&name) {
                     let view = view_mutex.lock().unwrap();
                     emit_columns_for_table_info(&mut program, &view.columns, base_reg);
                 }

@@ -476,7 +476,7 @@ impl Program {
             let schema = self.connection.schema.borrow();
 
             for (view_name, tx_state) in tx_states.iter() {
-                if let Some(view_mutex) = schema.get_view(view_name) {
+                if let Some(view_mutex) = schema.get_materialized_view(view_name) {
                     let mut view = view_mutex.lock().unwrap();
                     view.merge_delta(&tx_state.delta);
                 }

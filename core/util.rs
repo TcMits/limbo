@@ -2,7 +2,7 @@
 use crate::translate::expr::WalkControl;
 use crate::types::IOResult;
 use crate::{
-    schema::{self, Column, Schema, Type, ViewsMap},
+    schema::{self, Column, MaterializedViewsMap, Schema, Type},
     translate::{collate::CollationSeq, expr::walk_expr, plan::JoinOrderMember},
     types::{Value, ValueType},
     LimboError, OpenFlags, Result, Statement, StepResult, SymbolTable,
@@ -77,7 +77,7 @@ pub fn parse_schema_rows(
     schema: &mut Schema,
     syms: &SymbolTable,
     mv_tx_id: Option<u64>,
-    mut existing_views: ViewsMap,
+    mut existing_views: MaterializedViewsMap,
 ) -> Result<()> {
     rows.set_mv_tx_id(mv_tx_id);
     // TODO: if we IO, this unparsed indexes is lost. Will probably need some state between
@@ -179,7 +179,9 @@ pub fn parse_schema_rows(
                                         };
 
                                     // Add the existing view to the new schema
-                                    schema.views.insert(view_name.clone(), existing_view);
+                                    schema
+                                        .materialized_views
+                                        .insert(view_name.clone(), existing_view);
 
                                     // Store for second pass processing
                                     views_to_process.push((view_name.clone(), referenced_tables));
@@ -197,7 +199,7 @@ pub fn parse_schema_rows(
                                 Ok(incremental_view) => {
                                     let referenced_tables =
                                         incremental_view.get_referenced_table_names();
-                                    schema.add_view(incremental_view);
+                                    schema.add_materialized_view(incremental_view);
                                     views_to_process.push((view_name, referenced_tables));
                                 }
                                 Err(e) => {
@@ -255,7 +257,7 @@ pub fn parse_schema_rows(
     for (view_name, referenced_tables) in views_to_process {
         // Register this view as dependent on each referenced table
         for table_name in referenced_tables {
-            schema.add_view_dependency(&table_name, &view_name);
+            schema.add_materialized_view_dependency(&table_name, &view_name);
         }
     }
 

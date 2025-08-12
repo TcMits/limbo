@@ -470,7 +470,9 @@ fn parse_table(
         return Ok(());
     };
 
-    let view = connection.with_schema(database_id, |schema| schema.get_view(table_name.as_str()));
+    let view = connection.with_schema(database_id, |schema| {
+        schema.get_materialized_view(table_name.as_str())
+    });
     if let Some(view) = view {
         // Create a virtual table wrapper for the view
         // We'll use the view's columns from the schema

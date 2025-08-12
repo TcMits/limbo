@@ -1337,8 +1337,8 @@ pub fn insn_to_str(
                 0,
                 where_clause.clone().unwrap_or("NULL".to_string()),
             ),
-            Insn::PopulateViews => (
-                "PopulateViews",
+            Insn::PopulateMaterializedViews => (
+                "PopulateMaterializedViews",
                 0,
                 0,
                 0,

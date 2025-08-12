@@ -897,8 +897,8 @@ pub enum Insn {
         where_clause: Option<String>,
     },
 
-    /// Populate all views after schema parsing
-    PopulateViews,
+    /// Populate all materialized views after schema parsing
+    PopulateMaterializedViews,
 
     /// Place the result of lhs >> rhs in dest register.
     ShiftRight {
@@ -1185,7 +1185,7 @@ impl Insn {
             Insn::IsNull { .. } => execute::op_is_null,
             Insn::CollSeq { .. } => execute::op_coll_seq,
             Insn::ParseSchema { .. } => execute::op_parse_schema,
-            Insn::PopulateViews => execute::op_populate_views,
+            Insn::PopulateMaterializedViews => execute::op_populate_materialized_views,
             Insn::ShiftRight { .. } => execute::op_shift_right,
             Insn::ShiftLeft { .. } => execute::op_shift_left,
             Insn::AddImm { .. } => execute::op_add_imm,

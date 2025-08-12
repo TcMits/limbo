@@ -5177,7 +5177,7 @@ pub fn op_insert(
         match &state.op_insert_state.sub_state {
             OpInsertSubState::MaybeCaptureRecord => {
                 let schema = program.connection.schema.borrow();
-                let dependent_views = schema.get_dependent_views(table_name);
+                let dependent_views = schema.get_dependent_materialized_views(table_name);
                 // If there are no dependent views, we don't need to capture the old record.
                 // We also don't need to do it if the rowid of the UPDATEd row was changed, because that means
                 // we deleted it earlier and `op_delete` already captured the change.
@@ -5267,7 +5267,7 @@ pub fn op_insert(
                     state.op_insert_state.sub_state = OpInsertSubState::UpdateLastRowid;
                 } else {
                     let schema = program.connection.schema.borrow();
-                    let dependent_views = schema.get_dependent_views(table_name);
+                    let dependent_views = schema.get_dependent_materialized_views(table_name);
                     if !dependent_views.is_empty() {
                         state.op_insert_state.sub_state = OpInsertSubState::ApplyViewChange;
                     } else {
@@ -5288,7 +5288,7 @@ pub fn op_insert(
                     program.n_change.set(prev_changes + 1);
                 }
                 let schema = program.connection.schema.borrow();
-                let dependent_views = schema.get_dependent_views(table_name);
+                let dependent_views = schema.get_dependent_materialized_views(table_name);
                 if !dependent_views.is_empty() {
                     state.op_insert_state.sub_state = OpInsertSubState::ApplyViewChange;
                     continue;
@@ -5297,7 +5297,7 @@ pub fn op_insert(
             }
             OpInsertSubState::ApplyViewChange => {
                 let schema = program.connection.schema.borrow();
-                let dependent_views = schema.get_dependent_views(table_name);
+                let dependent_views = schema.get_dependent_materialized_views(table_name);
                 assert!(!dependent_views.is_empty());
 
                 let (key, values) = {
@@ -5420,7 +5420,7 @@ pub fn op_delete(
         match &state.op_delete_state.sub_state {
             OpDeleteSubState::MaybeCaptureRecord => {
                 let schema = program.connection.schema.borrow();
-                let dependent_views = schema.get_dependent_views(table_name);
+                let dependent_views = schema.get_dependent_materialized_views(table_name);
                 if dependent_views.is_empty() {
                     state.op_delete_state.sub_state = OpDeleteSubState::Delete;
                     continue;
@@ -5467,7 +5467,7 @@ pub fn op_delete(
                     return_if_io!(cursor.delete());
                 }
                 let schema = program.connection.schema.borrow();
-                let dependent_views = schema.get_dependent_views(table_name);
+                let dependent_views = schema.get_dependent_materialized_views(table_name);
                 if dependent_views.is_empty() {
                     break;
                 }
@@ -5476,7 +5476,7 @@ pub fn op_delete(
             }
             OpDeleteSubState::ApplyViewChange => {
                 let schema = program.connection.schema.borrow();
-                let dependent_views = schema.get_dependent_views(table_name);
+                let dependent_views = schema.get_dependent_materialized_views(table_name);
                 assert!(!dependent_views.is_empty());
                 let maybe_deleted_record = state.op_delete_state.deleted_record.take();
                 if let Some((key, values)) = maybe_deleted_record {
@@ -6423,7 +6423,7 @@ pub fn op_parse_schema(
 
         conn.with_schema_mut(|schema| {
             // TODO: This function below is synchronous, make it async
-            let existing_views = schema.views.clone();
+            let existing_views = schema.materialized_views.clone();
             parse_schema_rows(
                 stmt,
                 schema,
@@ -6437,7 +6437,7 @@ pub fn op_parse_schema(
 
         conn.with_schema_mut(|schema| {
             // TODO: This function below is synchronous, make it async
-            let existing_views = schema.views.clone();
+            let existing_views = schema.materialized_views.clone();
             parse_schema_rows(
                 stmt,
                 schema,
@@ -6452,7 +6452,7 @@ pub fn op_parse_schema(
     Ok(InsnFunctionStepResult::Step)
 }
 
-pub fn op_populate_views(
+pub fn op_populate_materialized_views(
     program: &Program,
     state: &mut ProgramState,
     _insn: &Insn,
@@ -6462,7 +6462,7 @@ pub fn op_populate_views(
     let conn = program.connection.clone();
     let schema = conn.schema.borrow();
 
-    return_if_io!(schema.populate_views(&conn));
+    return_if_io!(schema.populate_materialized_views(&conn));
     // All views populated, advance to next instruction
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)

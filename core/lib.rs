@@ -373,7 +373,7 @@ impl Database {
         let pager = conn.pager.borrow().clone();
         pager
             .io
-            .block(|| conn.schema.borrow().populate_views(&conn))?;
+            .block(|| conn.schema.borrow().populate_materialized_views(&conn))?;
         Ok(db)
     }
 
@@ -896,7 +896,7 @@ impl Connection {
 
             // Preserve existing views to avoid expensive repopulation.
             // TODO: We may not need to do this if we materialize our views.
-            let existing_views = self.schema.borrow().views.clone();
+            let existing_views = self.schema.borrow().materialized_views.clone();
 
             // TODO: this is hack to avoid a cyclical problem with schema reprepare
             // The problem here is that we prepare a statement here, but when the statement tries
@@ -918,7 +918,9 @@ impl Connection {
 
             {
                 let schema = self.schema.borrow();
-                pager.io.block(|| schema.populate_views(self))?;
+                pager
+                    .io
+                    .block(|| schema.populate_materialized_views(self))?;
             }
             Result::Ok(())
         };
@@ -1526,7 +1528,7 @@ impl Connection {
             .expect("query must be parsed to statement");
         let syms = self.syms.borrow();
         self.with_schema_mut(|schema| {
-            let existing_views = schema.views.clone();
+            let existing_views = schema.materialized_views.clone();
             if let Err(LimboError::ExtensionError(e)) =
                 parse_schema_rows(rows, schema, &syms, None, existing_views)
             {
