@@ -179,7 +179,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
                     &self.meta_path,
                     &mut self.meta,
                     |m| {
-                        m.synced_generation = m.synced_generation + 1;
+                        m.synced_generation += 1;
                         m.synced_frame_no = Some(0);
                         m.synced_wal_match_watermark = 0;
                     },
