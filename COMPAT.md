@@ -264,7 +264,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | unhex(X)                     | Yes     |                                                      |
 | unhex(X,Y)                   | Yes     |                                                      |
 | unicode(X)                   | Yes     |                                                      |
-| unlikely(X)                  | No      |                                                      |
+| unlikely(X)                  | Yes     |                                                      |
 | upper(X)                     | Yes     |                                                      |
 | zeroblob(N)                  | Yes     |                                                      |
 
