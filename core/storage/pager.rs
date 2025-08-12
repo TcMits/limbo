@@ -8,6 +8,7 @@ use crate::storage::{
     },
     wal::{CheckpointResult, Wal},
 };
+use crate::types::IOCompletions;
 use crate::util::IOExt as _;
 use crate::{
     return_if_io, turso_assert, types::WalFrameInfo, Completion, Connection, IOResult, LimboError,
@@ -46,15 +47,12 @@ impl HeaderRef {
                     return Err(LimboError::Page1NotAlloc);
                 }
 
-                let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
+                let (page, c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
                 *pager.header_ref_state.borrow_mut() = HeaderRefState::CreateHeader { page };
-                Ok(IOResult::IO)
+                Ok(IOResult::IO(IOCompletions::Single(c)))
             }
             HeaderRefState::CreateHeader { page } => {
-                // TODO: will have to remove this when tracking IO completions
-                if page.is_locked() {
-                    return Ok(IOResult::IO);
-                }
+                turso_assert!(page.is_loaded(), "page should be loaded");
                 turso_assert!(
                     page.get().id == DatabaseHeader::PAGE_ID,
                     "incorrect header page id"
@@ -85,15 +83,12 @@ impl HeaderRefMut {
                     return Err(LimboError::Page1NotAlloc);
                 }
 
-                let (page, _c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
+                let (page, c) = pager.read_page(DatabaseHeader::PAGE_ID)?;
                 *pager.header_ref_state.borrow_mut() = HeaderRefState::CreateHeader { page };
-                Ok(IOResult::IO)
+                Ok(IOResult::IO(IOCompletions::Single(c)))
             }
             HeaderRefState::CreateHeader { page } => {
-                // TODO: will have to remove this when tracking IO completions
-                if page.is_locked() {
-                    return Ok(IOResult::IO);
-                }
+                turso_assert!(page.is_loaded(), "page should be loaded");
                 turso_assert!(
                     page.get().id == DatabaseHeader::PAGE_ID,
                     "incorrect header page id"
@@ -972,13 +967,15 @@ impl Pager {
                     (DbState::Uninitialized, false) | (DbState::Initializing, true) => {
                         match self.allocate_page1()? {
                             IOResult::Done(_) => Ok(IOResult::Done(())),
-                            IOResult::IO => Ok(IOResult::IO),
+                            IOResult::IO(io) => Ok(IOResult::IO(io)),
                         }
                     }
-                    _ => Ok(IOResult::IO),
+                    // Give a chance for the allocation to happen elsewhere
+                    _ => Ok(IOResult::IO(IOCompletions::Single(Completion::new_dummy()))),
                 }
             } else {
-                Ok(IOResult::IO)
+                // Give a chance for the allocation to happen elsewhere
+                Ok(IOResult::IO(IOCompletions::Single(Completion::new_dummy())))
             }
         } else {
             Ok(IOResult::Done(()))
@@ -1677,14 +1674,12 @@ impl Pager {
                     let trunk_page_id = header.freelist_trunk_page.get();
                     if trunk_page.is_none() {
                         // Add as leaf to current trunk
-                        let (page, _c) = self.read_page(trunk_page_id as usize)?;
+                        let (page, c) = self.read_page(trunk_page_id as usize)?;
                         trunk_page.replace(page);
-                        return Ok(IOResult::IO);
+                        return Ok(IOResult::IO(IOCompletions::Single(c)));
                     }
                     let trunk_page = trunk_page.as_ref().unwrap();
-                    if trunk_page.is_locked() || !trunk_page.is_loaded() {
-                        return Ok(IOResult::IO);
-                    }
+                    turso_assert!(trunk_page.is_loaded(), "trunk_page should be loaded");
 
                     let trunk_page_contents = trunk_page.get().contents.as_ref().unwrap();
                     let number_of_leaf_pages =
@@ -1716,9 +1711,7 @@ impl Pager {
                     *state = FreePageState::NewTrunk { page: page.clone() };
                 }
                 FreePageState::NewTrunk { page } => {
-                    if page.is_locked() || !page.is_loaded() {
-                        return Ok(IOResult::IO);
-                    }
+                    turso_assert!(page.is_loaded(), "page should be loaded");
                     // If we get here, need to make this page a new trunk
                     turso_assert!(page.get().id == page_id, "page has unexpected id");
                     self.add_dirty(page);
@@ -1776,14 +1769,14 @@ impl Pager {
                     (default_header.page_size.get() - default_header.reserved_space as u32) as u16,
                 );
                 let write_counter = Rc::new(RefCell::new(0));
-                let _c = begin_write_btree_page(self, &page1.get(), write_counter.clone())?;
+                let c = begin_write_btree_page(self, &page1.get(), write_counter.clone())?;
 
                 self.allocate_page1_state
                     .replace(AllocatePage1State::Writing {
                         write_counter,
                         page: page1,
                     });
-                Ok(IOResult::IO)
+                Ok(IOResult::IO(IOCompletions::Single(c)))
             }
             AllocatePage1State::Writing {
                 write_counter,
@@ -1879,12 +1872,12 @@ impl Pager {
                         };
                         continue;
                     }
-                    let (trunk_page, _c) = self.read_page(first_freelist_trunk_page_id as usize)?;
+                    let (trunk_page, c) = self.read_page(first_freelist_trunk_page_id as usize)?;
                     *state = AllocatePageState::SearchAvailableFreeListLeaf {
                         trunk_page,
                         current_db_size: new_db_size,
                     };
-                    return Ok(IOResult::IO);
+                    return Ok(IOResult::IO(IOCompletions::Single(c)));
                 }
                 AllocatePageState::SearchAvailableFreeListLeaf {
                     trunk_page,
@@ -2126,17 +2119,13 @@ impl Pager {
     }
 
     pub fn with_header<T>(&self, f: impl Fn(&DatabaseHeader) -> T) -> Result<IOResult<T>> {
-        let IOResult::Done(header_ref) = HeaderRef::from_pager(self)? else {
-            return Ok(IOResult::IO);
-        };
+        let header_ref = return_if_io!(HeaderRef::from_pager(self));
         let header = header_ref.borrow();
         Ok(IOResult::Done(f(header)))
     }
 
     pub fn with_header_mut<T>(&self, f: impl Fn(&mut DatabaseHeader) -> T) -> Result<IOResult<T>> {
-        let IOResult::Done(header_ref) = HeaderRefMut::from_pager(self)? else {
-            return Ok(IOResult::IO);
-        };
+        let header_ref = return_if_io!(HeaderRefMut::from_pager(self));
         let header = header_ref.borrow_mut();
         Ok(IOResult::Done(f(header)))
     }
