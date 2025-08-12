@@ -1997,9 +1997,10 @@ pub mod test {
         conn.execute("create table test(id integer primary key, value text)")
             .unwrap();
         bulk_inserts(&conn, 20, 3);
-        db.io
-            .block(|| conn.pager.borrow_mut().cacheflush())
-            .unwrap();
+        let completions = conn.pager.borrow_mut().cacheflush().unwrap();
+        for c in completions {
+            db.io.wait_for_completion(c).unwrap();
+        }
 
         // Snapshot header & counters before the RESTART checkpoint.
         let wal_shared = db.maybe_shared_wal.read().as_ref().unwrap().clone();
@@ -2091,9 +2092,10 @@ pub mod test {
             .execute("create table test(id integer primary key, value text)")
             .unwrap();
         bulk_inserts(&conn1.clone(), 15, 2);
-        db.io
-            .block(|| conn1.pager.borrow_mut().cacheflush())
-            .unwrap();
+        let completions = conn1.pager.borrow_mut().cacheflush().unwrap();
+        for c in completions {
+            db.io.wait_for_completion(c).unwrap();
+        }
 
         // Force a read transaction that will freeze a lower read mark
         let readmark = {
@@ -2105,9 +2107,10 @@ pub mod test {
 
         // generate more frames that the reader will not see.
         bulk_inserts(&conn1.clone(), 15, 2);
-        db.io
-            .block(|| conn1.pager.borrow_mut().cacheflush())
-            .unwrap();
+        let completions = conn1.pager.borrow_mut().cacheflush().unwrap();
+        for c in completions {
+            db.io.wait_for_completion(c).unwrap();
+        }
 
         // Run passive checkpoint, expect partial
         let (res1, max_before) = {
@@ -2766,9 +2769,10 @@ pub mod test {
         bulk_inserts(&conn, 8, 4);
 
         // Ensure frames are flushed to the WAL
-        db.io
-            .block(|| conn.pager.borrow_mut().cacheflush())
-            .unwrap();
+        let completions = conn.pager.borrow_mut().cacheflush().unwrap();
+        for c in completions {
+            db.io.wait_for_completion(c).unwrap();
+        }
 
         // Snapshot the current mxFrame before running FULL
         let wal_shared = db.maybe_shared_wal.read().as_ref().unwrap().clone();
@@ -2798,9 +2802,10 @@ pub mod test {
 
         // First commit some data and flush (reader will snapshot here)
         bulk_inserts(&writer, 2, 3);
-        db.io
-            .block(|| writer.pager.borrow_mut().cacheflush())
-            .unwrap();
+        let completions = writer.pager.borrow_mut().cacheflush().unwrap();
+        for c in completions {
+            db.io.wait_for_completion(c).unwrap();
+        }
 
         // Start a read transaction pinned at the current snapshot
         {
@@ -2817,9 +2822,10 @@ pub mod test {
 
         // Advance WAL beyond the reader's snapshot
         bulk_inserts(&writer, 3, 4);
-        db.io
-            .block(|| writer.pager.borrow_mut().cacheflush())
-            .unwrap();
+        let completions = writer.pager.borrow_mut().cacheflush().unwrap();
+        for c in completions {
+            db.io.wait_for_completion(c).unwrap();
+        }
         let mx_now = unsafe {
             (&*db.maybe_shared_wal.read().as_ref().unwrap().get())
                 .max_frame
