@@ -331,6 +331,7 @@ pub enum ScalarFunc {
     BinRecordJsonObject,
     Attach,
     Detach,
+    Unlikely
 }
 
 impl ScalarFunc {
@@ -393,6 +394,7 @@ impl ScalarFunc {
             ScalarFunc::BinRecordJsonObject => true,
             ScalarFunc::Attach => false, // changes database state
             ScalarFunc::Detach => false, // changes database state
+            ScalarFunc::Unlikely => true,
         }
     }
 }
@@ -457,6 +459,7 @@ impl Display for ScalarFunc {
             Self::BinRecordJsonObject => "bin_record_json_object".to_string(),
             Self::Attach => "attach".to_string(),
             Self::Detach => "detach".to_string(),
+            Self::Unlikely => "unlikely".to_string()
         };
         write!(f, "{str}")
     }

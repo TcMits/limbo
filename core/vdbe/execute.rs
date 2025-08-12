@@ -4652,6 +4652,11 @@ pub fn op_function(
                 // Set result to NULL (detach doesn't return a value)
                 state.registers[*dest] = Register::Value(Value::Null);
             }
+            ScalarFunc::Unlikely => {
+                let value = &state.registers[*start_reg].borrow_mut();
+                let result = value.get_owned_value().exec_unlikely();
+                state.registers[*dest] = Register::Value(result);
+            }
         },
         crate::function::Func::Vector(vector_func) => match vector_func {
             VectorFunc::Vector => {
@@ -8142,6 +8147,10 @@ impl Value {
 
     pub fn exec_max<'a, T: Iterator<Item = &'a Value>>(regs: T) -> Value {
         regs.max().map(|v| v.to_owned()).unwrap_or(Value::Null)
+    }
+
+    fn exec_unlikely(&self) -> Value {
+        self.exec_likelihood(&Value::Float(0.0625))
     }
 }
 

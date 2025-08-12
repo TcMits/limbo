@@ -1841,6 +1841,33 @@ pub fn translate_expr(
                                 "DETACH should be handled at statement level, not as expression"
                             );
                         }
+                        ScalarFunc::Unlikely => {
+                            let args = if let Some(args) = args {
+                                if args.len() != 1 {
+                                    crate::bail_parse_error!(
+                                        "Unlikely function must have exactly 1 argument",
+                                    );
+                                }
+                                args
+                            } else {
+                                crate::bail_parse_error!("Unlikely function with no arguments",);
+                            };
+                            let start_reg = program.alloc_register();
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                start_reg,
+                                resolver,
+                            )?;
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
                     }
                 }
                 Func::Math(math_func) => match math_func.arity() {
