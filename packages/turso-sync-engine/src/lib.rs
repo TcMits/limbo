@@ -84,23 +84,12 @@ mod tests {
                 db: None,
             }
         }
-        pub async fn init(
-            &mut self,
-            local_path: PathBuf,
-            opts: DatabaseSyncEngineOpts,
-        ) -> Result<()> {
+        pub async fn init(&mut self, local_path: &str, opts: DatabaseSyncEngineOpts) -> Result<()> {
             let io = self.io.clone();
             let server = self.sync_server.clone();
             let db = self
                 .run(genawaiter::sync::Gen::new(|coro| async move {
-                    DatabaseSyncEngine::new(
-                        &coro,
-                        io,
-                        Arc::new(server),
-                        local_path.to_str().unwrap(),
-                        opts,
-                    )
-                    .await
+                    DatabaseSyncEngine::new(&coro, io, Arc::new(server), local_path, opts).await
                 }))
                 .await
                 .unwrap();

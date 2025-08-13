@@ -77,6 +77,13 @@ impl TestContext {
         let delay = self.rng.lock().await.next_u64() % 1000;
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await
     }
+    pub async fn random_sleep_n(&self, n: u64) {
+        let delay = {
+            let mut rng = self.rng.lock().await;
+            rng.next_u64() % 1000 * (rng.next_u64() % n + 1)
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await
+    }
 
     pub async fn rng(&self) -> tokio::sync::MutexGuard<ChaCha8Rng> {
         self.rng.lock().await
