@@ -190,9 +190,20 @@ pub fn translate_inner(
             program,
         )?,
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
-        ast::Stmt::CreateView { .. } => {
-            bail_parse_error!("CREATE VIEW not supported yet.")
-        }
+        ast::Stmt::CreateView {
+            view_name,
+            select,
+            columns,
+            ..
+        } => view::translate_create_view(
+            schema,
+            view_name.name.as_str(),
+            &select,
+            columns.as_ref(),
+            connection.clone(),
+            syms,
+            program,
+        )?,
         ast::Stmt::CreateMaterializedView {
             view_name, select, ..
         } => view::translate_create_materialized_view(
@@ -249,13 +260,7 @@ pub fn translate_inner(
         ast::Stmt::DropView {
             if_exists,
             view_name,
-        } => view::translate_drop_view(
-            schema,
-            view_name.name.as_str(),
-            if_exists,
-            connection.clone(),
-            program,
-        )?,
+        } => view::translate_drop_view(schema, view_name.name.as_str(), if_exists, program)?,
         ast::Stmt::Pragma(..) => {
             bail_parse_error!("PRAGMA statement cannot be evaluated in a nested context")
         }

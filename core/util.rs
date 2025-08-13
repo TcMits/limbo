@@ -151,62 +151,89 @@ pub fn parse_schema_rows(
                     }
                     "view" => {
                         use crate::incremental::view::IncrementalView;
+                        use crate::schema::View;
                         use fallible_iterator::FallibleIterator;
+                        use turso_sqlite3_parser::ast::{Cmd, Stmt};
+                        use turso_sqlite3_parser::lexer::sql::Parser;
 
                         let name: &str = row.get::<&str>(1)?;
                         let sql: &str = row.get::<&str>(4)?;
                         let view_name = name.to_string();
 
-                        // Try to remove and potentially reuse an existing view with this name.
-                        // Note: After this function completes, any views not reused are discarded,
-                        // as they are no longer relevant in the new schema.
-                        let should_create_new =
-                            if let Some(existing_view) = existing_views.remove(&view_name) {
-                                // Check if we can reuse this view (same SQL definition)
-                                let can_reuse = if let Ok(view_guard) = existing_view.lock() {
-                                    view_guard.has_same_sql(sql)
-                                } else {
-                                    false
-                                };
-
-                                if can_reuse {
-                                    // Reuse the existing view - it's already populated!
-                                    let referenced_tables =
-                                        if let Ok(view_guard) = existing_view.lock() {
-                                            view_guard.get_referenced_table_names()
+                        // Parse the SQL to determine if it's a regular or materialized view
+                        let mut parser = Parser::new(sql.as_bytes());
+                        if let Ok(Some(Cmd::Stmt(stmt))) = parser.next() {
+                            match stmt {
+                                Stmt::CreateMaterializedView { .. } => {
+                                    // Handle materialized view with potential reuse
+                                    let should_create_new = if let Some(existing_view) =
+                                        existing_views.remove(&view_name)
+                                    {
+                                        // Check if we can reuse this view (same SQL definition)
+                                        let can_reuse = if let Ok(view_guard) = existing_view.lock()
+                                        {
+                                            view_guard.has_same_sql(sql)
                                         } else {
-                                            vec![]
+                                            false
                                         };
 
-                                    // Add the existing view to the new schema
-                                    schema
-                                        .materialized_views
-                                        .insert(view_name.clone(), existing_view);
+                                        if can_reuse {
+                                            // Reuse the existing view - it's already populated!
+                                            let referenced_tables =
+                                                if let Ok(view_guard) = existing_view.lock() {
+                                                    view_guard.get_referenced_table_names()
+                                                } else {
+                                                    vec![]
+                                                };
 
-                                    // Store for second pass processing
-                                    views_to_process.push((view_name.clone(), referenced_tables));
-                                    false // Don't create new
-                                } else {
-                                    true // SQL changed, need to create new
-                                }
-                            } else {
-                                true // No existing view, need to create new
-                            };
+                                            // Add the existing view to the new schema
+                                            schema
+                                                .materialized_views
+                                                .insert(view_name.clone(), existing_view);
 
-                        if should_create_new {
-                            // Create a new IncrementalView
-                            match IncrementalView::from_sql(sql, schema) {
-                                Ok(incremental_view) => {
-                                    let referenced_tables =
-                                        incremental_view.get_referenced_table_names();
-                                    schema.add_materialized_view(incremental_view);
-                                    views_to_process.push((view_name, referenced_tables));
+                                            // Store for second pass processing
+                                            views_to_process
+                                                .push((view_name.clone(), referenced_tables));
+                                            false // Don't create new
+                                        } else {
+                                            true // SQL changed, need to create new
+                                        }
+                                    } else {
+                                        true // No existing view, need to create new
+                                    };
+
+                                    if should_create_new {
+                                        // Create a new IncrementalView
+                                        if let Ok(incremental_view) =
+                                            IncrementalView::from_sql(sql, schema)
+                                        {
+                                            let referenced_tables =
+                                                incremental_view.get_referenced_table_names();
+                                            schema.add_materialized_view(incremental_view);
+                                            views_to_process.push((view_name, referenced_tables));
+                                        }
+                                    }
                                 }
-                                Err(e) => {
-                                    eprintln!(
-                                        "Warning: Could not create incremental view for {name}: {e:?}"
-                                    );
+                                Stmt::CreateView {
+                                    view_name: _,
+                                    columns,
+                                    select,
+                                    ..
+                                } => {
+                                    // Create regular view
+                                    let view = View {
+                                        name: name.to_string(),
+                                        sql: sql.to_string(),
+                                        select_stmt: *select,
+                                        columns: columns.map(|cols| {
+                                            cols.into_iter()
+                                                .map(|c| c.col_name.to_string())
+                                                .collect()
+                                        }),
+                                    };
+                                    schema.add_view(view);
                                 }
+                                _ => {}
                             }
                         }
                     }

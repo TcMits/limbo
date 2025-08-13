@@ -3,6 +3,19 @@ use crate::types::IOResult;
 
 /// Type alias for the materialized views collection
 pub type MaterializedViewsMap = HashMap<String, Arc<Mutex<IncrementalView>>>;
+
+/// Simple view structure for non-materialized views
+#[derive(Debug, Clone)]
+pub struct View {
+    pub name: String,
+    pub sql: String,
+    pub select_stmt: ast::Select,
+    pub columns: Option<Vec<String>>,
+}
+
+/// Type alias for regular views collection
+pub type ViewsMap = HashMap<String, View>;
+
 use crate::result::LimboResult;
 use crate::storage::btree::BTreeCursor;
 use crate::translate::collate::CollationSeq;
@@ -33,6 +46,7 @@ const SCHEMA_TABLE_NAME_ALT: &str = "sqlite_master";
 pub struct Schema {
     pub tables: HashMap<String, Arc<Table>>,
     pub materialized_views: MaterializedViewsMap,
+    pub views: ViewsMap,
 
     /// table_name to list of indexes for the table
     pub indexes: HashMap<String, Vec<Arc<Index>>>,
@@ -61,10 +75,12 @@ impl Schema {
             );
         }
         let materialized_views: MaterializedViewsMap = HashMap::new();
+        let views: ViewsMap = HashMap::new();
         let table_to_materialized_views: HashMap<String, Vec<String>> = HashMap::new();
         Self {
             tables,
             materialized_views,
+            views,
             indexes,
             has_indexes,
             indexes_enabled,
@@ -90,16 +106,36 @@ impl Schema {
         self.materialized_views.get(&name).cloned()
     }
 
-    pub fn remove_view(&mut self, name: &str) -> Option<Arc<Mutex<IncrementalView>>> {
+    pub fn remove_view(&mut self, name: &str) -> Result<()> {
         let name = normalize_ident(name);
 
-        // Remove from table_to_materialized_views dependencies
-        for views in self.table_to_materialized_views.values_mut() {
-            views.retain(|v| v != &name);
-        }
+        // Check if we have both a regular view and a materialized view with the same name
+        // It should be impossible to have both
+        let has_regular_view = self.views.contains_key(&name);
+        let has_materialized_view = self.materialized_views.contains_key(&name);
 
-        // Remove the materialized view itself
-        self.materialized_views.remove(&name)
+        assert!(
+            !(has_regular_view && has_materialized_view),
+            "Found both regular view and materialized view with name: {name}"
+        );
+
+        if has_regular_view {
+            self.views.remove(&name);
+            Ok(())
+        } else if has_materialized_view {
+            // Remove from table_to_materialized_views dependencies
+            for views in self.table_to_materialized_views.values_mut() {
+                views.retain(|v| v != &name);
+            }
+
+            // Remove the materialized view itself
+            self.materialized_views.remove(&name);
+            Ok(())
+        } else {
+            Err(crate::LimboError::ParseError(format!(
+                "no such view: {name}"
+            )))
+        }
     }
 
     /// Register that a materialized view depends on a table
@@ -135,6 +171,18 @@ impl Schema {
             return_if_io!(view.populate_from_table(conn));
         }
         Ok(IOResult::Done(()))
+    }
+
+    /// Add a regular (non-materialized) view
+    pub fn add_view(&mut self, view: View) {
+        let name = normalize_ident(&view.name);
+        self.views.insert(name, view);
+    }
+
+    /// Get a regular view by name
+    pub fn get_view(&self, name: &str) -> Option<&View> {
+        let name = normalize_ident(name);
+        self.views.get(&name)
     }
 
     pub fn add_btree_table(&mut self, table: Arc<BTreeTable>) {
@@ -232,8 +280,8 @@ impl Schema {
         let mut automatic_indices: HashMap<String, Vec<(String, usize)>> =
             HashMap::with_capacity(10);
 
-        // Collect views for second pass to populate table_to_views mapping
-        let mut views_to_process: Vec<(String, Vec<String>)> = Vec::new();
+        // Collect materialized views for second pass to populate table_to_materialized_views mapping
+        let mut materialized_views_to_process: Vec<(String, Vec<String>)> = Vec::new();
 
         if matches!(pager.begin_read_tx()?, LimboResult::Busy) {
             return Err(LimboError::Busy);
@@ -359,19 +407,40 @@ impl Schema {
                     };
                     let sql = sql_text.as_str();
 
-                    // Create IncrementalView directly
-                    if let Ok(incremental_view) = IncrementalView::from_sql(sql, self) {
-                        // Get referenced table names before moving the view
-                        let referenced_tables = incremental_view.get_referenced_table_names();
-                        let view_name = name.to_string();
-
-                        // Add to schema (moves incremental_view)
-                        self.add_materialized_view(incremental_view);
-
-                        // Store for second pass processing
-                        views_to_process.push((view_name, referenced_tables));
-                    } else {
-                        eprintln!("Warning: Could not create incremental view for: {name}");
+                    // Parse the SQL to determine if it's a regular or materialized view
+                    let mut parser = Parser::new(sql.as_bytes());
+                    if let Ok(Some(Cmd::Stmt(stmt))) = parser.next() {
+                        match stmt {
+                            Stmt::CreateMaterializedView { .. } => {
+                                // Create IncrementalView for materialized views
+                                if let Ok(incremental_view) = IncrementalView::from_sql(sql, self) {
+                                    let referenced_tables =
+                                        incremental_view.get_referenced_table_names();
+                                    let view_name = name.to_string();
+                                    self.add_materialized_view(incremental_view);
+                                    materialized_views_to_process
+                                        .push((view_name, referenced_tables));
+                                }
+                            }
+                            Stmt::CreateView {
+                                view_name: _,
+                                columns,
+                                select,
+                                ..
+                            } => {
+                                // Create regular view
+                                let view = View {
+                                    name: name.to_string(),
+                                    sql: sql.to_string(),
+                                    select_stmt: *select,
+                                    columns: columns.map(|cols| {
+                                        cols.into_iter().map(|c| c.col_name.to_string()).collect()
+                                    }),
+                                };
+                                self.add_view(view);
+                            }
+                            _ => {}
+                        }
                     }
                 }
 
@@ -385,8 +454,8 @@ impl Schema {
 
         pager.end_read_tx()?;
 
-        // Second pass: populate table_to_views mapping
-        for (view_name, referenced_tables) in views_to_process {
+        // Second pass: populate table_to_materialized_views mapping
+        for (view_name, referenced_tables) in materialized_views_to_process {
             // Register this view as dependent on each referenced table
             for table_name in referenced_tables {
                 self.add_materialized_view_dependency(&table_name, &view_name);
@@ -474,9 +543,11 @@ impl Clone for Schema {
             .iter()
             .map(|(name, view)| (name.clone(), view.clone()))
             .collect();
+        let views = self.views.clone();
         Self {
             tables,
             materialized_views,
+            views,
             indexes,
             has_indexes: self.has_indexes.clone(),
             indexes_enabled: self.indexes_enabled,

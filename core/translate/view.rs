@@ -8,6 +8,54 @@ use crate::{Connection, Result, SymbolTable};
 use std::sync::Arc;
 use turso_sqlite3_parser::ast::{self, fmt::ToTokens};
 
+/// Common logic for creating views (both regular and materialized)
+fn emit_create_view_program(
+    schema: &Schema,
+    view_name: &str,
+    sql: String,
+    syms: &SymbolTable,
+    program: &mut ProgramBuilder,
+    populate_materialized: bool,
+) -> Result<()> {
+    let normalized_view_name = normalize_ident(view_name);
+
+    // Open cursor to sqlite_schema table
+    let table = schema.get_btree_table(SQLITE_TABLEID).unwrap();
+    let sqlite_schema_cursor_id = program.alloc_cursor_id(CursorType::BTreeTable(table.clone()));
+    program.emit_insn(Insn::OpenWrite {
+        cursor_id: sqlite_schema_cursor_id,
+        root_page: 1usize.into(),
+        db: 0,
+    });
+
+    // Add the view entry to sqlite_schema
+    let resolver = Resolver::new(schema, syms);
+    emit_schema_entry(
+        program,
+        &resolver,
+        sqlite_schema_cursor_id,
+        None, // cdc_table_cursor_id, no cdc for views
+        SchemaEntryType::View,
+        &normalized_view_name,
+        &normalized_view_name, // for views, tbl_name is same as name
+        0,                     // views don't have a root page
+        Some(sql),
+    )?;
+
+    // Parse schema to load the new view
+    program.emit_insn(Insn::ParseSchema {
+        db: sqlite_schema_cursor_id,
+        where_clause: Some(format!("name = '{normalized_view_name}'")),
+    });
+
+    // Populate materialized views if needed
+    if populate_materialized {
+        program.emit_insn(Insn::PopulateMaterializedViews);
+    }
+
+    Ok(())
+}
+
 pub fn translate_create_materialized_view(
     schema: &Schema,
     view_name: &str,
@@ -45,37 +93,8 @@ pub fn translate_create_materialized_view(
     // Reconstruct the SQL string
     let sql = create_materialized_view_to_str(view_name, select_stmt);
 
-    // Open cursor to sqlite_schema table
-    let table = schema.get_btree_table(SQLITE_TABLEID).unwrap();
-    let sqlite_schema_cursor_id = program.alloc_cursor_id(CursorType::BTreeTable(table.clone()));
-    program.emit_insn(Insn::OpenWrite {
-        cursor_id: sqlite_schema_cursor_id,
-        root_page: 1usize.into(),
-        db: 0,
-    });
-
-    // Add the view entry to sqlite_schema
-    let resolver = Resolver::new(schema, syms);
-    emit_schema_entry(
-        &mut program,
-        &resolver,
-        sqlite_schema_cursor_id,
-        None, // cdc_table_cursor_id, no cdc for views
-        SchemaEntryType::View,
-        &normalized_view_name,
-        &normalized_view_name, // for views, tbl_name is same as name
-        0,                     // views don't have a root page
-        Some(sql.clone()),
-    )?;
-
-    // Parse schema to load the new view
-    program.emit_insn(Insn::ParseSchema {
-        db: sqlite_schema_cursor_id,
-        where_clause: Some(format!("name = '{normalized_view_name}'")),
-    });
-
-    // Populate the new materialized view
-    program.emit_insn(Insn::PopulateMaterializedViews);
+    // Use common logic to emit the view creation program
+    emit_create_view_program(schema, view_name, sql, syms, &mut program, true)?;
 
     program.epilogue(schema);
     Ok(program)
@@ -89,27 +108,58 @@ fn create_materialized_view_to_str(view_name: &str, select_stmt: &ast::Select) -
     )
 }
 
+pub fn translate_create_view(
+    schema: &Schema,
+    view_name: &str,
+    select_stmt: &ast::Select,
+    _columns: Option<&Vec<ast::IndexedColumn>>,
+    _connection: Arc<Connection>,
+    syms: &SymbolTable,
+    mut program: ProgramBuilder,
+) -> Result<ProgramBuilder> {
+    let normalized_view_name = normalize_ident(view_name);
+
+    // Check if view already exists
+    if schema.get_view(&normalized_view_name).is_some()
+        || schema
+            .get_materialized_view(&normalized_view_name)
+            .is_some()
+    {
+        return Err(crate::LimboError::ParseError(format!(
+            "View {normalized_view_name} already exists"
+        )));
+    }
+
+    // Reconstruct the SQL string
+    let sql = create_view_to_str(view_name, select_stmt);
+
+    // Use common logic to emit the view creation program
+    emit_create_view_program(schema, view_name, sql, syms, &mut program, false)?;
+
+    Ok(program)
+}
+
+fn create_view_to_str(view_name: &str, select_stmt: &ast::Select) -> String {
+    format!(
+        "CREATE VIEW {} AS {}",
+        view_name,
+        select_stmt.format().unwrap()
+    )
+}
+
 pub fn translate_drop_view(
     schema: &Schema,
     view_name: &str,
     if_exists: bool,
-    connection: Arc<Connection>,
     mut program: ProgramBuilder,
 ) -> Result<ProgramBuilder> {
-    // Check if experimental views are enabled
-    if !connection.experimental_views_enabled() {
-        return Err(crate::LimboError::ParseError(
-            "DROP VIEW is an experimental feature. Enable with --experimental-views flag"
-                .to_string(),
-        ));
-    }
-
     let normalized_view_name = normalize_ident(view_name);
 
-    // Check if view exists
-    let view_exists = schema
-        .get_materialized_view(&normalized_view_name)
-        .is_some();
+    // Check if view exists (either regular or materialized)
+    let view_exists = schema.get_view(&normalized_view_name).is_some()
+        || schema
+            .get_materialized_view(&normalized_view_name)
+            .is_some();
 
     if !view_exists && !if_exists {
         return Err(crate::LimboError::ParseError(format!(

@@ -350,6 +350,8 @@ fn parse_from_clause_table(
 ) -> Result<()> {
     match table {
         ast::SelectTable::Table(qualified_name, maybe_alias, _) => parse_table(
+            schema,
+            syms,
             table_references,
             ctes,
             table_ref_counter,
@@ -391,6 +393,8 @@ fn parse_from_clause_table(
             Ok(())
         }
         ast::SelectTable::TableCall(qualified_name, maybe_args, maybe_alias) => parse_table(
+            schema,
+            syms,
             table_references,
             ctes,
             table_ref_counter,
@@ -406,6 +410,8 @@ fn parse_from_clause_table(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_table(
+    schema: &Schema,
+    syms: &SymbolTable,
     table_references: &mut TableReferences,
     ctes: &mut Vec<JoinedTable>,
     table_ref_counter: &mut TableRefIdCounter,
@@ -469,6 +475,30 @@ fn parse_table(
         });
         return Ok(());
     };
+
+    let regular_view = connection.with_schema(database_id, |schema| {
+        schema.get_view(table_name.as_str()).cloned()
+    });
+    if let Some(view) = regular_view {
+        // Views are essentially query aliases, so just Expand the view as a subquery
+        let view_select = view.select_stmt.clone();
+        let subselect = Box::new(view_select);
+
+        // Use the view name as alias if no explicit alias was provided
+        let view_alias = maybe_alias.or_else(|| Some(ast::As::As(table_name.clone())));
+
+        // Recursively call parse_from_clause_table with the view as a SELECT
+        return parse_from_clause_table(
+            schema,
+            ast::SelectTable::Select(subselect, view_alias),
+            table_references,
+            vtab_predicates,
+            ctes,
+            syms,
+            table_ref_counter,
+            connection,
+        );
+    }
 
     let view = connection.with_schema(database_id, |schema| {
         schema.get_materialized_view(table_name.as_str())
