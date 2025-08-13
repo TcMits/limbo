@@ -324,6 +324,8 @@ turso> SELECT * FROM t;
 
 Turso supports a JavaScript API, both with native and WebAssembly package options.
 
+Please read the [JavaScript API reference](docs/javascript-api-reference.md) for more information.
+
 ### Installation
 
 Installing the native package:
@@ -338,19 +340,15 @@ Installing the WebAssembly package:
 npm i @tursodatabase/database --cpu wasm32
 ```
 
-### API reference
-
-See [JavaScript API reference](docs/javascript-api-reference.md) for more information.
-
 ### Getting Started
 
 To use Turso from JavaScript application, you need to import `Database` type from the `@tursodatabase/database` package.
 You can the prepare a statement with `Database.prepare` method and execute the SQL statement with `Statement.get()` method.
 
 ```
-import Database from '@tursodatabase/database';
+import { connect } from '@tursodatabase/database';
 
-const db = new Database('turso.db');
+const db = await connect('turso.db');
 const row = db.prepare('SELECT 1').get();
 console.log(row);
 ```
