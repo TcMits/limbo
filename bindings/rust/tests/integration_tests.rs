@@ -321,8 +321,8 @@ async fn test_index() {
         .await
         .unwrap();
     let row = rows.next().await.unwrap().unwrap();
-    assert!(row.get::<String>(0).unwrap() == "alice".to_string());
-    assert!(row.get::<String>(1).unwrap() == "a@b.c".to_string());
+    assert!(row.get::<String>(0).unwrap() == "alice");
+    assert!(row.get::<String>(1).unwrap() == "a@b.c");
     assert!(rows.next().await.unwrap().is_none());
 
     let mut rows = conn
@@ -330,7 +330,7 @@ async fn test_index() {
         .await
         .unwrap();
     let row = rows.next().await.unwrap().unwrap();
-    assert!(row.get::<String>(0).unwrap() == "bob".to_string());
-    assert!(row.get::<String>(1).unwrap() == "b@d.e".to_string());
+    assert!(row.get::<String>(0).unwrap() == "bob");
+    assert!(row.get::<String>(1).unwrap() == "b@d.e");
     assert!(rows.next().await.unwrap().is_none());
 }
