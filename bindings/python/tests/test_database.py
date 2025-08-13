@@ -89,6 +89,24 @@ def test_in_memory_fetchone_select_all_users(provider):
     assert alice
     assert alice == (1, "alice")
 
+@pytest.mark.parametrize("provider", ["sqlite3", "turso"])
+def test_in_memory_index(provider):
+    conn = connect(provider, ":memory:")
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE users (name TEXT PRIMARY KEY, email TEXT)")
+    cursor.execute("CREATE INDEX email_idx ON users(email)")
+    cursor.execute("INSERT INTO users VALUES ('alice', 'a@b.c'), ('bob', 'b@d.e')")
+
+    cursor.execute("SELECT * FROM users WHERE email = 'a@b.c'")
+    alice = cursor.fetchall()
+
+    cursor.execute("SELECT * FROM users WHERE email = 'b@d.e'")
+    bob = cursor.fetchall()
+
+    conn.close()
+    assert alice == [("alice", "a@b.c")]
+    assert bob == [("bob", "b@d.e")]
+
 
 @pytest.mark.parametrize("provider", ["sqlite3", "turso"])
 def test_fetchone_select_all_users(provider):

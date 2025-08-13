@@ -315,10 +315,9 @@ impl Drop for Connection {
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
-#[pyfunction(signature = (path, experimental_indexes=None))]
-pub fn connect(path: &str, experimental_indexes: Option<bool>) -> Result<Connection> {
-    let experimental_indexes = experimental_indexes.unwrap_or(true);
-    match turso_core::Connection::from_uri(path, experimental_indexes, false, false) {
+#[pyfunction(signature = (path))]
+pub fn connect(path: &str) -> Result<Connection> {
+    match turso_core::Connection::from_uri(path, true, false, false) {
         Ok((io, conn)) => Ok(Connection { conn, _io: io }),
         Err(e) => Err(PyErr::new::<ProgrammingError, _>(format!(
             "Failed to create connection: {e:?}"
