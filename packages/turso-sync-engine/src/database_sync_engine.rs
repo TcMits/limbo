@@ -221,6 +221,8 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
         transfer_logical_changes(coro, &self.draft_tape, &synced, client_id, false).await?;
 
         self.push_synced_to_remote(coro).await?;
+
+        self.reset_synced_if_dirty(coro).await?;
         Ok(())
     }
 
@@ -772,7 +774,7 @@ pub mod tests {
                 .await
                 .unwrap();
 
-            runner.pull().await.unwrap();
+            runner.sync().await.unwrap();
 
             // create connection in outer scope in order to prevent Database from being dropped in between of pull operations
             let conn = runner.connect().await.unwrap();
@@ -791,7 +793,7 @@ pub mod tests {
                 }
 
                 tracing::info!("pull attempt={}", attempt);
-                runner.pull().await.unwrap();
+                runner.sync().await.unwrap();
 
                 let expected = expected
                     .iter()

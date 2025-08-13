@@ -167,12 +167,14 @@ impl DatabaseTape {
         opts: DatabaseReplaySessionOpts,
     ) -> Result<DatabaseReplaySession> {
         tracing::debug!("opening replay session");
+        let conn = self.connect(coro).await?;
+        conn.execute("BEGIN IMMEDIATE")?;
         Ok(DatabaseReplaySession {
-            conn: self.connect(coro).await?,
+            conn,
             cached_delete_stmt: HashMap::new(),
             cached_insert_stmt: HashMap::new(),
             cached_update_stmt: HashMap::new(),
-            in_txn: false,
+            in_txn: true,
             opts,
         })
     }
@@ -407,7 +409,7 @@ impl DatabaseChangesIterator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatabaseReplaySessionOpts {
     pub use_implicit_rowid: bool,
 }

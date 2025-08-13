@@ -313,6 +313,7 @@ impl TestSyncServer {
     pub async fn execute(&self, sql: &str, params: impl turso::IntoParams) -> Result<()> {
         let conn = self.db.connect()?;
         conn.execute(sql, params).await?;
+        tracing::debug!("sync_frames_from_conn after execute");
         self.sync_frames_from_conn(&conn).await?;
         Ok(())
     }
