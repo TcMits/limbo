@@ -8,6 +8,7 @@ Welcome to Turso database manual!
   * [Getting Started](#getting-started)
   * [Limitations](#limitations)
 * [The SQL shell](#the-sql-shell)
+  * [Shell commands](#shell-commands)
   * [Command line options](#command-line-options)
 * [The SQL language](#the-sql-language)
   * [`ALTER TABLE` — change table definition](#alter-table--change-table-definition)
@@ -101,6 +102,15 @@ Use ".open FILENAME" to reopen on a persistent database
 turso> SELECT 'hello, world';
 hello, world
 ```
+
+### Shell commands
+
+The shell supports commands in addition to SQL statements. The commands start with a dot (".") followed by the command. The supported commands are:
+
+| Command | Description |
+|---------|-------------|
+| `.schema` | Display the database schema |
+| `.dump` | Dump database contents as SQL statements |
 
 ### Command line options
 
