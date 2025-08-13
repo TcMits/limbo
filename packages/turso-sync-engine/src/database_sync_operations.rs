@@ -179,6 +179,10 @@ pub async fn wal_pull<'a, C: ProtocolIO, U: AsyncFnMut(&'a Coro, u64) -> Result<
         }
         coro.yield_(ProtocolCommand::IO).await?;
     }
+    if start_frame < end_frame {
+        // chunk which was sent from the server has ended early - so there is nothing left on server-side for pull
+        return Ok(WalPullResult::Done);
+    }
     if !buffer.is_empty() {
         return Err(Error::DatabaseSyncEngineError(format!(
             "wal_pull: response has unexpected trailing data: buffer.len()={}",
