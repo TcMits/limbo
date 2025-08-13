@@ -7267,7 +7267,7 @@ pub fn op_rename_column(
 ) -> Result<InsnFunctionStepResult> {
     load_insn!(
         RenameColumn {
-            table,
+            table: table_name,
             column_index,
             name
         },
@@ -7279,7 +7279,7 @@ pub fn op_rename_column(
     conn.with_schema_mut(|schema| {
         let table = schema
             .tables
-            .get_mut(table)
+            .get_mut(table_name)
             .expect("table being renamed should be in schema");
 
         let table = Arc::make_mut(table);
@@ -7294,6 +7294,20 @@ pub fn op_rename_column(
             .columns
             .get_mut(*column_index)
             .expect("renamed column should be in schema");
+
+        if let Some(indexes) = schema.indexes.get_mut(table_name) {
+            for index in indexes {
+                let index = Arc::make_mut(index);
+                for index_column in &mut index.columns {
+                    if index_column.name
+                        == *column.name.as_ref().expect("btree column should be named")
+                    {
+                        index_column.name = name.to_owned();
+                    }
+                }
+            }
+        }
+
         column.name = Some(name.to_owned());
     });
 
