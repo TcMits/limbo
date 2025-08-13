@@ -71,7 +71,7 @@ turso> SELECT 'hello, world';
 hello, world
 ```
 
-## Limitations
+### Limitations
 
 Turso aims towards full SQLite compatibility but has the following limitations:
 
