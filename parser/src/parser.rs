@@ -581,6 +581,7 @@ impl<'a> Parser<'a> {
             TokenType::TK_INSERT,
             TokenType::TK_REPLACE,
             TokenType::TK_UPDATE,
+            TokenType::TK_REINDEX,
         ])?;
 
         match tok.token_type.unwrap() {
@@ -602,6 +603,7 @@ impl<'a> Parser<'a> {
             TokenType::TK_DROP => self.parse_drop_stmt(),
             TokenType::TK_INSERT | TokenType::TK_REPLACE => self.parse_insert(),
             TokenType::TK_UPDATE => self.parse_update(),
+            TokenType::TK_REINDEX => self.parse_reindex(),
             _ => unreachable!(),
         }
     }
@@ -3975,6 +3977,22 @@ impl<'a> Parser<'a> {
     fn parse_update(&mut self) -> Result<Stmt, Error> {
         let with = self.parse_with()?;
         self.parse_update_without_cte(with)
+    }
+
+    fn parse_reindex(&mut self) -> Result<Stmt, Error> {
+        self.eat_assert(&[TokenType::TK_REINDEX]);
+        match self.peek()? {
+            Some(tok) => match tok.token_type.unwrap().fallback_id_if_ok() {
+                TokenType::TK_ID
+                | TokenType::TK_STRING
+                | TokenType::TK_JOIN_KW
+                | TokenType::TK_INDEXED => Ok(Stmt::Reindex {
+                    name: Some(self.parse_fullname(false)?),
+                }),
+                _ => Ok(Stmt::Reindex { name: None }),
+            },
+            _ => Ok(Stmt::Reindex { name: None }),
+        }
     }
 }
 
@@ -11247,6 +11265,23 @@ mod tests {
                     limit: Some(Limit {
                         expr: Box::new(Expr::Literal(Literal::Numeric("1".to_owned()))),
                         offset: None,
+                    }),
+                })],
+            ),
+            // parse reindex
+            (
+                b"REINDEX".as_slice(),
+                vec![Cmd::Stmt(Stmt::Reindex {
+                    name: None,
+                })],
+            ),
+            (
+                b"REINDEX foo".as_slice(),
+                vec![Cmd::Stmt(Stmt::Reindex {
+                    name: Some(QualifiedName {
+                        db_name: None,
+                        name: Name::Ident("foo".to_owned()),
+                        alias: None
                     }),
                 })],
             ),
