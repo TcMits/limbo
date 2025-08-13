@@ -18,7 +18,7 @@ pub type Result<T> = std::result::Result<T, errors::Error>;
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::sync::Arc;
 
     use tokio::{select, sync::Mutex};
     use tracing_subscriber::EnvFilter;
