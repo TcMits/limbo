@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <i>Turso Database</i> is an in-process SQL database, compatible with SQLite.
+  An in-process SQL database, compatible with SQLite.
 </p>
 
 <p align="center">
@@ -28,9 +28,13 @@
 
 ---
 
-## Features
+## About
 
-Turso Database is a _work-in-progress_, in-process OLTP database engine library written in Rust that has:
+Turso Database is an in-process SQL database written in Rust, compatible with SQLite.
+
+> **⚠️ Warning:** This software is ALPHA, only use for development, testing, and experimentation. We are working to make it production ready, but do not use it for critical data right now.
+> 
+## Features and Roadmap
 
 * **SQLite compatibility** for SQL dialect, file formats, and the C API [see [document](COMPAT.md) for details]
 * **Change data capture (CDC)** for real-time tracking of database changes.
@@ -42,15 +46,17 @@ Turso Database is a _work-in-progress_, in-process OLTP database engine library 
   * [Rust](bindings/rust)
   * [WebAssembly](bindings/javascript)
 * **Asynchronous I/O** support on Linux with `io_uring`
-* **OS support** for Linux, macOS, and Windows
+* **Cross-platform** support for Linux, macOS, Windows and browsers (through WebAssembly)
+* **Vector support** support including exact search and vector manipulation
+* **Improved schema management** including extended `ALTER` support and faster schema changes.
 
-### Roadmap
+The database has the following experimental features:
+
+* **`BEGIN CONCURRENT`** for improved write throughput using multi-version concurrency control (MVCC).
+* **Incremental computation** using DBSP for incremental view mainatenance and query subscriptions.
 
 The following features are on our current roadmap:
 
-* **`BEGIN CONCURRENT`** for improved write throughput using multi-version concurrency control (MVCC).
-* **Better schema management**, including extended `ALTER` support, faster schema changes, and strict column types by default.
-* **Incremental computation** using DBSP to implement query subscriptions, incremental view maintenance, and triggers.
 * **Vector indexing** for fast approximate vector search, similar to [libSQL vector search](https://turso.tech/vector).
 
 ## Getting Started
