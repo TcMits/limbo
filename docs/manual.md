@@ -80,7 +80,6 @@ Turso aims towards full SQLite compatibility but has the following limitations:
 
 * No multi-process access
 * No multi-threading
-* No indexing
 * No savepoints
 * No triggers
 * No views
