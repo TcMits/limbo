@@ -183,9 +183,9 @@ npm i @tursodatabase/database
 Example usage:
 
 ```js
-import { Database } from '@tursodatabase/database';
+import { connect } from '@tursodatabase/database';
 
-const db = new Database('sqlite.db');
+const db = await connect('sqlite.db');
 const stmt = db.prepare('SELECT * FROM users');
 const users = stmt.all();
 console.log(users);
