@@ -37,13 +37,13 @@ pub enum WalPushResult {
 
 pub async fn connect(coro: &Coro, tape: &DatabaseTape) -> Result<Arc<turso_core::Connection>> {
     let conn = tape.connect(coro).await?;
-    conn.wal_disable_checkpoint();
+    conn.wal_auto_checkpoint_disable();
     Ok(conn)
 }
 
 pub fn connect_untracked(tape: &DatabaseTape) -> Result<Arc<turso_core::Connection>> {
     let conn = tape.connect_untracked()?;
-    conn.wal_disable_checkpoint();
+    conn.wal_auto_checkpoint_disable();
     Ok(conn)
 }
 
