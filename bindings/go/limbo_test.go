@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"slices"
 	"testing"
 
 	_ "github.com/tursodatabase/turso"
@@ -678,6 +679,53 @@ func TestParameterOrdering(t *testing.T) {
 		for i := range 3 {
 			if result[i] != expectedValues[i] {
 				t.Fatalf("Expected %d, got %d", expectedValues[i], result[i])
+			}
+		}
+	}
+}
+
+func TestIndex(t *testing.T) {
+	newConn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("Error opening new connection: %v", err)
+	}
+	sql := "CREATE TABLE users (name TEXT PRIMARY KEY, email TEXT)"
+	_, err = newConn.Exec(sql)
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+	sql = "CREATE INDEX email_idx ON users(email)"
+	_, err = newConn.Exec(sql)
+	if err != nil {
+		t.Fatalf("Error creating index: %v", err)
+	}
+
+	// Test inserting with parameters in a different order than
+	// the table definition.
+	sql = "INSERT INTO users VALUES ('alice', 'a@b.c'), ('bob', 'b@d.e')"
+	_, err = newConn.Exec(sql)
+	if err != nil {
+		t.Fatalf("Error inserting data: %v", err)
+	}
+
+	for filter, row := range map[string][]string{
+		"a@b.c": []string{"alice", "a@b.c"},
+		"b@d.e": []string{"bob", "b@d.e"},
+	} {
+		query := "SELECT * FROM users WHERE email = ?"
+		rows, err := newConn.Query(query, filter)
+		if err != nil {
+			t.Fatalf("Error executing query: %v", err)
+		}
+		for rows.Next() {
+			var name, email string
+			err := rows.Scan(&name, &email)
+			t.Log("name,email:", name, email)
+			if err != nil {
+				t.Fatal("Error scanning row: ", err)
+			}
+			if !slices.Equal([]string{name, email}, row) {
+				t.Fatal("Unexpected result", row, []string{name, email})
 			}
 		}
 	}
