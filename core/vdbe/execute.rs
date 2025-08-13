@@ -4473,20 +4473,6 @@ pub fn op_function(
                 let result = exec_printf(&state.registers[*start_reg..*start_reg + arg_count])?;
                 state.registers[*dest] = Register::Value(result);
             }
-            ScalarFunc::Likely => {
-                let value = &state.registers[*start_reg].borrow_mut();
-                let result = value.get_owned_value().exec_likely();
-                state.registers[*dest] = Register::Value(result);
-            }
-            ScalarFunc::Likelihood => {
-                assert_eq!(arg_count, 2);
-                let value = &state.registers[*start_reg];
-                let probability = &state.registers[*start_reg + 1];
-                let result = value
-                    .get_owned_value()
-                    .exec_likelihood(probability.get_owned_value());
-                state.registers[*dest] = Register::Value(result);
-            }
             ScalarFunc::TableColumnsJsonArray => {
                 assert_eq!(arg_count, 1);
                 #[cfg(not(feature = "json"))]
@@ -4652,10 +4638,10 @@ pub fn op_function(
                 // Set result to NULL (detach doesn't return a value)
                 state.registers[*dest] = Register::Value(Value::Null);
             }
-            ScalarFunc::Unlikely => {
-                let value = &state.registers[*start_reg].borrow_mut();
-                let result = value.get_owned_value().exec_unlikely();
-                state.registers[*dest] = Register::Value(result);
+            ScalarFunc::Unlikely | ScalarFunc::Likely | ScalarFunc::Likelihood => {
+                panic!(
+                    "{scalar_func:?} should be stripped during expression translation and never reach VDBE",
+                );
             }
         },
         crate::function::Func::Vector(vector_func) => match vector_func {
