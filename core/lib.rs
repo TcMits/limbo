@@ -255,6 +255,8 @@ impl Database {
         enable_indexes: bool,
         enable_views: bool,
     ) -> Result<Arc<Database>> {
+        // turso-sync-engine create 2 databases with different names in the same IO if MemoryIO is used
+        // in this case we need to bypass registry (as this is MemoryIO DB) but also preserve original distinction in names (e.g. :memory:-draft and :memory:-synced)
         if path.starts_with(":memory:") {
             return Self::open_with_flags_bypass_registry(
                 io,
