@@ -108,25 +108,17 @@ impl Builder {
                     io,
                     self.path.as_str(),
                     self.enable_mvcc,
-                    indexes_enabled(),
+                    true,
                 )?;
                 Ok(Database { inner: db })
             }
             path => {
                 let io: Arc<dyn turso_core::IO> = Arc::new(turso_core::PlatformIO::new()?);
-                let db =
-                    turso_core::Database::open_file(io, path, self.enable_mvcc, indexes_enabled())?;
+                let db = turso_core::Database::open_file(io, path, self.enable_mvcc, true)?;
                 Ok(Database { inner: db })
             }
         }
     }
-}
-
-fn indexes_enabled() -> bool {
-    #[cfg(feature = "experimental_indexes")]
-    return true;
-    #[cfg(not(feature = "experimental_indexes"))]
-    return false;
 }
 
 /// A database.

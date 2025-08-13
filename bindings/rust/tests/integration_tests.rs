@@ -297,3 +297,40 @@ async fn test_row_get_conversion_error() {
     let result: Result<u32, _> = row.get(0);
     assert!(matches!(result, Err(Error::ConversionFailure(_))));
 }
+
+#[tokio::test]
+async fn test_index() {
+    let db = Builder::new_local(":memory:").build().await.unwrap();
+    let conn = db.connect().unwrap();
+
+    conn.execute("CREATE TABLE users (name TEXT PRIMARY KEY, email TEXT)", ())
+        .await
+        .unwrap();
+    conn.execute("CREATE INDEX email_idx ON users(email)", ())
+        .await
+        .unwrap();
+    conn.execute(
+        "INSERT INTO users VALUES ('alice', 'a@b.c'), ('bob', 'b@d.e')",
+        (),
+    )
+    .await
+    .unwrap();
+
+    let mut rows = conn
+        .query("SELECT * FROM users WHERE email = 'a@b.c'", ())
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert!(row.get::<String>(0).unwrap() == "alice".to_string());
+    assert!(row.get::<String>(1).unwrap() == "a@b.c".to_string());
+    assert!(rows.next().await.unwrap().is_none());
+
+    let mut rows = conn
+        .query("SELECT * FROM users WHERE email = 'b@d.e'", ())
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert!(row.get::<String>(0).unwrap() == "bob".to_string());
+    assert!(row.get::<String>(1).unwrap() == "b@d.e".to_string());
+    assert!(rows.next().await.unwrap().is_none());
+}
