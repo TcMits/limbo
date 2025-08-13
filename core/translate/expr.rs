@@ -1718,11 +1718,10 @@ pub fn translate_expr(
                                 start_reg,
                                 resolver,
                             )?;
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg,
-                                dest: target_register,
-                                func: func_ctx,
+                            program.emit_insn(Insn::Copy {
+                                src_reg: start_reg,
+                                dst_reg: target_register,
+                                extra_amount: 0,
                             });
                             Ok(target_register)
                         }
