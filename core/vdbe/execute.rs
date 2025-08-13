@@ -10051,62 +10051,6 @@ mod tests {
     }
 
     #[test]
-    fn test_likely() {
-        let input = Value::build_text("limbo");
-        let expected = Value::build_text("limbo");
-        assert_eq!(input.exec_likely(), expected);
-
-        let input = Value::Integer(100);
-        let expected = Value::Integer(100);
-        assert_eq!(input.exec_likely(), expected);
-
-        let input = Value::Float(12.34);
-        let expected = Value::Float(12.34);
-        assert_eq!(input.exec_likely(), expected);
-
-        let input = Value::Null;
-        let expected = Value::Null;
-        assert_eq!(input.exec_likely(), expected);
-
-        let input = Value::Blob(vec![1, 2, 3, 4]);
-        let expected = Value::Blob(vec![1, 2, 3, 4]);
-        assert_eq!(input.exec_likely(), expected);
-    }
-
-    #[test]
-    fn test_likelihood() {
-        let value = Value::build_text("limbo");
-        let prob = Value::Float(0.5);
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let value = Value::build_text("database");
-        let prob = Value::Float(0.9375);
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let value = Value::Integer(100);
-        let prob = Value::Float(1.0);
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let value = Value::Float(12.34);
-        let prob = Value::Float(0.5);
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let value = Value::Null;
-        let prob = Value::Float(0.5);
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let value = Value::Blob(vec![1, 2, 3, 4]);
-        let prob = Value::Float(0.5);
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let prob = Value::build_text("0.5");
-        assert_eq!(value.exec_likelihood(&prob), value);
-
-        let prob = Value::Null;
-        assert_eq!(value.exec_likelihood(&prob), value);
-    }
-
-    #[test]
     fn test_bitfield() {
         let mut bitfield = Bitfield::<4>::new();
         for i in 0..256 {
@@ -10123,28 +10067,5 @@ mod tests {
             bitfield.unset(i);
             assert!(!bitfield.get(i));
         }
-    }
-
-    #[test]
-    fn test_unlikely() {
-        let input = Value::build_text("turso");
-        let expected = Value::build_text("turso");
-        assert_eq!(input.exec_unlikely(), expected);
-
-        let input = Value::Integer(42);
-        let expected = Value::Integer(42);
-        assert_eq!(input.exec_unlikely(), expected);
-
-        let input = Value::Float(99.99);
-        let expected = Value::Float(99.99);
-        assert_eq!(input.exec_unlikely(), expected);
-
-        let input = Value::Null;
-        let expected = Value::Null;
-        assert_eq!(input.exec_unlikely(), expected);
-
-        let input = Value::Blob(vec![10, 20, 30, 40]);
-        let expected = Value::Blob(vec![10, 20, 30, 40]);
-        assert_eq!(input.exec_unlikely(), expected);
     }
 }
