@@ -66,7 +66,7 @@ async function process(opts, request) {
             const response = await fetch(`${opts.url}${requestType.path}`, {
                 method: requestType.method,
                 headers: opts.headers,
-                body: requestType.body
+                body: requestType.body != null ? new Uint8Array(requestType.body) : null,
             });
             completion.status(response.status);
             const reader = response.body.getReader();

@@ -14,7 +14,7 @@ pub enum JsProtocolRequest {
     Http {
         method: String,
         path: String,
-        body: Option<Buffer>,
+        body: Option<Vec<u8>>,
     },
     FullRead {
         path: String,
@@ -134,7 +134,7 @@ impl ProtocolIO for JsProtocolIo {
         Ok(self.add_request(JsProtocolRequest::Http {
             method: method.to_string(),
             path: path.to_string(),
-            body: body.map(Buffer::from),
+            body,
         }))
     }
 
