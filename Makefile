@@ -55,7 +55,7 @@ uv-sync-test:
 	uv sync --all-extras --dev --package turso_test
 .PHONE: uv-sync
 
-test: limbo uv-sync-test test-compat test-vector test-sqlite3 test-shell test-memory test-write test-update test-constraint test-collate test-extensions test-mvcc
+test: limbo uv-sync-test test-compat test-vector test-sqlite3 test-shell test-memory test-write test-update test-constraint test-collate test-extensions test-mvcc test-matviews
 .PHONY: test
 
 test-extensions: limbo uv-sync-test
@@ -77,6 +77,10 @@ test-vector:
 test-time:
 	RUST_LOG=$(RUST_LOG) SQLITE_EXEC=$(SQLITE_EXEC) ./testing/time.test
 .PHONY: test-time
+
+test-matviews:
+	RUST_LOG=$(RUST_LOG) SQLITE_EXEC=$(SQLITE_EXEC) ./testing/materialized_views.test
+.PHONY: test-matviews
 
 reset-db:
 	./scripts/clone_test_db.sh

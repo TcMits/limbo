@@ -1,0 +1,370 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test_on_specific_db {:memory:} matview-basic-filter-population {
+    CREATE TABLE products(id INTEGER, name TEXT, price INTEGER, category TEXT);
+    INSERT INTO products VALUES
+        (1, 'Laptop', 1200, 'Electronics'),
+        (2, 'Mouse', 25, 'Electronics'),
+        (3, 'Desk', 350, 'Furniture'),
+        (4, 'Chair', 150, 'Furniture'),
+        (5, 'Monitor', 400, 'Electronics'),
+        (6, 'Keyboard', 75, 'Electronics');
+
+    CREATE MATERIALIZED VIEW expensive_items AS
+        SELECT * FROM products WHERE price > 200;
+
+    SELECT id, name, price FROM expensive_items ORDER BY id;
+} {1|Laptop|1200
+3|Desk|350
+5|Monitor|400}
+
+do_execsql_test_on_specific_db {:memory:} matview-aggregation-population {
+    CREATE TABLE sales(product_id INTEGER, quantity INTEGER, day INTEGER);
+    INSERT INTO sales VALUES
+        (1, 2, 1),
+        (2, 5, 1),
+        (1, 1, 2),
+        (3, 1, 2),
+        (2, 3, 3),
+        (1, 1, 3);
+
+    CREATE MATERIALIZED VIEW daily_totals AS
+        SELECT day, SUM(quantity) as total, COUNT(*) as transactions
+        FROM sales
+        GROUP BY day;
+
+    SELECT * FROM daily_totals ORDER BY day;
+} {1|7|2
+2|2|2
+3|4|2}
+
+do_execsql_test_on_specific_db {:memory:} matview-filter-with-groupby {
+    CREATE TABLE t(a INTEGER, b INTEGER);
+    INSERT INTO t(a,b) VALUES (2,2), (3,3), (6,6), (7,7);
+    
+    CREATE MATERIALIZED VIEW v AS 
+        SELECT b as yourb, SUM(a) as mysum, COUNT(a) as mycount 
+        FROM t 
+        WHERE b > 2 
+        GROUP BY b;
+    
+    SELECT * FROM v ORDER BY yourb;
+} {3|3|1
+6|6|1
+7|7|1}
+
+do_execsql_test_on_specific_db {:memory:} matview-insert-maintenance {
+    CREATE TABLE t(a INTEGER, b INTEGER);
+    CREATE MATERIALIZED VIEW v AS 
+        SELECT b, SUM(a) as total, COUNT(*) as cnt 
+        FROM t 
+        WHERE b > 2 
+        GROUP BY b;
+    
+    INSERT INTO t VALUES (3,3), (6,6);
+    SELECT * FROM v ORDER BY b;
+    
+    INSERT INTO t VALUES (4,3), (5,6);
+    SELECT * FROM v ORDER BY b;
+    
+    INSERT INTO t VALUES (1,1), (2,2);
+    SELECT * FROM v ORDER BY b;
+} {3|3|1
+6|6|1
+3|7|2
+6|11|2
+3|7|2
+6|11|2}
+
+do_execsql_test_on_specific_db {:memory:} matview-delete-maintenance {
+    CREATE TABLE items(id INTEGER, category TEXT, amount INTEGER);
+    INSERT INTO items VALUES 
+        (1, 'A', 10),
+        (2, 'B', 20),
+        (3, 'A', 30),
+        (4, 'B', 40),
+        (5, 'A', 50);
+    
+    CREATE MATERIALIZED VIEW category_sums AS
+        SELECT category, SUM(amount) as total, COUNT(*) as cnt
+        FROM items
+        GROUP BY category;
+    
+    SELECT * FROM category_sums ORDER BY category;
+    
+    DELETE FROM items WHERE id = 3;
+    SELECT * FROM category_sums ORDER BY category;
+    
+    DELETE FROM items WHERE category = 'B';
+    SELECT * FROM category_sums ORDER BY category;
+} {A|90|3
+B|60|2
+A|60|2
+B|60|2
+A|60|2}
+
+do_execsql_test_on_specific_db {:memory:} matview-update-maintenance {
+    CREATE TABLE records(id INTEGER, value INTEGER, status INTEGER);
+    INSERT INTO records VALUES
+        (1, 100, 1),
+        (2, 200, 2),
+        (3, 300, 1),
+        (4, 400, 2);
+    
+    CREATE MATERIALIZED VIEW status_totals AS
+        SELECT status, SUM(value) as total, COUNT(*) as cnt
+        FROM records
+        GROUP BY status;
+    
+    SELECT * FROM status_totals ORDER BY status;
+    
+    UPDATE records SET value = 150 WHERE id = 1;
+    SELECT * FROM status_totals ORDER BY status;
+    
+    UPDATE records SET status = 2 WHERE id = 3;
+    SELECT * FROM status_totals ORDER BY status;
+} {1|400|2
+2|600|2
+1|450|2
+2|600|2
+1|150|1
+2|900|3}
+
+do_execsql_test_on_specific_db {:memory:} matview-integer-primary-key-basic {
+    CREATE TABLE t(a INTEGER PRIMARY KEY, b INTEGER);
+    INSERT INTO t(a,b) VALUES (2,2), (3,3), (6,6), (7,7);
+    
+    CREATE MATERIALIZED VIEW v AS 
+        SELECT * FROM t WHERE b > 2;
+    
+    SELECT * FROM v ORDER BY a;
+} {3|3
+6|6
+7|7}
+
+do_execsql_test_on_specific_db {:memory:} matview-integer-primary-key-update-rowid {
+    CREATE TABLE t(a INTEGER PRIMARY KEY, b INTEGER);
+    INSERT INTO t(a,b) VALUES (2,2), (3,3), (6,6), (7,7);
+    
+    CREATE MATERIALIZED VIEW v AS 
+        SELECT * FROM t WHERE b > 2;
+    
+    SELECT * FROM v ORDER BY a;
+    
+    UPDATE t SET a = 1 WHERE b = 3;
+    SELECT * FROM v ORDER BY a;
+    
+    UPDATE t SET a = 10 WHERE a = 6;
+    SELECT * FROM v ORDER BY a;
+} {3|3
+6|6
+7|7
+1|3
+6|6
+7|7
+1|3
+7|7
+10|6}
+
+do_execsql_test_on_specific_db {:memory:} matview-integer-primary-key-update-value {
+    CREATE TABLE t(a INTEGER PRIMARY KEY, b INTEGER);
+    INSERT INTO t(a,b) VALUES (2,2), (3,3), (6,6), (7,7);
+    
+    CREATE MATERIALIZED VIEW v AS 
+        SELECT * FROM t WHERE b > 2;
+    
+    SELECT * FROM v ORDER BY a;
+    
+    UPDATE t SET b = 1 WHERE a = 6;
+    SELECT * FROM v ORDER BY a;
+    
+    UPDATE t SET b = 5 WHERE a = 2;
+    SELECT * FROM v ORDER BY a;
+} {3|3
+6|6
+7|7
+3|3
+7|7
+2|5
+3|3
+7|7}
+
+do_execsql_test_on_specific_db {:memory:} matview-integer-primary-key-with-aggregation {
+    CREATE TABLE t(a INTEGER PRIMARY KEY, b INTEGER, c INTEGER);
+    INSERT INTO t VALUES 
+        (1, 10, 100),
+        (2, 10, 200),
+        (3, 20, 300),
+        (4, 20, 400),
+        (5, 10, 500);
+    
+    CREATE MATERIALIZED VIEW v AS
+        SELECT b, SUM(c) as total, COUNT(*) as cnt
+        FROM t
+        WHERE a > 2
+        GROUP BY b;
+    
+    SELECT * FROM v ORDER BY b;
+    
+    UPDATE t SET a = 6 WHERE a = 1;
+    SELECT * FROM v ORDER BY b;
+    
+    DELETE FROM t WHERE a = 3;
+    SELECT * FROM v ORDER BY b;
+} {10|500|1
+20|700|2
+10|600|2
+20|700|2
+10|600|2
+20|400|1}
+
+do_execsql_test_on_specific_db {:memory:} matview-complex-filter-aggregation {
+    CREATE TABLE transactions(
+        id INTEGER,
+        account INTEGER,
+        amount INTEGER,
+        type INTEGER
+    );
+    
+    INSERT INTO transactions VALUES
+        (1, 100, 50, 1),
+        (2, 100, 30, 2),
+        (3, 200, 100, 1),
+        (4, 100, 20, 1),
+        (5, 200, 40, 2),
+        (6, 300, 60, 1);
+    
+    CREATE MATERIALIZED VIEW account_deposits AS
+        SELECT account, SUM(amount) as total_deposits, COUNT(*) as deposit_count
+        FROM transactions
+        WHERE type = 1
+        GROUP BY account;
+    
+    SELECT * FROM account_deposits ORDER BY account;
+    
+    INSERT INTO transactions VALUES (7, 100, 25, 1);
+    SELECT * FROM account_deposits ORDER BY account;
+    
+    UPDATE transactions SET amount = 80 WHERE id = 1;
+    SELECT * FROM account_deposits ORDER BY account;
+    
+    DELETE FROM transactions WHERE id = 3;
+    SELECT * FROM account_deposits ORDER BY account;
+} {100|70|2
+200|100|1
+300|60|1
+100|95|3
+200|100|1
+300|60|1
+100|125|3
+200|100|1
+300|60|1
+100|125|3
+300|60|1}
+
+do_execsql_test_on_specific_db {:memory:} matview-sum-count-only {
+    CREATE TABLE data(id INTEGER, value INTEGER, category INTEGER);
+    INSERT INTO data VALUES
+        (1, 10, 1),
+        (2, 20, 1),
+        (3, 30, 2),
+        (4, 40, 2),
+        (5, 50, 1);
+    
+    CREATE MATERIALIZED VIEW category_stats AS
+        SELECT category,
+               SUM(value) as sum_val,
+               COUNT(*) as cnt
+        FROM data
+        GROUP BY category;
+    
+    SELECT * FROM category_stats ORDER BY category;
+    
+    INSERT INTO data VALUES (6, 5, 1);
+    SELECT * FROM category_stats ORDER BY category;
+    
+    UPDATE data SET value = 35 WHERE id = 3;
+    SELECT * FROM category_stats ORDER BY category;
+} {1|80|3
+2|70|2
+1|85|4
+2|70|2
+1|85|4
+2|75|2}
+
+do_execsql_test_on_specific_db {:memory:} matview-empty-table-population {
+    CREATE TABLE t(a INTEGER, b INTEGER);
+    CREATE MATERIALIZED VIEW v AS
+        SELECT b, SUM(a) as total, COUNT(*) as cnt
+        FROM t
+        WHERE b > 5
+        GROUP BY b;
+    
+    SELECT COUNT(*) FROM v;
+    
+    INSERT INTO t VALUES (1, 3), (2, 7), (3, 9);
+    SELECT * FROM v ORDER BY b;
+} {0
+7|2|1
+9|3|1}
+
+do_execsql_test_on_specific_db {:memory:} matview-all-rows-filtered {
+    CREATE TABLE t(a INTEGER, b INTEGER);
+    INSERT INTO t VALUES (1, 1), (2, 2), (3, 3);
+    
+    CREATE MATERIALIZED VIEW v AS
+        SELECT * FROM t WHERE b > 10;
+    
+    SELECT COUNT(*) FROM v;
+    
+    INSERT INTO t VALUES (11, 11);
+    SELECT * FROM v;
+    
+    UPDATE t SET b = 1 WHERE a = 11;
+    SELECT COUNT(*) FROM v;
+} {0
+11|11
+0}
+
+do_execsql_test_on_specific_db {:memory:} matview-mixed-operations-sequence {
+    CREATE TABLE orders(
+        order_id INTEGER PRIMARY KEY,
+        customer_id INTEGER,
+        amount INTEGER
+    );
+    
+    INSERT INTO orders VALUES (1, 100, 50);
+    INSERT INTO orders VALUES (2, 200, 75);
+    
+    CREATE MATERIALIZED VIEW customer_totals AS
+        SELECT customer_id, SUM(amount) as total, COUNT(*) as order_count
+        FROM orders
+        GROUP BY customer_id;
+    
+    SELECT * FROM customer_totals ORDER BY customer_id;
+    
+    INSERT INTO orders VALUES (3, 100, 25);
+    SELECT * FROM customer_totals ORDER BY customer_id;
+    
+    UPDATE orders SET amount = 100 WHERE order_id = 2;
+    SELECT * FROM customer_totals ORDER BY customer_id;
+    
+    DELETE FROM orders WHERE order_id = 1;
+    SELECT * FROM customer_totals ORDER BY customer_id;
+    
+    INSERT INTO orders VALUES (4, 300, 150);
+    SELECT * FROM customer_totals ORDER BY customer_id;
+} {100|50|1
+200|75|1
+100|75|2
+200|75|1
+100|75|2
+200|100|1
+100|25|1
+200|100|1
+100|25|1
+200|100|1
+300|150|1}

@@ -5191,30 +5191,32 @@ pub fn op_insert(
                 let old_record = {
                     let mut cursor = state.get_cursor(*cursor_id);
                     let cursor = cursor.as_btree_mut();
-                    // Get the current key
+                    // Get the current key - for INSERT operations, there may not be a current row
                     let maybe_key = return_if_io!(cursor.rowid());
-                    let key = maybe_key.ok_or_else(|| {
-                        LimboError::InternalError("Cannot delete: no current row".to_string())
-                    })?;
-                    // Get the current record before deletion and extract values
-                    let maybe_record = return_if_io!(cursor.record());
-                    if let Some(record) = maybe_record {
-                        let mut values = record
-                            .get_values()
-                            .into_iter()
-                            .map(|v| v.to_owned())
-                            .collect::<Vec<_>>();
+                    if let Some(key) = maybe_key {
+                        // Get the current record before deletion and extract values
+                        let maybe_record = return_if_io!(cursor.record());
+                        if let Some(record) = maybe_record {
+                            let mut values = record
+                                .get_values()
+                                .into_iter()
+                                .map(|v| v.to_owned())
+                                .collect::<Vec<_>>();
 
-                        // Fix rowid alias columns: replace Null with actual rowid value
-                        if let Some(table) = schema.get_table(table_name) {
-                            for (i, col) in table.columns().iter().enumerate() {
-                                if col.is_rowid_alias && i < values.len() {
-                                    values[i] = Value::Integer(key);
+                            // Fix rowid alias columns: replace Null with actual rowid value
+                            if let Some(table) = schema.get_table(table_name) {
+                                for (i, col) in table.columns().iter().enumerate() {
+                                    if col.is_rowid_alias && i < values.len() {
+                                        values[i] = Value::Integer(key);
+                                    }
                                 }
                             }
+                            Some((key, values))
+                        } else {
+                            None
                         }
-                        Some((key, values))
                     } else {
+                        // No current row - this is a fresh INSERT, not an UPDATE
                         None
                     }
                 };
