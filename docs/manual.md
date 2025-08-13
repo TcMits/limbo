@@ -32,6 +32,7 @@ Welcome to Turso database manual!
     * [Code generator](#code-generator)
     * [Query optimizer](#query-optimizer)
   * [Virtual Machine](#virtual-machine)
+  * [MVCC](#mvcc)
   * [Pager](#pager)
   * [I/O](#io)
 
@@ -505,7 +506,11 @@ The code generator module takes AST as input and produces virtual machine progra
   
 #### Query optimizer
 
+TODO
+
 ### Virtual Machine
+
+TODO
 
 ### MVCC
 
@@ -532,6 +537,5 @@ TODO
 ### References
 
 Per-Åke Larson et al. "High-Performance Concurrency Control Mechanisms for Main-Memory Databases." In _VLDB '11_
-
 
 [SQLite]: https://www.sqlite.org/
