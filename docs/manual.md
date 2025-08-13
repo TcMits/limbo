@@ -7,6 +7,8 @@ Welcome to Turso database manual!
 * [Introduction](#introduction)
   * [Getting Started](#getting-started)
   * [Limitations](#limitations)
+* [The SQL shell](#the-sql-shell)
+  * [Command line options](#command-line-options)
 * [The SQL language](#the-sql-language)
   * [`ALTER TABLE` — change table definition](#alter-table--change-table-definition)
   * [`BEGIN TRANSACTION` — start a transaction](#begin-transaction--start-a-transaction)
@@ -85,6 +87,36 @@ Turso aims towards full SQLite compatibility but has the following limitations:
 * UTF-8 is the only supported character encoding
 
 For more detailed list of SQLite compatibility, please refer to [COMPAT.md](../COMPAT.md).
+
+## The SQL shell
+
+The `tursodb` command provides an interactive SQL shell, similar to `sqlite3`. You can start it in in-memory mode as follows:
+
+```console
+$ tursodb
+Turso
+Enter ".help" for usage hints.
+Connected to a transient in-memory database.
+Use ".open FILENAME" to reopen on a persistent database
+turso> SELECT 'hello, world';
+hello, world
+```
+
+### Command line options
+
+The SQL shell supports the following command line options:
+
+| Option | Description |
+|--------|-------------|
+| `-m`, `--output-mode` `<mode>` | Configure output mode. Supported values for `<mode>`: <ul><li>`pretty` for pretty output (default)</li><li>`list` for minimal SQLite compatible format</li></ul>
+| `-q`, `--quiet` | Don't display program information at startup |
+| `-e`, `--echo` | Print commands before execution |
+| `--readonly` | Open database in read-only mode |
+| `-h`, `--help` | Print help |
+| `-V`, `--version` | Print version |
+| `--mcp` | Start a MCP server instead of the interactive shell |
+| `--experimental-mvcc` | Enable experimental MVCC feature. **Note:**  the feature is not production ready so do not use it for critical data right now. |
+| `--experimental-views` | Enable experimental views feature. **Note**: the feature is not production ready so do not use it for critical data right now. |
 
 ## The SQL language
 
