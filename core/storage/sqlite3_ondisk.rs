@@ -556,7 +556,9 @@ impl PageContent {
     }
 
     /// Write the beginning of the cell content area on this page.
-    pub fn write_cell_content_area(&self, value: u16) {
+    pub fn write_cell_content_area(&self, value: usize) {
+        debug_assert!(value <= PageSize::MAX as usize);
+        let value = value as u16; // deliberate cast to u16 because 0 is interpreted as 65536
         self.write_u16(BTREE_CELL_CONTENT_AREA, value);
     }
 
@@ -821,7 +823,7 @@ impl PageContent {
         buf[0..DatabaseHeader::SIZE].copy_from_slice(bytemuck::bytes_of(header));
     }
 
-    pub fn debug_print_freelist(&self, usable_space: u16) {
+    pub fn debug_print_freelist(&self, usable_space: usize) {
         let mut pc = self.first_freeblock() as usize;
         let mut block_num = 0;
         println!("---- Free List Blocks ----");
@@ -829,7 +831,7 @@ impl PageContent {
         println!("cell content area: {}", self.cell_content_area());
         println!("fragmented bytes: {}", self.num_frag_free_bytes());
 
-        while pc != 0 && pc <= usable_space as usize {
+        while pc != 0 && pc <= usable_space {
             let next = self.read_u16_no_offset(pc);
             let size = self.read_u16_no_offset(pc + 2);
 

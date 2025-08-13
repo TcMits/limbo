@@ -870,7 +870,7 @@ impl Pager {
         let page = Arc::new(BTreePageInner {
             page: RefCell::new(page),
         });
-        btree_init_page(&page, page_type, offset, self.usable_space() as u16);
+        btree_init_page(&page, page_type, offset, self.usable_space());
         tracing::debug!(
             "do_allocate_page(id={}, page_type={:?})",
             page.get().get().id,
@@ -1584,7 +1584,8 @@ impl Pager {
                     &page1,
                     PageType::TableLeaf,
                     DatabaseHeader::SIZE,
-                    (default_header.page_size.get() - default_header.reserved_space as u32) as u16,
+                    (default_header.page_size.get() - default_header.reserved_space as u32)
+                        as usize,
                 );
                 let c = begin_write_btree_page(self, &page1.get())?;
 
