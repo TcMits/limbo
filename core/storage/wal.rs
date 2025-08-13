@@ -1168,6 +1168,12 @@ impl Wal for WalFile {
         let page_size = self.page_size();
         let mut frame = vec![0u8; page_size as usize + WAL_FRAME_HEADER_SIZE];
         let mut seen = HashSet::new();
+        turso_assert!(
+            frame_count >= frame_watermark,
+            "frame_count must be not less than frame_watermark: {} vs {}",
+            frame_count,
+            frame_watermark
+        );
         let mut pages = Vec::with_capacity((frame_count - frame_watermark) as usize);
         for frame_no in frame_watermark + 1..=frame_count {
             let c = self.read_frame_raw(frame_no, &mut frame)?;
