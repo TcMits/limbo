@@ -33,7 +33,6 @@ Welcome to Turso database manual!
     * [`sqlite_column`](#sqlite3_column)
   * [WAL manipulation](#wal-manipulation)
     * [`libsql_wal_frame_count`](#libsql_wal_frame_count)
-* [SQL Commands](#sql-commands)
 * [Appendix A: Turso Internals](#appendix-a-turso-internals)
   * [Frontend](#frontend)
     * [Parser](#parser)
@@ -484,8 +483,6 @@ in the `p_frame_count` parameter.
   connection.
 * The `p_frame_count` must be a valid pointer to a `u32` that will store the
 * number of frames in the WAL file.
-
-## SQL Commands
 
 ## Appendix A: Turso Internals
 
