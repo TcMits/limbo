@@ -26,6 +26,11 @@ Welcome to Turso database manual!
   * [`UPDATE` — update rows of a table](#update--update-rows-of-a-table)
 * [JavaScript API](#javascript-api)
 * [SQLite C API](#sqlite-c-api)
+  * [Basic operations](#basic-operations)
+    * [`sqlite_open`](#sqlite3_open)
+    * [`sqlite_prepare`](#sqlite3_prepare)
+    * [`sqlite_step`](#sqlite3_step)
+    * [`sqlite_column`](#sqlite3_column)
   * [WAL manipulation](#wal-manipulation)
     * [`libsql_wal_frame_count`](#libsql_wal_frame_count)
 * [SQL Commands](#sql-commands)
@@ -396,7 +401,58 @@ console.log(row);
 
 ## SQLite C API
 
-Turso supports the SQLite C API, with libSQL extensions.
+Turso supports a subset of the SQLite C API, including libSQL extensions.
+
+### Basic operations
+
+#### `sqlite3_open` 
+
+Open a connection to a database.
+
+**Synopsis:**
+
+```c
+int sqlite3_open(const char *filename, sqlite3 **db_out);
+int sqlite3_open_v2(const char *filename, sqlite3 **db_out, int _flags, const char *_z_vfs);
+```
+
+#### `sqlite3_prepare`
+
+Prepare a SQL statement for execution.
+
+**Synopsis:**
+
+```c
+int sqlite3_prepare_v2(sqlite3 *db, const char *sql, int _len, sqlite3_stmt **out_stmt, const char **_tail);
+```
+
+#### `sqlite3_step`
+
+Evaluate a prepared statement until it yields the next row or completes.
+
+**Synopsis:**
+
+```c
+int sqlite3_step(sqlite3_stmt *stmt);
+```
+
+#### `sqlite3_column`
+
+Return the value of a column for the current row of a statement.
+
+**Synopsis:**
+
+```c
+int sqlite3_column_type(sqlite3_stmt *_stmt, int _idx);
+int sqlite3_column_count(sqlite3_stmt *_stmt);
+const char *sqlite3_column_decltype(sqlite3_stmt *_stmt, int _idx);
+const char *sqlite3_column_name(sqlite3_stmt *_stmt, int _idx);
+int64_t sqlite3_column_int64(sqlite3_stmt *_stmt, int _idx);
+double sqlite3_column_double(sqlite3_stmt *_stmt, int _idx);
+const void *sqlite3_column_blob(sqlite3_stmt *_stmt, int _idx);
+int sqlite3_column_bytes(sqlite3_stmt *_stmt, int _idx);
+const unsigned char *sqlite3_column_text(sqlite3_stmt *stmt, int idx);
+```
 
 ### WAL manipulation
 
