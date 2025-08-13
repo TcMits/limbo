@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     database_sync_operations::{
-        checkpoint_wal_file, db_bootstrap, reset_wal_file, transfer_logical_changes,
-        transfer_physical_changes, wait_full_body, wal_pull, wal_push, WalPullResult,
+        checkpoint_wal_file, connect, connect_untracked, db_bootstrap, reset_wal_file,
+        transfer_logical_changes, transfer_physical_changes, wait_full_body, wal_pull, wal_push,
+        WalPullResult,
     },
     database_tape::DatabaseTape,
     errors::Error,
@@ -95,7 +96,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
 
     /// Create database connection and appropriately configure it before use
     pub async fn connect(&self, coro: &Coro) -> Result<Arc<turso_core::Connection>> {
-        self.draft_tape.connect(coro).await
+        connect(coro, &self.draft_tape).await
     }
 
     /// Sync all new changes from remote DB and apply them locally
@@ -122,7 +123,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
                 tracing::info!("opened synced");
 
                 // we will start wal write session for Draft DB in order to hold write lock during transfer of changes
-                let mut draft_session = WalSession::new(self.draft_tape.connect(coro).await?);
+                let mut draft_session = WalSession::new(connect(coro, &self.draft_tape).await?);
                 draft_session.begin()?;
 
                 // mark Synced as dirty as we will start transfer of logical changes there and if we will fail in the middle - we will need to cleanup Synced db
@@ -174,7 +175,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             );
             {
                 let synced = self.io.open_tape(&self.synced_path, false)?;
-                checkpoint_wal_file(coro, &synced.connect_untracked()?).await?;
+                checkpoint_wal_file(coro, &connect_untracked(&synced)?).await?;
                 update_meta(
                     coro,
                     self.protocol.as_ref(),
@@ -288,7 +289,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             self.synced_path,
         );
         let synced = self.io.open_tape(&self.synced_path, false)?;
-        let synced_conn = synced.connect(coro).await?;
+        let synced_conn = connect(coro, &synced).await?;
         let mut wal = WalSession::new(synced_conn);
 
         let generation = self.meta().synced_generation;
@@ -334,7 +335,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             self.meta().client_unique_id
         );
         let synced = self.io.open_tape(&self.synced_path, false)?;
-        let synced_conn = synced.connect(coro).await?;
+        let synced_conn = connect(coro, &synced).await?;
 
         let mut wal = WalSession::new(synced_conn);
         wal.begin()?;

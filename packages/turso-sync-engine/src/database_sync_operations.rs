@@ -35,6 +35,18 @@ pub enum WalPushResult {
     NeedCheckpoint,
 }
 
+pub async fn connect(coro: &Coro, tape: &DatabaseTape) -> Result<Arc<turso_core::Connection>> {
+    let conn = tape.connect(coro).await?;
+    conn.wal_disable_checkpoint();
+    Ok(conn)
+}
+
+pub fn connect_untracked(tape: &DatabaseTape) -> Result<Arc<turso_core::Connection>> {
+    let conn = tape.connect_untracked()?;
+    conn.wal_disable_checkpoint();
+    Ok(conn)
+}
+
 /// Bootstrap multiple DB files from latest generation from remote
 pub async fn db_bootstrap<C: ProtocolIO>(
     coro: &Coro,
@@ -257,8 +269,8 @@ pub async fn transfer_logical_changes(
     bump_pull_gen: bool,
 ) -> Result<()> {
     tracing::debug!("transfer_logical_changes: client_id={client_id}");
-    let source_conn = source.connect_untracked()?;
-    let target_conn = target.connect_untracked()?;
+    let source_conn = connect_untracked(source)?;
+    let target_conn = connect_untracked(target)?;
 
     // fetch last_change_id from the target DB in order to guarantee atomic replay of changes and avoid conflicts in case of failure
     let source_pull_gen = 'source_pull_gen: {
@@ -333,7 +345,7 @@ pub async fn transfer_logical_changes(
         use_implicit_rowid: false,
     };
 
-    let source_schema_cookie = source.connect_untracked()?.read_schema_version()?;
+    let source_schema_cookie = connect_untracked(source)?.read_schema_version()?;
 
     let mut session = target.start_replay_session(coro, replay_opts).await?;
 
@@ -414,7 +426,7 @@ pub async fn transfer_physical_changes(
 ) -> Result<u64> {
     tracing::debug!("transfer_physical_changes: source_wal_match_watermark={source_wal_match_watermark}, source_sync_watermark={source_sync_watermark}, target_wal_match_watermark={target_wal_match_watermark}");
 
-    let source_conn = source.connect(coro).await?;
+    let source_conn = connect(coro, source).await?;
     let mut source_session = WalSession::new(source_conn.clone());
     source_session.begin()?;
 
