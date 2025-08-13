@@ -159,9 +159,8 @@ impl Page {
         self.get().flags.load(Ordering::Acquire) & PAGE_LOCKED != 0
     }
 
-    pub fn set_locked(&self) -> bool {
-        let prev = self.get().flags.fetch_or(PAGE_LOCKED, Ordering::Acquire);
-        prev & PAGE_LOCKED == 0
+    pub fn set_locked(&self) {
+        self.get().flags.fetch_or(PAGE_LOCKED, Ordering::Acquire);
     }
 
     pub fn clear_locked(&self) {
@@ -1011,13 +1010,13 @@ impl Pager {
     ) -> Result<(PageRef, Completion)> {
         tracing::trace!("read_page_no_cache(page_idx = {})", page_idx);
         let page = Arc::new(Page::new(page_idx));
-        page.set_locked();
 
         let Some(wal) = self.wal.as_ref() else {
             turso_assert!(
                 matches!(frame_watermark, Some(0) | None),
                 "frame_watermark must be either None or Some(0) because DB has no WAL and read with other watermark is invalid"
             );
+            page.set_locked();
             let c = self.begin_read_disk_page(page_idx, page.clone(), allow_empty_read)?;
             return Ok((page, c));
         };
