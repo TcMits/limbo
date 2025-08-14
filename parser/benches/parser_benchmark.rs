@@ -83,9 +83,8 @@ fn bench_lexer(criterion: &mut Criterion) {
                 let tokenizer = Tokenizer::new();
                 let mut scanner = Scanner::new(black_box(tokenizer));
                 loop {
-                    match scanner.scan(black_box(qb)).unwrap() {
-                        (_, None, _) => break,
-                        _ => {}
+                    if let (_, None, _) = scanner.scan(black_box(qb)).unwrap() {
+                        break;
                     }
                 }
             });
