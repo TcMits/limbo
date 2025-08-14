@@ -32,6 +32,33 @@ fn bench_parser(criterion: &mut Criterion) {
     }
 }
 
+fn bench_parser_insert_batch(criterion: &mut Criterion) {
+    for batch_size in [1, 10, 100] {
+        let mut values = String::from("INSERT INTO test VALUES ");
+        for i in 0..batch_size {
+            if i > 0 {
+                values.push(',');
+            }
+            values.push_str(&format!("({}, '{}')", i, format_args!("value_{i}")));
+        }
+
+        let mut group = criterion.benchmark_group(format!("Parser insert batch `{values}`"));
+        let qb = values.as_bytes();
+
+        group.bench_function(BenchmarkId::new("limbo_parser_insert_batch", ""), |b| {
+            b.iter(|| Parser::new(black_box(qb)).next().unwrap());
+        });
+
+        group.bench_function(BenchmarkId::new("limbo_old_parser_insert_batch", ""), |b| {
+            b.iter(|| {
+                OldParser::new(black_box(qb)).next().unwrap().unwrap();
+            });
+        });
+
+        group.finish();
+    }
+}
+
 fn bench_lexer(criterion: &mut Criterion) {
     let queries = [
         "SELECT 1",
@@ -71,6 +98,6 @@ fn bench_lexer(criterion: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = bench_parser, bench_lexer
+    targets = bench_parser, bench_parser_insert_batch, bench_lexer
 }
 criterion_main!(benches);

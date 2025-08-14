@@ -1200,19 +1200,6 @@ pub enum ResolveType {
     Replace,
 }
 
-impl ResolveType {
-    /// Get the OE_XXX bit value
-    pub fn bit_value(&self) -> usize {
-        match self {
-            ResolveType::Rollback => 1,
-            ResolveType::Abort => 2,
-            ResolveType::Fail => 3,
-            ResolveType::Ignore => 4,
-            ResolveType::Replace => 5,
-        }
-    }
-}
-
 /// `WITH` clause
 // https://sqlite.org/lang_with.html
 // https://sqlite.org/syntax/with-clause.html

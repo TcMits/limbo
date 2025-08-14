@@ -361,6 +361,7 @@ impl Display for TokenType {
 
 impl TokenType {
     /// if your parsing process expects next token to be TK_ID, remember to call this function !!!
+    #[inline(always)]
     pub fn fallback_id_if_ok(self) -> Self {
         use TokenType::*;
         match self {
