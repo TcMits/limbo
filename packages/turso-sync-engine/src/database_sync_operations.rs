@@ -122,7 +122,7 @@ pub async fn wal_pull<'a, C: ProtocolIO, U: AsyncFnMut(&'a Coro, u64) -> Result<
     end_frame: u64,
     mut update: U,
 ) -> Result<WalPullResult> {
-    tracing::debug!(
+    tracing::info!(
         "wal_pull: generation={}, start_frame={}, end_frame={}",
         generation,
         start_frame,
@@ -209,7 +209,7 @@ pub async fn wal_push<C: ProtocolIO>(
     end_frame: u64,
 ) -> Result<WalPushResult> {
     assert!(wal_session.in_txn());
-    tracing::debug!("wal_push: baton={baton:?}, generation={generation}, start_frame={start_frame}, end_frame={end_frame}");
+    tracing::info!("wal_push: baton={baton:?}, generation={generation}, start_frame={start_frame}, end_frame={end_frame}");
 
     if start_frame == end_frame {
         return Ok(WalPushResult::Ok { baton: None });
@@ -272,7 +272,7 @@ pub async fn transfer_logical_changes(
     client_id: &str,
     bump_pull_gen: bool,
 ) -> Result<()> {
-    tracing::debug!("transfer_logical_changes: client_id={client_id}");
+    tracing::info!("transfer_logical_changes: client_id={client_id}");
     let source_conn = connect_untracked(source)?;
     let target_conn = connect_untracked(target)?;
 
@@ -293,12 +293,12 @@ pub async fn transfer_logical_changes(
                 Error::DatabaseSyncEngineError("unexpected source pull_gen type".to_string())
             })?,
             None => {
-                tracing::debug!("transfer_logical_changes: client_id={client_id}, turso_sync_last_change_id table is not found");
+                tracing::info!("transfer_logical_changes: client_id={client_id}, turso_sync_last_change_id table is not found");
                 0
             }
         }
     };
-    tracing::debug!(
+    tracing::info!(
         "transfer_logical_changes: client_id={client_id}, source_pull_gen={source_pull_gen}"
     );
 
@@ -383,7 +383,7 @@ pub async fn transfer_logical_changes(
             }
             DatabaseTapeOperation::Commit => {
                 if rows_changed > 0 || (bump_pull_gen && last_change_id.unwrap_or(0) > 0) {
-                    tracing::debug!("prepare update stmt for turso_sync_last_change_id table with client_id={} and last_change_id={:?}", client_id, last_change_id);
+                    tracing::info!("prepare update stmt for turso_sync_last_change_id table with client_id={} and last_change_id={:?}", client_id, last_change_id);
                     // update turso_sync_last_change_id table with new value before commit
                     let mut set_last_change_id_stmt =
                         session.conn().prepare(TURSO_SYNC_UPDATE_LAST_CHANGE_ID)?;
@@ -392,7 +392,7 @@ pub async fn transfer_logical_changes(
                     } else {
                         (source_pull_gen, last_change_id.unwrap_or(0))
                     };
-                    tracing::debug!("transfer_logical_changes: client_id={client_id}, set pull_gen={next_pull_gen}, change_id={next_change_id}, rows_changed={rows_changed}");
+                    tracing::info!("transfer_logical_changes: client_id={client_id}, set pull_gen={next_pull_gen}, change_id={next_change_id}, rows_changed={rows_changed}");
                     set_last_change_id_stmt
                         .bind_at(1.try_into().unwrap(), Value::Integer(next_pull_gen));
                     set_last_change_id_stmt
@@ -414,7 +414,7 @@ pub async fn transfer_logical_changes(
         session.replay(coro, operation).await?;
     }
 
-    tracing::debug!("transfer_logical_changes: rows_changed={:?}", rows_changed);
+    tracing::info!("transfer_logical_changes: rows_changed={:?}", rows_changed);
     Ok(())
 }
 
@@ -428,7 +428,7 @@ pub async fn transfer_physical_changes(
     source_sync_watermark: u64,
     target_wal_match_watermark: u64,
 ) -> Result<u64> {
-    tracing::debug!("transfer_physical_changes: source_wal_match_watermark={source_wal_match_watermark}, source_sync_watermark={source_sync_watermark}, target_wal_match_watermark={target_wal_match_watermark}");
+    tracing::info!("transfer_physical_changes: source_wal_match_watermark={source_wal_match_watermark}, source_sync_watermark={source_sync_watermark}, target_wal_match_watermark={target_wal_match_watermark}");
 
     let source_conn = connect(coro, source).await?;
     let mut source_session = WalSession::new(source_conn.clone());
@@ -454,7 +454,7 @@ pub async fn transfer_physical_changes(
         let mut last_frame_info = None;
         let mut frame = vec![0u8; WAL_FRAME_SIZE];
         let mut target_sync_watermark = target_session.frames_count()?;
-        tracing::debug!(
+        tracing::info!(
             "transfer_physical_changes: start={}, end={}",
             source_wal_match_watermark + 1,
             source_frames_count
@@ -465,7 +465,7 @@ pub async fn transfer_physical_changes(
             target_session.append_page(frame_info.page_no, &frame[WAL_FRAME_HEADER..])?;
             if source_frame_no == source_sync_watermark {
                 target_sync_watermark = target_session.frames_count()? + 1; // +1 because page will be actually commited on next iteration
-                tracing::debug!("set target_sync_watermark to {}", target_sync_watermark);
+                tracing::info!("set target_sync_watermark to {}", target_sync_watermark);
             }
             last_frame_info = Some(frame_info);
         }

@@ -45,7 +45,7 @@ async fn update_meta<IO: ProtocolIO>(
 ) -> Result<()> {
     let mut meta = orig.as_ref().unwrap().clone();
     update(&mut meta);
-    tracing::debug!("update_meta: {meta:?}");
+    tracing::info!("update_meta: {meta:?}");
     let completion = io.full_write(meta_path, meta.dump()?)?;
     // todo: what happen if we will actually update the metadata on disk but fail and so in memory state will not be updated
     wait_full_body(coro, &completion).await?;
@@ -60,7 +60,7 @@ async fn set_meta<IO: ProtocolIO>(
     orig: &mut Option<DatabaseMetadata>,
     meta: DatabaseMetadata,
 ) -> Result<()> {
-    tracing::debug!("set_meta: {meta:?}");
+    tracing::info!("set_meta: {meta:?}");
     let completion = io.full_write(meta_path, meta.dump()?)?;
     // todo: what happen if we will actually update the metadata on disk but fail and so in memory state will not be updated
     wait_full_body(coro, &completion).await?;
@@ -103,7 +103,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
     /// This method will **not** send local changed to the remote
     /// This method will block writes for the period of pull
     pub async fn pull(&mut self, coro: &Coro) -> Result<()> {
-        tracing::debug!(
+        tracing::info!(
             "pull: draft={}, synced={}",
             self.draft_path,
             self.synced_path
@@ -120,7 +120,6 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
                 // we will "replay" Synced WAL to the Draft WAL later without pushing it to the remote
                 // so, we pass 'capture: true' as we need to preserve all changes for future push of WAL
                 let synced = self.io.open_tape(&self.synced_path, true)?;
-                tracing::info!("opened synced");
 
                 // we will start wal write session for Draft DB in order to hold write lock during transfer of changes
                 let mut draft_session = WalSession::new(connect(coro, &self.draft_tape).await?);
@@ -168,7 +167,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             let WalPullResult::NeedCheckpoint = pull_result else {
                 break;
             };
-            tracing::debug!(
+            tracing::info!(
                 "ready to checkpoint synced db file at {:?}, generation={}",
                 self.synced_path,
                 self.meta().synced_generation
@@ -198,7 +197,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
     /// This method will **not** pull remote changes to the local DB
     /// This method will **not** block writes for the period of sync
     pub async fn push(&mut self, coro: &Coro) -> Result<()> {
-        tracing::debug!(
+        tracing::info!(
             "push: draft={}, synced={}",
             self.draft_path,
             self.synced_path
@@ -237,7 +236,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
     }
 
     async fn init(&mut self, coro: &Coro) -> Result<()> {
-        tracing::debug!(
+        tracing::info!(
             "initialize sync engine: draft={}, synced={}, opts={:?}",
             self.draft_path,
             self.synced_path,
@@ -258,7 +257,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             }
             None => {
                 let meta = self.bootstrap_db_files(coro).await?;
-                tracing::debug!("write meta after successful bootstrap: meta={meta:?}");
+                tracing::info!("write meta after successful bootstrap: meta={meta:?}");
                 set_meta(
                     coro,
                     self.protocol.as_ref(),
@@ -285,7 +284,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
     }
 
     async fn pull_synced_from_remote(&mut self, coro: &Coro) -> Result<WalPullResult> {
-        tracing::debug!(
+        tracing::info!(
             "pull_synced_from_remote: draft={:?}, synced={:?}",
             self.draft_path,
             self.synced_path,
@@ -330,7 +329,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
     }
 
     async fn push_synced_to_remote(&mut self, coro: &Coro) -> Result<()> {
-        tracing::debug!(
+        tracing::info!(
             "push_synced_to_remote: draft={}, synced={}, id={}",
             self.draft_path,
             self.synced_path,
@@ -381,7 +380,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
             self.meta.is_none(),
             "bootstrap_db_files must be called only when meta is not set"
         );
-        tracing::debug!(
+        tracing::info!(
             "bootstrap_db_files: draft={}, synced={}",
             self.draft_path,
             self.synced_path,
@@ -410,7 +409,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
         let db_info = db_bootstrap(coro, self.protocol.as_ref(), files).await?;
 
         let elapsed = std::time::Instant::now().duration_since(start_time);
-        tracing::debug!(
+        tracing::info!(
             "bootstrap_db_files: finished draft={:?}, synced={:?}: elapsed={:?}",
             self.draft_path,
             self.synced_path,
@@ -428,7 +427,7 @@ impl<C: ProtocolIO> DatabaseSyncEngine<C> {
 
     /// Reset WAL of Synced database which potentially can have some local changes
     async fn reset_synced_if_dirty(&mut self, coro: &Coro) -> Result<()> {
-        tracing::debug!(
+        tracing::info!(
             "reset_synced: synced_path={:?}, synced_is_dirty={}",
             self.synced_path,
             self.synced_is_dirty
