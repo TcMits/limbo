@@ -2840,10 +2840,7 @@ impl<'a> Parser<'a> {
                         body: Some(PragmaBody::Call(value)),
                     })
                 }
-                _ => Ok(Stmt::Pragma {
-                    name,
-                    body: None,
-                }),
+                _ => Ok(Stmt::Pragma { name, body: None }),
             },
             _ => Ok(Stmt::Pragma { name, body: None }),
         }
