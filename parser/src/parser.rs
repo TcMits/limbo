@@ -1511,6 +1511,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[allow(clippy::vec_box)]
     fn parse_expr_list(&mut self) -> Result<Vec<Box<Expr>>, Error> {
         let mut exprs = vec![];
         while let Some(tok) = self.peek()? {
@@ -2365,6 +2366,7 @@ impl<'a> Parser<'a> {
         Ok(result)
     }
 
+    #[allow(clippy::vec_box)]
     fn parse_nexpr_list(&mut self) -> Result<Vec<Box<Expr>>, Error> {
         let mut result = vec![self.parse_expr(0)?];
         while let Some(tok) = self.peek()? {
@@ -11216,16 +11218,13 @@ mod tests {
 
         for (input, expected) in test_cases {
             println!("Testing input: {:?}", from_bytes(input));
-            let mut parser = Parser::new(input);
+            let parser = Parser::new(input);
             let mut results = Vec::new();
-            while let Some(cmd) = parser.next() {
-                match cmd {
-                    Ok(cmd) => results.push(cmd),
-                    Err(err) => panic!("Parse error: {}", err),
-                }
+            for cmd in parser {
+                results.push(cmd.unwrap());
             }
 
-            assert_eq!(results, expected, "Input: {:?}", input);
+            assert_eq!(results, expected, "Input: {input:?}");
         }
     }
 }

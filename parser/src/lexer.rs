@@ -1089,10 +1089,7 @@ mod tests {
             let token = lexer.next().unwrap().unwrap();
             let expect_value = unsafe { String::from_utf8_unchecked(expected.value.to_vec()) };
             let got_value = unsafe { String::from_utf8_unchecked(token.value.to_vec()) };
-            print!(
-                "Input: {:?}, Expected: {:?}, Got: {:?}\n",
-                input, expect_value, got_value
-            );
+            println!("Input: {input:?}, Expected: {expect_value:?}, Got: {got_value:?}");
             assert_eq!(got_value, expect_value);
             assert_eq!(token.token_type, expected.token_type);
         }

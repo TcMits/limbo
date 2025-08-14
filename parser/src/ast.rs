@@ -1043,6 +1043,7 @@ pub struct Limit {
 // https://sqlite.org/syntax/insert-stmt.html
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[allow(clippy::large_enum_variant)]
 pub enum InsertBody {
     /// `SELECT` or `VALUES`
     Select(Select, Option<Box<Upsert>>),
