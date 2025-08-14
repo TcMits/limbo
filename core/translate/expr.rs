@@ -1710,19 +1710,13 @@ pub fn translate_expr(
                             } else {
                                 crate::bail_parse_error!("likely function with no arguments",);
                             };
-                            let start_reg = program.alloc_register();
                             translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[0],
-                                start_reg,
+                                target_register,
                                 resolver,
                             )?;
-                            program.emit_insn(Insn::Copy {
-                                src_reg: start_reg,
-                                dst_reg: target_register,
-                                extra_amount: 0,
-                            });
                             Ok(target_register)
                         }
                         ScalarFunc::Likelihood => {
@@ -1759,20 +1753,13 @@ pub fn translate_expr(
                                     "second argument of likelihood() must be a numeric literal",
                                 );
                             }
-
-                            let start_reg = program.alloc_register();
                             translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[0],
-                                start_reg,
+                                target_register,
                                 resolver,
                             )?;
-                            program.emit_insn(Insn::Copy {
-                                src_reg: start_reg,
-                                dst_reg: target_register,
-                                extra_amount: 0,
-                            });
                             Ok(target_register)
                         }
                         ScalarFunc::TableColumnsJsonArray => {
@@ -1851,19 +1838,14 @@ pub fn translate_expr(
                             } else {
                                 crate::bail_parse_error!("Unlikely function with no arguments",);
                             };
-                            let start_reg = program.alloc_register();
                             translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[0],
-                                start_reg,
+                                target_register,
                                 resolver,
                             )?;
-                            program.emit_insn(Insn::Copy {
-                                src_reg: start_reg,
-                                dst_reg: target_register,
-                                extra_amount: 0,
-                            });
+
                             Ok(target_register)
                         }
                     }
