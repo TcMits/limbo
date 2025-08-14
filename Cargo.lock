@@ -3965,6 +3965,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "turso_sqlite3_parser",
+ "walkdir",
 ]
 
 [[package]]
