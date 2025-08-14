@@ -186,7 +186,7 @@ impl<'a> Lexer<'a> {
 
     #[inline]
     fn eat_one_token(&mut self, typ: TokenType) -> Token<'a> {
-        debug_assert!(self.remaining().len() >= 1);
+        debug_assert!(!self.remaining().is_empty());
 
         let tok = Token {
             value: &self.remaining()[..1],

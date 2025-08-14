@@ -47,28 +47,28 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Self::UnrecognizedToken(pos) => {
-                write!(f, "unrecognized token at {:?}", pos)
+                write!(f, "unrecognized token at {pos:?}")
             }
             Self::UnterminatedLiteral(pos) => {
-                write!(f, "non-terminated literal at {:?}", pos)
+                write!(f, "non-terminated literal at {pos:?}")
             }
             Self::UnterminatedBracket(pos) => {
-                write!(f, "non-terminated bracket at {:?}", pos)
+                write!(f, "non-terminated bracket at {pos:?}")
             }
             Self::UnterminatedBlockComment(pos) => {
-                write!(f, "non-terminated block comment at {:?}", pos)
+                write!(f, "non-terminated block comment at {pos:?}")
             }
-            Self::BadVariableName(pos) => write!(f, "bad variable name at {:?}", pos),
-            Self::BadNumber(pos) => write!(f, "bad number at {:?}", pos),
+            Self::BadVariableName(pos) => write!(f, "bad variable name at {pos:?}"),
+            Self::BadNumber(pos) => write!(f, "bad number at {pos:?}"),
             Self::BadFractionalPart(pos) => {
-                write!(f, "bad fractional part at {:?}", pos)
+                write!(f, "bad fractional part at {pos:?}")
             }
             Self::BadExponentPart(pos) => {
-                write!(f, "bad exponent part at {:?}", pos)
+                write!(f, "bad exponent part at {pos:?}")
             }
-            Self::ExpectedEqualsSign(pos) => write!(f, "expected = sign at {:?}", pos),
+            Self::ExpectedEqualsSign(pos) => write!(f, "expected = sign at {pos:?}"),
             Self::MalformedHexInteger(pos) => {
-                write!(f, "malformed hex integer at {:?}", pos)
+                write!(f, "malformed hex integer at {pos:?}")
             }
             Self::ParseUnexpectedEOF => {
                 write!(f, "unexpected end of file")
@@ -80,12 +80,11 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "got unexpected token after parsing to offset {:?}: expected {:?}, found {}",
-                    parsed_offset, expected, got
+                    "got unexpected token after parsing to offset {parsed_offset:?}: expected {expected:?}, found {got}",
                 )
             }
             Self::Custom(ref s) => {
-                write!(f, "custom error: {}", s)
+                write!(f, "custom error: {s}")
             }
         }
     }

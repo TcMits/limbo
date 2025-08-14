@@ -335,7 +335,7 @@ impl<'a> Parser<'a> {
                         }
 
                         match p.consume_lexer_without_whitespaces_or_comments() {
-                            None => return Ok(false),
+                            None => Ok(false),
                             Some(tok) => match tok?.token_type.unwrap() {
                                 TK_AS => Ok(true),
                                 _ => Ok(false),
@@ -353,7 +353,7 @@ impl<'a> Parser<'a> {
                         if prev_tt == TK_RP {
                             self.try_parse(|p| {
                                 match p.consume_lexer_without_whitespaces_or_comments() {
-                                    None => return Ok(false),
+                                    None => Ok(false),
                                     Some(tok) => match get_token(tok?.token_type.unwrap()) {
                                         TK_LP | TK_ID => Ok(true),
                                         _ => Ok(false),
@@ -375,7 +375,7 @@ impl<'a> Parser<'a> {
                         if prev_tt == TK_RP {
                             self.try_parse(|p| {
                                 match p.consume_lexer_without_whitespaces_or_comments() {
-                                    None => return Ok(false),
+                                    None => Ok(false),
                                     Some(tok) => match tok?.token_type.unwrap() {
                                         TK_LP => Ok(true),
                                         _ => Ok(false),
@@ -394,7 +394,7 @@ impl<'a> Parser<'a> {
                 TK_UNION => {
                     let can_be_union = self.try_parse(|p| {
                         match p.consume_lexer_without_whitespaces_or_comments() {
-                            None => return Ok(false),
+                            None => Ok(false),
                             Some(tok) => match tok?.token_type.unwrap() {
                                 TK_ALL | TK_SELECT | TK_VALUES => Ok(true),
                                 _ => Ok(false),
@@ -409,7 +409,7 @@ impl<'a> Parser<'a> {
                 TK_EXCEPT | TK_INTERSECT => {
                     let can_be_except = self.try_parse(|p| {
                         match p.consume_lexer_without_whitespaces_or_comments() {
-                            None => return Ok(false),
+                            None => Ok(false),
                             Some(tok) => match tok?.token_type.unwrap() {
                                 TK_SELECT | TK_VALUES => Ok(true),
                                 _ => Ok(false),
@@ -423,10 +423,7 @@ impl<'a> Parser<'a> {
                 }
                 TK_COLUMNKW => {
                     let prev_tt = self.current_token.token_type.unwrap_or(TK_EOF);
-                    let can_be_columnkw = match prev_tt {
-                        TK_ADD | TK_RENAME | TK_DROP => true,
-                        _ => false,
-                    };
+                    let can_be_columnkw = matches!(prev_tt, TK_ADD | TK_RENAME | TK_DROP);
 
                     if !can_be_columnkw {
                         tok.token_type = Some(TK_ID);
@@ -443,7 +440,7 @@ impl<'a> Parser<'a> {
                         }
 
                         match p.consume_lexer_without_whitespaces_or_comments() {
-                            None => return Ok(false),
+                            None => Ok(false),
                             Some(tok) => match tok?.token_type.unwrap() {
                                 TK_AS => Ok(true),
                                 _ => Ok(false),
@@ -460,7 +457,7 @@ impl<'a> Parser<'a> {
                     let can_be_without = match prev_tt {
                         TK_RP | TK_COMMA => self.try_parse(|p| {
                             match p.consume_lexer_without_whitespaces_or_comments() {
-                                None => return Ok(false),
+                                None => Ok(false),
                                 Some(tok) => match get_token(tok?.token_type.unwrap()) {
                                     TK_ID => Ok(true),
                                     _ => Ok(false),
@@ -788,9 +785,8 @@ impl<'a> Parser<'a> {
                     eat_assert!(self, TK_LP);
                     let mut result = vec![];
                     loop {
-                        match self.peek_no_eof()?.token_type.unwrap() {
-                            TK_RP => break, // handle empty args case
-                            _ => {}
+                        if self.peek_no_eof()?.token_type == Some(TK_RP) {
+                            break; // handle empty args case
                         }
 
                         result.push(self.parse_vtab_arg()?);
@@ -902,10 +898,10 @@ impl<'a> Parser<'a> {
             None
         };
 
-        if secone_name.is_some() {
+        if let Some(secone_name) = secone_name {
             Ok(QualifiedName {
                 db_name: Some(first_name),
-                name: secone_name.unwrap(),
+                name: secone_name,
                 alias: alias_name,
             })
         } else {
@@ -945,18 +941,14 @@ impl<'a> Parser<'a> {
             return Ok(None);
         };
 
-        loop {
-            if let Some(tok) = self.peek()? {
-                match tok.token_type.unwrap().fallback_id_if_ok() {
-                    TK_ID | TK_STRING => {
-                        eat_assert!(self, TK_ID, TK_STRING);
-                        type_name.push_str(" ");
-                        type_name.push_str(from_bytes_as_str(tok.value));
-                    }
-                    _ => break,
+        while let Some(tok) = self.peek()? {
+            match tok.token_type.unwrap().fallback_id_if_ok() {
+                TK_ID | TK_STRING => {
+                    eat_assert!(self, TK_ID, TK_STRING);
+                    type_name.push(' ');
+                    type_name.push_str(from_bytes_as_str(tok.value));
                 }
-            } else {
-                break;
+                _ => break,
             }
         }
 
@@ -1326,18 +1318,18 @@ impl<'a> Parser<'a> {
                 eat_expect!(self, TK_AS);
                 let typ = self.parse_type()?;
                 eat_expect!(self, TK_RP);
-                return Ok(Box::new(Expr::Cast {
+                Ok(Box::new(Expr::Cast {
                     expr,
                     type_name: typ,
-                }));
+                }))
             }
             TK_CTIME_KW => {
                 let tok = eat_assert!(self, TK_CTIME_KW);
-                if b"CURRENT_DATE".eq_ignore_ascii_case(&tok.value) {
+                if b"CURRENT_DATE".eq_ignore_ascii_case(tok.value) {
                     Ok(Box::new(Expr::Literal(Literal::CurrentDate)))
-                } else if b"CURRENT_TIME".eq_ignore_ascii_case(&tok.value) {
+                } else if b"CURRENT_TIME".eq_ignore_ascii_case(tok.value) {
                     Ok(Box::new(Expr::Literal(Literal::CurrentTime)))
-                } else if b"CURRENT_TIMESTAMP".eq_ignore_ascii_case(&tok.value) {
+                } else if b"CURRENT_TIMESTAMP".eq_ignore_ascii_case(tok.value) {
                     Ok(Box::new(Expr::Literal(Literal::CurrentTimestamp)))
                 } else {
                     unreachable!()
@@ -1383,12 +1375,8 @@ impl<'a> Parser<'a> {
                 eat_expect!(self, TK_THEN);
                 let mut when_then_pairs = vec![(first_when, self.parse_expr(0)?)];
 
-                loop {
-                    if let Some(tok) = self.peek()? {
-                        if tok.token_type.unwrap() != TK_WHEN {
-                            break;
-                        }
-                    } else {
+                while let Some(tok) = self.peek()? {
+                    if tok.token_type.unwrap() != TK_WHEN {
                         break;
                     }
 
@@ -1463,7 +1451,7 @@ impl<'a> Parser<'a> {
                                 eat_assert!(self, TK_STAR);
                                 eat_expect!(self, TK_RP);
                                 return Ok(Box::new(Expr::FunctionCallStar {
-                                    name: name,
+                                    name,
                                     filter_over: self.parse_filter_over()?,
                                 }));
                             }
@@ -1501,14 +1489,16 @@ impl<'a> Parser<'a> {
                     None
                 };
 
-                if second_name.is_some() && third_name.is_some() {
-                    Ok(Box::new(Expr::DoublyQualified(
-                        name,
-                        second_name.unwrap(),
-                        third_name.unwrap(),
-                    )))
-                } else if second_name.is_some() {
-                    Ok(Box::new(Expr::Qualified(name, second_name.unwrap())))
+                if let Some(second_name) = second_name {
+                    if let Some(third_name) = third_name {
+                        Ok(Box::new(Expr::DoublyQualified(
+                            name,
+                            second_name,
+                            third_name,
+                        )))
+                    } else {
+                        Ok(Box::new(Expr::Qualified(name, second_name)))
+                    }
                 } else if can_be_lit_str {
                     Ok(Box::new(Expr::Literal(match name {
                         Name::Quoted(s) => Literal::String(s),
@@ -1523,15 +1513,12 @@ impl<'a> Parser<'a> {
 
     fn parse_expr_list(&mut self) -> Result<Vec<Box<Expr>>, Error> {
         let mut exprs = vec![];
-        loop {
-            match self.peek()? {
-                Some(tok) => match tok.token_type.unwrap().fallback_id_if_ok() {
-                    TK_LP | TK_CAST | TK_ID | TK_STRING | TK_INDEXED | TK_JOIN_KW | TK_NULL
-                    | TK_BLOB | TK_FLOAT | TK_INTEGER | TK_VARIABLE | TK_CTIME_KW | TK_NOT
-                    | TK_BITNOT | TK_PLUS | TK_MINUS | TK_EXISTS | TK_CASE => {}
-                    _ => break,
-                },
-                None => break,
+        while let Some(tok) = self.peek()? {
+            match tok.token_type.unwrap().fallback_id_if_ok() {
+                TK_LP | TK_CAST | TK_ID | TK_STRING | TK_INDEXED | TK_JOIN_KW | TK_NULL
+                | TK_BLOB | TK_FLOAT | TK_INTEGER | TK_VARIABLE | TK_CTIME_KW | TK_NOT
+                | TK_BITNOT | TK_PLUS | TK_MINUS | TK_EXISTS | TK_CASE => {}
+                _ => break,
             }
 
             exprs.push(self.parse_expr(0)?);
@@ -2023,15 +2010,12 @@ impl<'a> Parser<'a> {
         }
 
         let mut result = vec![self.parse_window_defn()?];
-        loop {
-            match self.peek()? {
-                Some(tok) => match tok.token_type.unwrap() {
-                    TK_COMMA => {
-                        eat_assert!(self, TK_COMMA);
-                        result.push(self.parse_window_defn()?);
-                    }
-                    _ => break,
-                },
+        while let Some(tok) = self.peek()? {
+            match tok.token_type.unwrap() {
+                TK_COMMA => {
+                    eat_assert!(self, TK_COMMA);
+                    result.push(self.parse_window_defn()?);
+                }
                 _ => break,
             }
         }
@@ -2148,54 +2132,50 @@ impl<'a> Parser<'a> {
 
     fn parse_joined_tables(&mut self) -> Result<Vec<JoinedSelectTable>, Error> {
         let mut result = vec![];
-        loop {
-            let op = match self.peek()? {
-                Some(tok) => match tok.token_type.unwrap() {
-                    TK_COMMA => {
-                        eat_assert!(self, TK_COMMA);
-                        JoinOperator::Comma
-                    }
-                    TK_JOIN => {
-                        eat_assert!(self, TK_JOIN);
-                        JoinOperator::TypedJoin(None)
-                    }
-                    TK_JOIN_KW => {
-                        let jkw = eat_assert!(self, TK_JOIN_KW);
-                        let tok =
-                            eat_expect!(self, TK_JOIN, TK_ID, TK_STRING, TK_INDEXED, TK_JOIN_KW);
+        while let Some(tok) = self.peek()? {
+            let op = match tok.token_type.unwrap() {
+                TK_COMMA => {
+                    eat_assert!(self, TK_COMMA);
+                    JoinOperator::Comma
+                }
+                TK_JOIN => {
+                    eat_assert!(self, TK_JOIN);
+                    JoinOperator::TypedJoin(None)
+                }
+                TK_JOIN_KW => {
+                    let jkw = eat_assert!(self, TK_JOIN_KW);
+                    let tok = eat_expect!(self, TK_JOIN, TK_ID, TK_STRING, TK_INDEXED, TK_JOIN_KW);
 
-                        match tok.token_type.unwrap() {
-                            TK_JOIN => {
-                                JoinOperator::TypedJoin(Some(new_join_type(jkw.value, None, None)?))
-                            }
-                            _ => {
-                                let name_1 = tok.value;
-                                let tok = eat_expect!(
-                                    self, TK_JOIN, TK_ID, TK_STRING, TK_INDEXED, TK_JOIN_KW,
-                                );
+                    match tok.token_type.unwrap() {
+                        TK_JOIN => {
+                            JoinOperator::TypedJoin(Some(new_join_type(jkw.value, None, None)?))
+                        }
+                        _ => {
+                            let name_1 = tok.value;
+                            let tok = eat_expect!(
+                                self, TK_JOIN, TK_ID, TK_STRING, TK_INDEXED, TK_JOIN_KW,
+                            );
 
-                                match tok.token_type.unwrap() {
-                                    TK_JOIN => JoinOperator::TypedJoin(Some(new_join_type(
+                            match tok.token_type.unwrap() {
+                                TK_JOIN => JoinOperator::TypedJoin(Some(new_join_type(
+                                    jkw.value,
+                                    Some(name_1),
+                                    None,
+                                )?)),
+                                _ => {
+                                    let name_2 = tok.value;
+                                    eat_expect!(self, TK_JOIN);
+                                    JoinOperator::TypedJoin(Some(new_join_type(
                                         jkw.value,
                                         Some(name_1),
-                                        None,
-                                    )?)),
-                                    _ => {
-                                        let name_2 = tok.value;
-                                        eat_expect!(self, TK_JOIN);
-                                        JoinOperator::TypedJoin(Some(new_join_type(
-                                            jkw.value,
-                                            Some(name_1),
-                                            Some(name_2),
-                                        )?))
-                                    }
+                                        Some(name_2),
+                                    )?))
                                 }
                             }
                         }
                     }
-                    _ => break,
-                },
-                None => break,
+                }
+                _ => break,
             };
 
             let tok = peek_expect!(self, TK_ID, TK_STRING, TK_INDEXED, TK_JOIN_KW, TK_LP);
@@ -2372,13 +2352,9 @@ impl<'a> Parser<'a> {
     fn parse_select_columns(&mut self) -> Result<Vec<ResultColumn>, Error> {
         let mut result = vec![self.parse_select_column()?];
 
-        loop {
-            if let Some(tok) = self.peek()? {
-                if tok.token_type == Some(TK_COMMA) {
-                    eat_assert!(self, TK_COMMA);
-                } else {
-                    break;
-                }
+        while let Some(tok) = self.peek()? {
+            if tok.token_type == Some(TK_COMMA) {
+                eat_assert!(self, TK_COMMA);
             } else {
                 break;
             }
@@ -2391,13 +2367,9 @@ impl<'a> Parser<'a> {
 
     fn parse_nexpr_list(&mut self) -> Result<Vec<Box<Expr>>, Error> {
         let mut result = vec![self.parse_expr(0)?];
-        loop {
-            if let Some(tok) = self.peek()? {
-                if tok.token_type == Some(TK_COMMA) {
-                    eat_assert!(self, TK_COMMA);
-                } else {
-                    break;
-                }
+        while let Some(tok) = self.peek()? {
+            if tok.token_type == Some(TK_COMMA) {
+                eat_assert!(self, TK_COMMA);
             } else {
                 break;
             }
@@ -2432,13 +2404,9 @@ impl<'a> Parser<'a> {
                 let mut values = vec![self.parse_nexpr_list()?];
                 eat_expect!(self, TK_RP);
 
-                loop {
-                    if let Some(tok) = self.peek()? {
-                        if tok.token_type == Some(TK_COMMA) {
-                            eat_assert!(self, TK_COMMA);
-                        } else {
-                            break;
-                        }
+                while let Some(tok) = self.peek()? {
+                    if tok.token_type == Some(TK_COMMA) {
+                        eat_assert!(self, TK_COMMA);
                     } else {
                         break;
                     }
@@ -2457,29 +2425,26 @@ impl<'a> Parser<'a> {
     fn parse_select_body(&mut self) -> Result<SelectBody, Error> {
         let select = self.parse_one_select()?;
         let mut compounds = vec![];
-        loop {
-            let op = match self.peek()? {
-                Some(tok) => match tok.token_type.unwrap() {
-                    TK_UNION => {
-                        eat_assert!(self, TK_UNION);
-                        if self.peek_no_eof()?.token_type == Some(TK_ALL) {
-                            eat_assert!(self, TK_ALL);
-                            CompoundOperator::UnionAll
-                        } else {
-                            CompoundOperator::Union
-                        }
+        while let Some(tok) = self.peek()? {
+            let op = match tok.token_type.unwrap() {
+                TK_UNION => {
+                    eat_assert!(self, TK_UNION);
+                    if self.peek_no_eof()?.token_type == Some(TK_ALL) {
+                        eat_assert!(self, TK_ALL);
+                        CompoundOperator::UnionAll
+                    } else {
+                        CompoundOperator::Union
                     }
-                    TK_EXCEPT => {
-                        eat_assert!(self, TK_EXCEPT);
-                        CompoundOperator::Except
-                    }
-                    TK_INTERSECT => {
-                        eat_assert!(self, TK_INTERSECT);
-                        CompoundOperator::Intersect
-                    }
-                    _ => break,
-                },
-                None => break,
+                }
+                TK_EXCEPT => {
+                    eat_assert!(self, TK_EXCEPT);
+                    CompoundOperator::Except
+                }
+                TK_INTERSECT => {
+                    eat_assert!(self, TK_INTERSECT);
+                    CompoundOperator::Intersect
+                }
+                _ => break,
             };
 
             compounds.push(CompoundSelect {
@@ -2542,7 +2507,7 @@ impl<'a> Parser<'a> {
         }
 
         eat_expect!(self, TK_BY);
-        Ok(self.parse_sort_list()?)
+        self.parse_sort_list()
     }
 
     fn parse_limit(&mut self) -> Result<Option<Limit>, Error> {
@@ -2644,15 +2609,12 @@ impl<'a> Parser<'a> {
     fn parse_named_table_constraints(&mut self) -> Result<Vec<NamedTableConstraint>, Error> {
         let mut result = vec![];
 
-        loop {
-            match self.peek()? {
-                Some(tok) => match tok.token_type.unwrap() {
-                    TK_COMMA => {
-                        eat_assert!(self, TK_COMMA);
-                    }
-                    TK_CONSTRAINT | TK_PRIMARY | TK_UNIQUE | TK_CHECK | TK_FOREIGN => {}
-                    _ => break,
-                },
+        while let Some(tok) = self.peek()? {
+            match tok.token_type.unwrap() {
+                TK_COMMA => {
+                    eat_assert!(self, TK_COMMA);
+                }
+                TK_CONSTRAINT | TK_PRIMARY | TK_UNIQUE | TK_CHECK | TK_FOREIGN => {}
                 _ => break,
             }
 
@@ -2736,7 +2698,7 @@ impl<'a> Parser<'a> {
             match self.peek()? {
                 Some(tok) if tok.token_type == Some(TK_COMMA) => {
                     eat_assert!(self, TK_COMMA);
-                    result = result | self.parse_table_option()?;
+                    result |= self.parse_table_option()?;
                 }
                 _ => break,
             }
@@ -2805,16 +2767,13 @@ impl<'a> Parser<'a> {
             _ => None,
         };
 
-        Ok(Stmt::Analyze { name: name })
+        Ok(Stmt::Analyze { name })
     }
 
     fn parse_attach(&mut self) -> Result<Stmt, Error> {
         eat_assert!(self, TK_ATTACH);
-        match self.peek_no_eof()?.token_type.unwrap() {
-            TK_DATABASE => {
-                eat_assert!(self, TK_DATABASE);
-            }
-            _ => {}
+        if self.peek_no_eof()?.token_type == Some(TK_DATABASE) {
+            eat_assert!(self, TK_DATABASE);
         }
 
         let expr = self.parse_expr(0)?;
@@ -2836,11 +2795,8 @@ impl<'a> Parser<'a> {
 
     fn parse_detach(&mut self) -> Result<Stmt, Error> {
         eat_assert!(self, TK_DETACH);
-        match self.peek_no_eof()?.token_type.unwrap() {
-            TK_DATABASE => {
-                eat_assert!(self, TK_DATABASE);
-            }
-            _ => {}
+        if self.peek_no_eof()?.token_type == Some(TK_DATABASE) {
+            eat_assert!(self, TK_DATABASE);
         }
 
         Ok(Stmt::Detach {
@@ -2871,7 +2827,7 @@ impl<'a> Parser<'a> {
                 TK_EQ => {
                     eat_assert!(self, TK_EQ);
                     Ok(Stmt::Pragma {
-                        name: name,
+                        name,
                         body: Some(PragmaBody::Equals(self.parse_pragma_value()?)),
                     })
                 }
@@ -2880,19 +2836,16 @@ impl<'a> Parser<'a> {
                     let value = self.parse_pragma_value()?;
                     eat_expect!(self, TK_RP);
                     Ok(Stmt::Pragma {
-                        name: name,
+                        name,
                         body: Some(PragmaBody::Call(value)),
                     })
                 }
                 _ => Ok(Stmt::Pragma {
-                    name: name,
+                    name,
                     body: None,
                 }),
             },
-            _ => Ok(Stmt::Pragma {
-                name: name,
-                body: None,
-            }),
+            _ => Ok(Stmt::Pragma { name, body: None }),
         }
     }
 
@@ -3088,25 +3041,22 @@ impl<'a> Parser<'a> {
     fn parse_ref_args(&mut self) -> Result<Vec<RefArg>, Error> {
         let mut result = vec![];
 
-        loop {
-            match self.peek()? {
-                Some(tok) => match tok.token_type.unwrap() {
-                    TK_MATCH => {
-                        eat_assert!(self, TK_MATCH);
-                        result.push(RefArg::Match(self.parse_nm()?));
+        while let Some(tok) = self.peek()? {
+            match tok.token_type.unwrap() {
+                TK_MATCH => {
+                    eat_assert!(self, TK_MATCH);
+                    result.push(RefArg::Match(self.parse_nm()?));
+                }
+                TK_ON => {
+                    eat_assert!(self, TK_ON);
+                    let tok = eat_expect!(self, TK_INSERT, TK_DELETE, TK_UPDATE);
+                    match tok.token_type.unwrap() {
+                        TK_INSERT => result.push(RefArg::OnInsert(self.parse_ref_act()?)),
+                        TK_DELETE => result.push(RefArg::OnDelete(self.parse_ref_act()?)),
+                        TK_UPDATE => result.push(RefArg::OnUpdate(self.parse_ref_act()?)),
+                        _ => unreachable!(),
                     }
-                    TK_ON => {
-                        eat_assert!(self, TK_ON);
-                        let tok = eat_expect!(self, TK_INSERT, TK_DELETE, TK_UPDATE);
-                        match tok.token_type.unwrap() {
-                            TK_INSERT => result.push(RefArg::OnInsert(self.parse_ref_act()?)),
-                            TK_DELETE => result.push(RefArg::OnDelete(self.parse_ref_act()?)),
-                            TK_UPDATE => result.push(RefArg::OnUpdate(self.parse_ref_act()?)),
-                            _ => unreachable!(),
-                        }
-                    }
-                    _ => break,
-                },
+                }
                 _ => break,
             }
         }
@@ -3312,11 +3262,8 @@ impl<'a> Parser<'a> {
 
         match tok.token_type.unwrap() {
             TK_ADD => {
-                match self.peek_no_eof()?.token_type.unwrap() {
-                    TK_COLUMNKW => {
-                        eat_assert!(self, TK_COLUMNKW);
-                    }
-                    _ => {}
+                if self.peek_no_eof()?.token_type == Some(TK_COLUMNKW) {
+                    eat_assert!(self, TK_COLUMNKW);
                 }
 
                 Ok(Stmt::AlterTable {
@@ -3325,11 +3272,8 @@ impl<'a> Parser<'a> {
                 })
             }
             TK_DROP => {
-                match self.peek_no_eof()?.token_type.unwrap() {
-                    TK_COLUMNKW => {
-                        eat_assert!(self, TK_COLUMNKW);
-                    }
-                    _ => {}
+                if self.peek_no_eof()?.token_type == Some(TK_COLUMNKW) {
+                    eat_assert!(self, TK_COLUMNKW);
                 }
 
                 Ok(Stmt::AlterTable {
@@ -3350,11 +3294,11 @@ impl<'a> Parser<'a> {
                 eat_expect!(self, TK_TO);
                 let to_name = self.parse_nm()?;
 
-                if col_name.is_some() {
+                if let Some(col_name) = col_name {
                     Ok(Stmt::AlterTable {
                         name: tbl_name,
                         body: AlterTableBody::RenameColumn {
-                            old: col_name.unwrap(),
+                            old: col_name,
                             new: to_name,
                         },
                     })
@@ -3648,13 +3592,9 @@ impl<'a> Parser<'a> {
         eat_expect!(self, TK_BEGIN);
 
         let mut cmds = vec![self.parse_trigger_cmd()?];
-        loop {
-            match self.peek_no_eof()?.token_type.unwrap() {
-                TK_UPDATE | TK_REPLACE | TK_INSERT | TK_DELETE | TK_WITH | TK_SELECT
-                | TK_VALUES => {}
-                _ => break,
-            }
-
+        while let TK_UPDATE | TK_REPLACE | TK_INSERT | TK_DELETE | TK_WITH | TK_SELECT | TK_VALUES =
+            self.peek_no_eof()?.token_type.unwrap()
+        {
             cmds.push(self.parse_trigger_cmd()?);
         }
 
