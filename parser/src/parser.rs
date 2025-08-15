@@ -43,7 +43,7 @@ macro_rules! peek_expect {
 macro_rules! eat_assert {
     ( $parser:expr, $( $x:ident ),* $(,)?) => {
         {
-            let token = $parser.eat_no_eof()?;
+            let token = $parser.eat().unwrap().unwrap();
 
             #[cfg(debug_assertions)]
             match token.token_type.unwrap() {
