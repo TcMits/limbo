@@ -73,14 +73,17 @@ pub fn match_ignore_ascci_case(input: TokenStream) -> TokenStream {
     }
 
     struct PathEntry {
+        id: usize,
         result: Option<Arm>,
         sub_entries: HashMap<u8, Box<PathEntry>>,
     }
 
     let mut paths = Box::new(PathEntry {
+        id: 0,
         result: None,
         sub_entries: HashMap::new(),
     });
+    let mut counter = 1;
 
     for (keyword_b, arm) in arms.drain(..) {
         let mut current = &mut paths;
@@ -92,9 +95,11 @@ pub fn match_ignore_ascci_case(input: TokenStream) -> TokenStream {
                 }
                 None => {
                     let new_entry = Box::new(PathEntry {
+                        id: counter,
                         result: None,
                         sub_entries: HashMap::new(),
                     });
+                    counter += 1;
                     current.sub_entries.insert(b, new_entry);
                     current = current.sub_entries.get_mut(&b).unwrap();
                 }
@@ -108,9 +113,10 @@ pub fn match_ignore_ascci_case(input: TokenStream) -> TokenStream {
     fn write_entry(
         idx: usize,
         var_name: proc_macro2::TokenStream,
-        fallback_arm: Option<Arm>,
         entry: &PathEntry,
+        result_arms: &mut Vec<proc_macro2::TokenStream>,
     ) -> proc_macro2::TokenStream {
+        let id = entry.id;
         let eof_handle = if let Some(ref result) = entry.result {
             let guard = if let Some(ref b) = result.guard {
                 let expr = &b.1;
@@ -119,36 +125,77 @@ pub fn match_ignore_ascci_case(input: TokenStream) -> TokenStream {
                 quote! {}
             };
             let body = &result.body;
-            quote! { None #guard => { #body } }
-        } else {
-            quote! {}
-        };
-
-        let fallback_handle = if let Some(ref result) = fallback_arm {
-            let body = &result.body;
-            quote! { _ => { #body } }
+            result_arms.push(quote! { (true, #id) => { #body } });
+            quote! { None #guard => { break 'match_loop true; } }
         } else {
             quote! {}
         };
 
         let mut arms = Vec::with_capacity(entry.sub_entries.len());
         for (&b, sub_entry) in &entry.sub_entries {
-            let sub_match = write_entry(idx + 1, var_name.clone(), fallback_arm.clone(), sub_entry);
+            let id = sub_entry.id;
             if b.is_ascii_alphabetic() {
                 let b_lower = b.to_ascii_lowercase();
-                arms.push(quote! { Some(#b) | Some(#b_lower) => #sub_match });
+                arms.push(quote! { Some(#b) | Some(#b_lower) => { state = #id; } });
             } else {
-                arms.push(quote! { Some(#b) => #sub_match });
+                arms.push(quote! { Some(#b) => { state = #id; } });
             }
         }
 
-        quote! { match #var_name.get(#idx) {
-            #eof_handle
-            #(#arms)*
-            #fallback_handle
-        } }
+        let mut sub_entries = Vec::with_capacity(entry.sub_entries.len());
+        for sub_entry in entry.sub_entries.values() {
+            sub_entries.push(write_entry(
+                idx + 1,
+                var_name.clone(),
+                sub_entry,
+                result_arms,
+            ));
+        }
+
+        quote! {
+            #id => match #var_name.get(#idx) {
+                #eof_handle
+                #(#arms)*
+                _ => { break 'match_loop false; }
+            }
+            #(#sub_entries)*
+        }
     }
 
+    let fallback_handle = if let Some(ref result) = fallback_arm {
+        let body = &result.body;
+        quote! { _ => { #body } }
+    } else {
+        quote! {}
+    };
+
     let expr = match_block.expr;
-    TokenStream::from(write_entry(0, quote! { #expr }, fallback_arm, &paths))
+    let mut result_arms = Vec::with_capacity(counter);
+    let match_arms = write_entry(0, quote! { #expr }, &paths, &mut result_arms);
+    TokenStream::from(quote! {
+        {
+            let mut state = 0usize;
+
+            #[cfg(debug_assertions)]
+            let mut loop_counter = 0usize;
+
+            let has_result = 'match_loop: loop {
+                #[cfg(debug_assertions)]
+                {
+                    debug_assert!(loop_counter < #counter);
+                    loop_counter += 1;
+                }
+
+                match state {
+                    #match_arms
+                    _ => unreachable!(),
+                }
+            };
+
+            match (has_result, state) {
+                #(#result_arms)*
+                #fallback_handle
+            }
+        }
+    })
 }
